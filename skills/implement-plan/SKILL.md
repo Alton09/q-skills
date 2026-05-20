@@ -20,39 +20,28 @@ Turn a plan into working, verified, tested code with automatic task tracking.
 
 ## Workflow Overview
 
-1. **Plan Selection** — read from Obsidian vault (RDC/Plans)
+1. **Plan Selection** — file path or inline markdown
 2. **Model Selection** — pick Sonnet (default), Haiku, or Opus
 3. **Worktree Setup** — delegate to `/create-worktree` skill
 4. **Phase-by-Phase Implementation** — sequential execution
 5. **Quality Verification** — delegate to project's `/verify` skill
-6. **Task Tracking** — check off completed phases in plan
+6. **Task Tracking** — check off completed phases in plan file
 7. **Report** — summary, worktree path, status
 
 ## Step 1: Plan Selection
 
-List available plans from Obsidian vault:
-
-```bash
-obsidian vault=RDC files folder=Plans
-```
-
 Prompt user:
 ```
-Available plans:
-  1. add-recipe-favorites-feature
-  2. fix-note-deletion-persistence
-  3. offline-recipe-support
-
-Which plan? (Enter number, or paste plan content):
+Plan file path (or paste markdown content):
 ```
 
-If user already named a plan or pasted content, skip prompt and proceed.
+Accept either:
+- File path: `docs/plans/add-recipe-favorites.md`
+- Inline markdown: (user pastes plan content directly)
 
-Once selected, fetch and read the full plan:
+If file path, read it. If inline, use content directly.
 
-```bash
-obsidian vault=RDC read path="Plans/<plan-name>.md"
-```
+Then read and validate plan structure (must have phases with checkboxes).
 
 ## Step 2: Model Selection
 
@@ -143,28 +132,18 @@ Expect response: `pass` or `fail`.
    /notify-me "implement-plan hard stop: Phase <N> failed verification 3x. Error: <summary>"
    ```
 3. Wait for user intervention — do NOT check off phase or continue
-4. User fixes issue, signals ready to retry
+4. User fixes issue in the worktree, signals ready to retry
 5. Skill resumes from the failed phase
 
 ## Step 7: Task Tracking
 
-When a phase passes verification, check off the phase in the Obsidian plan:
+When a phase passes verification, update the plan file locally:
 
-```bash
-obsidian vault=RDC read path="Plans/<plan-name>.md"
-# (Read current content, update checkbox to [x], write back)
-obsidian vault=RDC create path="Plans/<plan-name>.md" content="<updated>" overwrite silent
-```
+1. Read the plan file
+2. Change phase checkbox from `- [ ]` to `- [x]`
+3. Write the updated plan back to the file
 
-After checking off, call `/save-plan` skill (project implements):
-
-```
-/save-plan <plan-name>
-```
-
-Expect response: `pass` or `fail`. If fail, report error and stop.
-
-Print updated plan state so user can see progress:
+Then print updated plan state so user can see progress:
 
 ```
 Phases completed:
@@ -173,6 +152,8 @@ Phases completed:
 - Phase 3: Testing & Refinement (in progress)
 - Phase 4: Documentation (pending)
 ```
+
+The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
 
 ## Step 8: Final Report
 
@@ -223,9 +204,7 @@ If hard-stopped due to failure:
 
 Projects can configure via environment or project CLAUDE.md:
 
-- `OBSIDIAN_VAULT` — Obsidian vault name (default: `RDC`)
 - `VERIFY_SKILL` — verify skill name (default: `/verify`)
-- `SAVE_PLAN_SKILL` — save-plan skill name (default: `/save-plan`)
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 
 ## Plan Format Example

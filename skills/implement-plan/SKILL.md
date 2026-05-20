@@ -3,10 +3,10 @@ name: implement-plan
 description: |
   Execute a plan end-to-end with automatic quality verification and task tracking.
   
-  Use this skill whenever you have a structured implementation plan (markdown with 
-  phases and checkboxes) and want to implement it in an isolated worktree with full 
-  verification and automatic task tracking. The skill reads plans from Obsidian 
-  (RDC vault by default), implements phase-by-phase sequentially, delegates quality 
+  Use this skill whenever you have a structured implementation plan (markdown file 
+  with phases and checkboxes) and want to implement it in an isolated worktree with 
+  full verification and automatic task tracking. The skill reads plans from any 
+  markdown file, implements phase-by-phase sequentially, delegates quality 
   verification to the project's /verify skill, and automatically checks off completed 
   tasks in the plan document.
   
@@ -36,12 +36,12 @@ Plan file path (or paste markdown content):
 ```
 
 Accept either:
-- File path: `docs/plans/add-recipe-favorites.md`
+- File path: `docs/plans/add-recipe-favorites.md`, `./my-plan.md`, etc.
 - Inline markdown: (user pastes plan content directly)
 
 If file path, read it. If inline, use content directly.
 
-Then read and validate plan structure (must have phases with checkboxes).
+Then validate plan structure: must have phases (markdown sections starting with `###`) with checkboxes (`- [ ]` for incomplete, `- [x]` for complete).
 
 ## Step 2: Model Selection
 
@@ -202,9 +202,9 @@ If hard-stopped due to failure:
 
 ## Configuration
 
-Projects can configure via environment or project CLAUDE.md:
+Projects can override via environment or project CLAUDE.md:
 
-- `VERIFY_SKILL` — verify skill name (default: `/verify`)
+- `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 
 ## Plan Format Example

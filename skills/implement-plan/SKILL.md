@@ -97,10 +97,19 @@ Key: Each phase is a section with checkboxes for tasks. The skill tracks and upd
 
 ## Step 5: Phase-by-Phase Implementation
 
+Before starting, invoke `/clean-architecture` to load the project's architectural rules
+into context:
+
+```
+/clean-architecture
+```
+
+Follow those rules throughout every phase.
+
 For each phase in the plan:
 
 1. Read the phase tasks
-2. Implement all tasks in the phase
+2. Implement all tasks in the phase, honoring the architecture rules loaded above
 3. After implementation, run quality verification (Step 6)
 4. If verification passes, check off the phase
 5. If verification fails, retry (Step 6)

@@ -77,6 +77,20 @@ Build a list of unique skills invoked in the session. For each, record:
 
 If no skills were invoked, report that and stop. Nothing to sharpen.
 
+**Present the skill list to the user before proceeding.** Show a numbered list:
+
+```
+Skills used this session:
+1. <skill-name> (N invocations)
+2. <skill-name> (N invocations)
+...
+
+Which skills should I analyze? (e.g., "1, 3" or "all")
+```
+
+Wait for the user's selection. Only proceed with Step 3 for the chosen skills. This avoids
+generating proposals for skills the user doesn't want to review.
+
 ## Step 3: Gather Friction Signals
 
 For each skill invocation, look at the surrounding turns and flag these signals:

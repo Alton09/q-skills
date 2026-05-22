@@ -1,5 +1,5 @@
-# claude-skill-core
+# qualls-core
 
-Personal cloud code workflow with project-agnostic, composable skills.
+Claude Code plugin for implementation planning and code generation.
 
-Core reusable skills for implementation, quality verification, and goal tracking across projects.
+Core reusable skill: `implement-plan` for structured feature development.

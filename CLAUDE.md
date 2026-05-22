@@ -1,20 +1,31 @@
-# claude-skill-core
+# qualls-core Plugin
 
-Project-agnostic skills for Claude Code workflows.
+Claude Code plugin for structured implementation planning.
 
-## Skills
+## Usage
 
-Base skills in this repo are designed to compose across projects:
+```
+/qualls-core:implement-plan
+```
 
-- **implement-plan**: Plan selection, worktree setup, phased implementation
-- **goal**: Goal tracking and checkpoint verification
-- **quality-gates**: Test, lint, coverage verification with retry logic
+Invoke in any project to create structured implementation plans and execute phased development.
 
-Projects extend these by adding local project-specific skills under `.claude/skills/`.
+## Plugin Structure
 
-## Adding to a Project
+- `.claude-plugin/plugin.json` — Plugin manifest
+- `.claude-plugin/marketplace.json` — Marketplace metadata
+- `skills/implement-plan/` — Core skill implementation
 
-1. Clone or reference this repo
-2. Import base skills into your project's `.claude/skills/`
-3. Create project-specific skills that wrap or delegate to base skills
-4. Override CLAUDE.md with project-specific guidance as needed
+## Installation
+
+```bash
+claude plugin install qualls-core@qualls-core --scope user
+```
+
+## Dependencies
+
+Skill delegates to external tools that must exist in consumer projects:
+- `/create-worktree`
+- `/clean-architecture`
+- `/verify`
+- `/notify-me`

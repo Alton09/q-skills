@@ -1,0 +1,15 @@
+{
+  "name": "qualls-core-marketplace",
+  "description": "Personal marketplace for implementation planning and structured development workflows",
+  "owner": {
+    "name": "John Qualls",
+    "email": "altonqualls@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "qualls-core",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}

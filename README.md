@@ -79,6 +79,7 @@ claude-skill-core/
     marketplace.json          # Marketplace registry
   plugins/
     qualls-core/
+      plugin.json               # Plugin manifest (per-plugin)
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill

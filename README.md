@@ -22,7 +22,8 @@ Structured implementation planning and feature development skills.
 ### From GitHub
 
 ```bash
-claude plugin install Alton09/claude-skill-core
+claude plugin marketplace add github:Alton09/claude-skill-core
+claude plugin install qualls-core
 ```
 
 ### From local clone
@@ -33,25 +34,12 @@ claude plugin install Alton09/claude-skill-core
 git clone https://github.com/Alton09/claude-skill-core.git ~/Workspace/claude-skill-core
 ```
 
-2. Register the marketplace in `~/.claude/settings.json`:
+2. Add the local directory as a marketplace:
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "qualls-core": {
-      "source": {
-        "source": "directory",
-        "path": "/path/to/claude-skill-core"
-      }
-    }
-  },
-  "installedPlugins": {
-    "qualls-core@qualls-core": true
-  }
-}
+```bash
+claude plugin marketplace add /path/to/claude-skill-core
+claude plugin install qualls-core
 ```
-
-Replace `/path/to/claude-skill-core` with your actual clone path.
 
 3. Reload plugins in Claude Code:
 

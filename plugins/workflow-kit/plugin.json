@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "name": "qualls-core",
+  "name": "workflow-kit",
   "version": "0.2.0",
   "description": "Claude Code plugin for structured implementation planning and feature development"
 }

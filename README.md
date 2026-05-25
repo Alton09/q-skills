@@ -1,10 +1,10 @@
-# claude-skill-core
+# q-skills
 
 A collection of Claude Code plugins for structured development workflows.
 
 ## Plugins
 
-### qualls-core
+### workflow-kit
 
 Structured implementation planning and feature development skills.
 
@@ -12,18 +12,18 @@ Structured implementation planning and feature development skills.
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| feature-plan | `/qualls-core:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/qualls-core:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
-| skill-sharpener | `/qualls-core:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
-| notify-me | `/qualls-core:notify-me` | Send macOS system notifications during long-running tasks |
+| feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
+| skill-sharpener | `/workflow-kit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
+| notify-me | `/workflow-kit:notify-me` | Send macOS system notifications during long-running tasks |
 
 ## Installation
 
 ### From GitHub
 
 ```bash
-claude plugin marketplace add github:Alton09/claude-skill-core
-claude plugin install qualls-core
+claude plugin marketplace add github:Alton09/q-skills
+claude plugin install workflow-kit
 ```
 
 ### From local clone
@@ -31,14 +31,14 @@ claude plugin install qualls-core
 1. Clone the repo:
 
 ```bash
-git clone https://github.com/Alton09/claude-skill-core.git ~/Workspace/claude-skill-core
+git clone https://github.com/Alton09/q-skills.git ~/Workspace/q-skills
 ```
 
 2. Add the local directory as a marketplace:
 
 ```bash
-claude plugin marketplace add /path/to/claude-skill-core
-claude plugin install qualls-core
+claude plugin marketplace add /path/to/q-skills
+claude plugin install workflow-kit
 ```
 
 3. Reload plugins in Claude Code:
@@ -54,21 +54,21 @@ Run `/doctor` to confirm no errors.
 After installation, skills are available as slash commands:
 
 ```
-/qualls-core:feature-plan      # Plan a feature
-/qualls-core:implement-plan    # Execute a plan
-/qualls-core:skill-sharpener   # Improve skills from session data
-/qualls-core:notify-me         # Send macOS notification
+/workflow-kit:feature-plan      # Plan a feature
+/workflow-kit:implement-plan    # Execute a plan
+/workflow-kit:skill-sharpener   # Improve skills from session data
+/workflow-kit:notify-me         # Send macOS notification
 ```
 
 ## Project Structure
 
 ```
-claude-skill-core/
+q-skills/
   .claude-plugin/
     plugin.json               # Plugin manifest
     marketplace.json          # Marketplace registry
   plugins/
-    qualls-core/
+    workflow-kit/
       plugin.json               # Plugin manifest (per-plugin)
       skills/
         feature-plan/         # Feature planning skill

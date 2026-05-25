@@ -1,4 +1,4 @@
-# claude-skill-core
+# q-skills
 
 Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` with its own `skills/` directory.
 
@@ -10,7 +10,7 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Current Plugins
 
-- `qualls-core` — Structured implementation planning and feature development
+- `workflow-kit` — Structured implementation planning and feature development
 
 ## Dependencies
 

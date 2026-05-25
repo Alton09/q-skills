@@ -18,4 +18,3 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/create-worktree`
 - `/clean-architecture`
 - `/verify`
-- `/notify-me`

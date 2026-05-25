@@ -15,6 +15,7 @@ Structured implementation planning and feature development skills.
 | feature-plan | `/qualls-core:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
 | implement-plan | `/qualls-core:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
 | skill-sharpener | `/qualls-core:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
+| notify-me | `/qualls-core:notify-me` | Send macOS system notifications during long-running tasks |
 
 ## Installation
 
@@ -68,6 +69,7 @@ After installation, skills are available as slash commands:
 /qualls-core:feature-plan      # Plan a feature
 /qualls-core:implement-plan    # Execute a plan
 /qualls-core:skill-sharpener   # Improve skills from session data
+/qualls-core:notify-me         # Send macOS notification
 ```
 
 ## Project Structure
@@ -84,6 +86,7 @@ claude-skill-core/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill
         skill-sharpener/      # Skill improvement skill
+        notify-me/            # macOS notification skill
 ```
 
 ## Dependencies
@@ -93,7 +96,6 @@ Some skills delegate to external tools that must exist in the consumer project:
 - `/create-worktree` — worktree creation (used by implement-plan)
 - `/clean-architecture` — architecture rules (used by implement-plan, feature-plan)
 - `/verify` — quality verification (used by implement-plan)
-- `/notify-me` — notifications (used by implement-plan)
 
 ## License
 

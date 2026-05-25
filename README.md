@@ -1,53 +1,99 @@
-# qualls-core
+# claude-skill-core
 
-Claude Code plugin for implementation planning and code generation.
+A collection of Claude Code plugins for structured development workflows.
 
-Core reusable skill: `implement-plan` for structured feature development.
+## Plugins
 
-## Local Installation
+### qualls-core
 
-### 1. Clone the repo
+Structured implementation planning and feature development skills.
+
+**Skills included:**
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| feature-plan | `/qualls-core:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
+| implement-plan | `/qualls-core:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
+| skill-sharpener | `/qualls-core:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
+
+## Installation
+
+### From GitHub
+
+```bash
+claude plugin install Alton09/claude-skill-core
+```
+
+### From local clone
+
+1. Clone the repo:
 
 ```bash
 git clone https://github.com/Alton09/claude-skill-core.git ~/Workspace/claude-skill-core
 ```
 
-### 2. Register the marketplace in `~/.claude/settings.json`
-
-Add to `extraKnownMarketplaces`:
+2. Register the marketplace in `~/.claude/settings.json`:
 
 ```json
-"extraKnownMarketplaces": {
-  "qualls-core": {
-    "source": {
-      "source": "directory",
-      "path": "/path/to/claude-skill-core"
+{
+  "extraKnownMarketplaces": {
+    "qualls-core": {
+      "source": {
+        "source": "directory",
+        "path": "/path/to/claude-skill-core"
+      }
     }
+  },
+  "installedPlugins": {
+    "qualls-core@qualls-core": true
   }
 }
 ```
 
 Replace `/path/to/claude-skill-core` with your actual clone path.
 
-### 3. Install the plugin
+3. Reload plugins in Claude Code:
 
-Add to `installedPlugins` in `~/.claude/settings.json`:
-
-```json
-"installedPlugins": {
-  "qualls-core@qualls-core": true
-}
+```
+/reload-plugins
 ```
 
-### 4. Verify the marketplace key matches
+Run `/doctor` to confirm no errors.
 
-The key in `extraKnownMarketplaces` must be `qualls-core` — this must match the `@marketplace`
-suffix in `installedPlugins`. A mismatch causes "Plugin not found in marketplace" errors.
-Claude Code also caches a `known_marketplaces.json` file; if you see this error after setup,
-check that the key there is also `qualls-core` (not `qualls-core-marketplace` or similar).
+## Usage
 
-### 5. Reload plugins
+After installation, skills are available as slash commands:
 
-Run `/reload-plugins` in Claude Code. Run `/doctor` to confirm no errors.
+```
+/qualls-core:feature-plan      # Plan a feature
+/qualls-core:implement-plan    # Execute a plan
+/qualls-core:skill-sharpener   # Improve skills from session data
+```
 
-Skills are then available as `/qualls-core:implement-plan`.
+## Project Structure
+
+```
+claude-skill-core/
+  .claude-plugin/
+    plugin.json               # Plugin manifest
+    marketplace.json          # Marketplace registry
+  plugins/
+    qualls-core/
+      skills/
+        feature-plan/         # Feature planning skill
+        implement-plan/       # Plan execution skill
+        skill-sharpener/      # Skill improvement skill
+```
+
+## Dependencies
+
+Some skills delegate to external tools that must exist in the consumer project:
+
+- `/create-worktree` — worktree creation (used by implement-plan)
+- `/clean-architecture` — architecture rules (used by implement-plan, feature-plan)
+- `/verify` — quality verification (used by implement-plan)
+- `/notify-me` — notifications (used by implement-plan)
+
+## License
+
+See [LICENSE](LICENSE) for details.

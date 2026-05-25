@@ -9,7 +9,7 @@
     {
       "name": "qualls-core",
       "version": "0.1.0",
-      "source": "./"
+      "source": "./plugins/qualls-core"
     }
   ]
 }

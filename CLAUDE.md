@@ -1,30 +1,20 @@
-# qualls-core Plugin
+# claude-skill-core
 
-Claude Code plugin for structured implementation planning.
-
-## Usage
-
-```
-/qualls-core:implement-plan
-```
-
-Invoke in any project to create structured implementation plans and execute phased development.
+Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` with its own `skills/` directory.
 
 ## Plugin Structure
 
-- `.claude-plugin/plugin.json` — Plugin manifest
-- `.claude-plugin/marketplace.json` — Marketplace metadata
-- `skills/implement-plan/` — Core skill implementation
+- `.claude-plugin/plugin.json` — Plugin manifest (stays at repo root for install discovery)
+- `.claude-plugin/marketplace.json` — Marketplace registry pointing to plugins
+- `plugins/<name>/skills/` — Skills for each plugin
 
-## Installation
+## Current Plugins
 
-```bash
-claude plugin install qualls-core@qualls-core --scope user
-```
+- `qualls-core` — Structured implementation planning and feature development
 
 ## Dependencies
 
-Skill delegates to external tools that must exist in consumer projects:
+Skills delegate to external tools that must exist in consumer projects:
 - `/create-worktree`
 - `/clean-architecture`
 - `/verify`

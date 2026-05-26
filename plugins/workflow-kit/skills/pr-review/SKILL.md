@@ -76,13 +76,6 @@ rule when reporting a finding.
 
 If not available, skip. Track as "skipped".
 
-### Verification: `/verify`
-
-If available, run it as a final validation pass after the review is drafted. Report
-any failures as additional findings.
-
-If not available, skip. Track as "skipped".
-
 **How to check if a delegate skill exists:** attempt to invoke it. If the skill is not
 found or not registered, the system will indicate it's unavailable. That's the signal
 to skip and move on — don't error, don't retry.
@@ -141,9 +134,9 @@ If zero findings across all categories, say so directly:
 the verdict:
 
 ```markdown
-> **Note:** The following review skills were not available in this project and
-> were skipped: /clean-architecture, /testing-patterns. Define these skills in
-> your project to get deeper coverage in those areas.
+> **Note:** The following review skills were not available in this project
+> and were skipped: /clean-architecture, /testing-patterns. Define these
+> skills in your project to get deeper coverage in those areas.
 ```
 
 Only list the ones that were actually skipped.

@@ -19,15 +19,6 @@ Structured implementation planning and feature development skills.
 
 ## Installation
 
-### From GitHub
-
-```bash
-claude plugin marketplace add github:Alton09/q-skills
-claude plugin install workflow-kit
-```
-
-### From local clone
-
 1. Clone the repo:
 
 ```bash
@@ -48,6 +39,18 @@ claude plugin install workflow-kit
 ```
 
 Run `/doctor` to confirm no errors.
+
+## Updating
+
+```bash
+# Check your exact plugin identifier
+claude plugins list
+
+# Update using the name shown (e.g. workflow-kit@q-skills)
+claude plugins update workflow-kit@<marketplace-name>
+```
+
+Restart Claude Code after updating to apply changes.
 
 ## Usage
 

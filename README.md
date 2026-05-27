@@ -14,6 +14,8 @@ Structured implementation planning and feature development skills.
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
 | implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
+| deep-dive | `/workflow-kit:deep-dive` | Rescue a stuck phase with a stronger-model sub-agent when implement-plan hits 3x verify failure |
+| pr-review | `/workflow-kit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
 | skill-sharpener | `/workflow-kit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
 | notify-me | `/workflow-kit:notify-me` | Send macOS system notifications during long-running tasks |
 
@@ -59,6 +61,8 @@ After installation, skills are available as slash commands:
 ```
 /workflow-kit:feature-plan      # Plan a feature
 /workflow-kit:implement-plan    # Execute a plan
+/workflow-kit:deep-dive         # Rescue a stuck phase with a stronger model
+/workflow-kit:pr-review         # Review a GitHub PR
 /workflow-kit:skill-sharpener   # Improve skills from session data
 /workflow-kit:notify-me         # Send macOS notification
 ```
@@ -76,6 +80,8 @@ q-skills/
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill
+        deep-dive/            # Stuck-phase rescue skill
+        pr-review/            # GitHub PR review skill
         skill-sharpener/      # Skill improvement skill
         notify-me/            # macOS notification skill
 ```
@@ -85,8 +91,8 @@ q-skills/
 Some skills delegate to external tools that must exist in the consumer project:
 
 - `/create-worktree` — worktree creation (used by implement-plan)
-- `/clean-architecture` — architecture rules (used by implement-plan, feature-plan)
-- `/verify` — quality verification (used by implement-plan)
+- `/clean-architecture` — architecture rules (used by implement-plan, feature-plan, deep-dive)
+- `/verify` — quality verification (used by implement-plan, deep-dive)
 
 ## License
 

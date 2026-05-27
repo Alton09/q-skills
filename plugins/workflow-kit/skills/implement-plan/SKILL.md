@@ -135,14 +135,52 @@ Expect response: `pass` or `fail`.
 
 **On Hard Stop (3x failure):**
 
-1. Report what failed (capture error output from `/verify`)
+Before paging the user, escalate to `/deep-dive` for a focused rescue attempt with a
+stronger model. The deep-dive skill is the dedicated escalation path for this exact
+case — one sub-agent, capped retry budget, explicit halt if it can't converge.
+
+1. Capture the last `/verify` error output verbatim
+2. **Annotate the plan with a BLOCKED marker** so the failure persists across sessions
+   and is visible to anyone reading the plan. Append a callout block immediately under
+   the failed phase heading:
+
+   ```markdown
+   ### Phase <N>: <name>
+
+   > ⚠️ **BLOCKED**: 3x `/verify` failure. Deep-dive in progress.
+   > **Last error:** <one-line summary of the verify error>
+   > **Worktree:** <worktree path>
+
+   - [ ] Task ...
+   ```
+
+   Write the updated plan back to disk before handoff. This way, if the session ends
+   mid-rescue, the plan still reflects reality and a future run can pick up the thread.
+
+3. Invoke `/deep-dive` with:
+   - Plan file path
+   - Failed phase name/section
+   - Last `/verify` error output (raw)
+   - Worktree path
+   - Model override (default: opus)
+4. Read the deep-dive result:
+   - **Pass** → deep-dive will have cleared the BLOCKED callout. Check off the phase
+     and continue to the next phase.
+   - **Halt** (deep-dive exhausted its 3 attempts) → deep-dive will have replaced the
+     BLOCKED callout with a HALTED callout. Fall through to user-wait below.
+
+**User-Wait (deep-dive exhausted):**
+
+1. Report what failed (deep-dive halt report already covers attempt history)
 2. Call `/notify-me` with error summary:
    ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification 3x. Error: <summary>"
+   /notify-me "implement-plan hard stop: Phase <N> failed verification 3x and deep-dive halted. Error: <summary>"
    ```
 3. Wait for user intervention — do NOT check off phase or continue
 4. User fixes issue in the worktree, signals ready to retry
 5. Skill resumes from the failed phase
+
+If `/deep-dive` is not available in the project, skip directly to the user-wait path.
 
 ## Step 7: Task Tracking
 

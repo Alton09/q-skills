@@ -111,8 +111,8 @@ For each phase in the plan:
 1. Read the phase tasks
 2. Implement all tasks in the phase, honoring the architecture rules loaded above
 3. After implementation, run quality verification (Step 6)
-4. If verification passes, check off the phase
-5. If verification fails, retry (Step 6)
+4. If verification fails, retry (Step 6)
+5. **If verification passes, IMMEDIATELY perform Step 7 (check off phase in plan file) before moving to the next phase.** Do not batch checkbox updates — write the file after each phase or they will be forgotten.
 
 **No parallelization** — phases run sequentially, one at a time.
 
@@ -203,6 +203,8 @@ Phases completed:
 The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
 
 ## Step 8: Final Report
+
+Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
 Once all phases are checked off:
 

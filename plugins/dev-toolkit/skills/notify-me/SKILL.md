@@ -1,9 +1,6 @@
 ---
 name: notify-me
 description: Send macOS system notifications from Claude Code. Use this skill whenever you need to notify the user of task completion, status updates, or important events — especially when blocking on long-running operations. Triggers on /notify-me, /notify, or /send notification. Examples: "notify me when the build finishes", "send a notification saying tests passed", "i want a mac notification with this status".
-compatibility:
-  - platform: darwin (macOS only)
-  - dependencies: terminal-notifier (install with `brew install terminal-notifier`)
 ---
 
 # notify-me

@@ -1,0 +1,23 @@
+{
+  "skill_name": "notify-me",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Send me a notification that says 'Build complete!' with the title 'CI Pipeline'",
+      "expected_output": "Native macOS notification displays with title 'CI Pipeline' and message 'Build complete!'",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need to alert the user that tests passed. Send a notification with just a message.",
+      "expected_output": "Native macOS notification displays with default title 'Claude Code' and message about tests passing",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Notify with a three-part notification: title 'Deployment', message 'Finished successfully', subtitle 'Production'",
+      "expected_output": "Native macOS notification displays with all three parts: title, message, and subtitle",
+      "files": []
+    }
+  ]
+}

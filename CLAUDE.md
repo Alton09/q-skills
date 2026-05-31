@@ -4,13 +4,14 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Plugin Structure
 
-- `.claude-plugin/plugin.json` — Plugin manifest (stays at repo root for install discovery)
 - `.claude-plugin/marketplace.json` — Marketplace registry pointing to plugins
+- `plugins/<name>/.claude-plugin/plugin.json` — Per-plugin manifest
 - `plugins/<name>/skills/` — Skills for each plugin
 
 ## Current Plugins
 
-- `workflow-kit` — Structured implementation planning and feature development
+- `workflow-kit` — Plan → build → rescue pipeline (feature-plan, implement-plan, deep-dive)
+- `dev-toolkit` — Standalone dev utilities (notify-me, pr-review, skill-sharpener)
 
 ## Dependencies
 

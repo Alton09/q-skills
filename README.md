@@ -103,11 +103,19 @@ q-skills/
 
 ## Dependencies
 
-workflow-kit skills delegate to external tools that must exist in the consumer project:
+workflow-kit skills delegate to project-local skills that you supply. These must exist in
+your project's `.claude/skills/` before running implement-plan or feature-plan:
 
-- `/create-worktree` — worktree creation (used by implement-plan)
-- `/clean-architecture` — architecture rules (used by implement-plan, feature-plan, deep-dive)
-- `/verify` — quality verification (used by implement-plan, deep-dive)
+| Skill | Required | Contract |
+|---|---|---|
+| `/verify` | Required | Run quality gates; return `pass` or `fail` with raw output verbatim on failure |
+| `/create-worktree` | Required | Create an isolated git worktree and branch; return its path |
+| `/clean-architecture` | Required | Load layer rules and naming conventions into context |
+| `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
+
+See [`examples/android/`](examples/android/) for a working reference implementation targeting
+Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those
+skills as a starting point for your own project.
 
 ## License
 

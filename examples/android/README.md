@@ -11,6 +11,9 @@ workflow-kit's core skills (`/feature-plan`, `/implement-plan`, `/deep-dive`) de
 Copy the skill directories you need into your project's `.claude/skills/` directory:
 
 ```bash
+# Ensure the destination exists first
+mkdir -p ~/your-project/.claude/skills/
+
 # Copy a single skill
 cp -r examples/android/verify ~/your-project/.claude/skills/
 
@@ -29,7 +32,7 @@ Then adapt each `SKILL.md` to match your project's module layout, Gradle command
 | Skill | Required | What it does |
 |---|---|---|
 | [`/verify`](./verify/SKILL.md) | Required | Runs Gradle quality gates (ktlint, detekt, unit tests, compile check). Returns `pass` or `fail` with raw output. |
-| [`/clean-architecture`](./clean-architecture/SKILL.md) | Required | Loads layer rules (presentation/domain/data), naming conventions, and NEVER constraints into context before each implementation phase. |
+| [`/clean-architecture`](./clean-architecture/SKILL.md) | Required | Loads layer rules (presentation/domain/data), naming conventions, and NEVER constraints into context once before implementation begins. |
 | [`/create-worktree`](./create-worktree/SKILL.md) | Required | Creates an isolated git worktree + branch and copies `local.properties` so the worktree builds. Returns the worktree path. |
 | [`/research`](./research/SKILL.md) | **Optional** | Looks up Android API surfaces using the `android` CLI. Requires `android` CLI installed on PATH. feature-plan degrades gracefully if absent. |
 

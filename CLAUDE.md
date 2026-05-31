@@ -19,3 +19,6 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/create-worktree`
 - `/clean-architecture`
 - `/verify`
+- `/research` (optional)
+
+See `examples/android/` for reference implementations targeting Kotlin/Compose/Hilt.

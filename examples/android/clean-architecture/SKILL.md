@@ -3,7 +3,7 @@ name: clean-architecture
 description: >
   Load Android project architecture rules and layer conventions into context.
   Use this skill to get architecture rules, layer rules, conventions, or structural
-  guidelines before implementing — called automatically by implement-plan before each phase.
+  guidelines before implementing — loaded once before implementation begins.
 ---
 
 # Clean Architecture Rules

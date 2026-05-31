@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "name": "dev-toolkit",
+  "version": "0.1.0",
+  "description": "Standalone Claude Code dev utilities: macOS notifications, PR review, and skill sharpening"
+}

@@ -6,10 +6,7 @@
     "email": "altonqualls@gmail.com"
   },
   "plugins": [
-    {
-      "name": "workflow-kit",
-      "version": "0.5.0",
-      "source": "./plugins/workflow-kit"
-    }
+    { "name": "workflow-kit", "version": "0.6.0", "source": "./plugins/workflow-kit" },
+    { "name": "dev-toolkit", "version": "0.1.0", "source": "./plugins/dev-toolkit" }
   ]
 }

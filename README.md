@@ -15,9 +15,18 @@ Structured implementation planning and feature development skills.
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
 | implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
 | deep-dive | `/workflow-kit:deep-dive` | Rescue a stuck phase with a stronger-model sub-agent when implement-plan hits 3x verify failure |
-| pr-review | `/workflow-kit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
-| skill-sharpener | `/workflow-kit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
-| notify-me | `/workflow-kit:notify-me` | Send macOS system notifications during long-running tasks |
+
+### dev-toolkit
+
+Standalone dev utilities that work independently of any planning pipeline.
+
+**Skills included:**
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| pr-review | `/dev-toolkit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
+| skill-sharpener | `/dev-toolkit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
+| notify-me | `/dev-toolkit:notify-me` | Send macOS system notifications during long-running tasks |
 
 ## Installation
 
@@ -27,11 +36,12 @@ Structured implementation planning and feature development skills.
 git clone https://github.com/Alton09/q-skills.git ~/Workspace/q-skills
 ```
 
-2. Add the local directory as a marketplace:
+2. Add the local directory as a marketplace and install each plugin:
 
 ```bash
 claude plugin marketplace add /path/to/q-skills
 claude plugin install workflow-kit
+claude plugin install dev-toolkit
 ```
 
 3. Reload plugins in Claude Code:
@@ -50,6 +60,7 @@ claude plugins list
 
 # Update using the name shown (e.g. workflow-kit@q-skills)
 claude plugins update workflow-kit@<marketplace-name>
+claude plugins update dev-toolkit@<marketplace-name>
 ```
 
 Restart Claude Code after updating to apply changes.
@@ -62,9 +73,9 @@ After installation, skills are available as slash commands:
 /workflow-kit:feature-plan      # Plan a feature
 /workflow-kit:implement-plan    # Execute a plan
 /workflow-kit:deep-dive         # Rescue a stuck phase with a stronger model
-/workflow-kit:pr-review         # Review a GitHub PR
-/workflow-kit:skill-sharpener   # Improve skills from session data
-/workflow-kit:notify-me         # Send macOS notification
+/dev-toolkit:pr-review          # Review a GitHub PR
+/dev-toolkit:skill-sharpener    # Improve skills from session data
+/dev-toolkit:notify-me          # Send macOS notification
 ```
 
 ## Project Structure
@@ -72,15 +83,19 @@ After installation, skills are available as slash commands:
 ```
 q-skills/
   .claude-plugin/
-    plugin.json               # Plugin manifest
-    marketplace.json          # Marketplace registry
+    marketplace.json          # Marketplace registry (lists both plugins)
   plugins/
     workflow-kit/
-      plugin.json               # Plugin manifest (per-plugin)
+      .claude-plugin/
+        plugin.json           # Plugin manifest (v0.6.0)
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill
         deep-dive/            # Stuck-phase rescue skill
+    dev-toolkit/
+      .claude-plugin/
+        plugin.json           # Plugin manifest (v0.1.0)
+      skills/
         pr-review/            # GitHub PR review skill
         skill-sharpener/      # Skill improvement skill
         notify-me/            # macOS notification skill
@@ -88,7 +103,7 @@ q-skills/
 
 ## Dependencies
 
-Some skills delegate to external tools that must exist in the consumer project:
+workflow-kit skills delegate to external tools that must exist in the consumer project:
 
 - `/create-worktree` — worktree creation (used by implement-plan)
 - `/clean-architecture` — architecture rules (used by implement-plan, feature-plan, deep-dive)

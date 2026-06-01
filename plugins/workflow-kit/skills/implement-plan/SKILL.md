@@ -28,6 +28,24 @@ Turn a plan into working, verified, tested code with automatic task tracking.
 6. **Task Tracking** — check off completed phases in plan file
 7. **Report** — summary, worktree path, status
 
+## Step 0: Pre-Flight (MANDATORY before any implementation work)
+
+Before reading source files, writing code, or invoking other skills,
+you MUST collect three answers in order:
+
+1. Plan path/content (Step 1)
+2. Model choice (Step 2)
+3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
+   and confirm the new worktree path before proceeding
+
+Do NOT begin Step 4 (Read Plan Structure) or any code reading until
+Steps 1–3 are answered and the worktree (if requested) exists. Skipping
+Step 3 has caused users to implement features on `main` and then
+manually migrate diffs — never acceptable.
+
+If the user supplied a plan path as an argument, you have answered Step 1
+but you have NOT answered Steps 2 and 3. Ask them now.
+
 ## Step 1: Plan Selection
 
 Prompt user:

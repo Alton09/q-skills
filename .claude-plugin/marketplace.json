@@ -1,12 +1,8 @@
 {
   "name": "q-skills",
   "description": "Personal marketplace for Claude Code plugins",
-  "owner": {
-    "name": "John Qualls",
-    "email": "altonqualls@gmail.com"
-  },
   "plugins": [
-    { "name": "workflow-kit", "version": "0.6.0", "source": "./plugins/workflow-kit" },
-    { "name": "dev-toolkit", "version": "0.1.0", "source": "./plugins/dev-toolkit" }
+    { "name": "workflow-kit", "version": "1.0.0", "source": "./plugins/workflow-kit" },
+    { "name": "dev-toolkit", "version": "1.0.0", "source": "./plugins/dev-toolkit" }
   ]
 }

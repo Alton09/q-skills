@@ -36,7 +36,7 @@ you MUST collect three answers in order:
 1. Plan path/content (Step 1)
 2. Model choice (Step 2)
 3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
-   and confirm the new worktree path before proceeding
+   and note the new worktree path, then proceed immediately
 
 Do NOT begin Step 4 (Read Plan Structure) or any code reading until
 Steps 1–3 are answered and the worktree (if requested) exists. Skipping
@@ -79,9 +79,7 @@ Use selected model for implementation phase. Store choice for reference in final
 
 Ask: "Should I create a new worktree? (y/n, default: y)"
 
-If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.).
-
-Confirm worktree path with user before proceeding.
+If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
 
 ## Step 4: Read Plan Structure
 

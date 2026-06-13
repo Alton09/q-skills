@@ -151,24 +151,28 @@ prompt — sub-agents start cold and cannot cheaply re-derive it.
 
 For each phase, in order:
 
-**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Apply
-`/delegate` routing logic to the phase's tasks:
+**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
+the phase's tasks and map to the Agent tool's `model` parameter:
 
-| Phase character | Model |
+| Phase character | Agent `model` |
 |---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | Haiku |
-| Normal feature work (typical layer impl, standard tests) | Sonnet |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | Opus |
+| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
+| Normal feature work (typical layer impl, standard tests) | `sonnet` |
+| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
 
+The values are the literal `model` enum tokens — pass them straight to the Agent tool.
 Record the chosen model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
 everything the phase needs:
 
 - Plan file path + the **verbatim task list for this phase only**
-- Worktree path → pass as the sub-agent's working directory (isolation: worktree or
-  explicit cwd). All edits happen here, never on `main`.
-- The architecture digest from 5a
+- Worktree path → instruct the sub-agent to `cd` into this existing worktree and do
+  all work there. Do NOT use `isolation: "worktree"` — that spawns a *separate* new
+  worktree per sub-agent and scatters each phase's edits, breaking carry-forward. All
+  phases share the one worktree from Step 3; edits never touch `main`.
+- The architecture digest from 5a — retain the non-negotiable rules (layering,
+  forbidden dependencies, naming) **verbatim**; paraphrase only the soft guidance
 - **Prior-phase carry-forward**: a short summary the orchestrator maintains across
   phases — files created/modified, key decisions, public interfaces introduced — so
   Phase N builds correctly on Phases 1..N-1
@@ -178,11 +182,14 @@ everything the phase needs:
   next phase needs, and any tasks you could not complete.
 
 **3. Spawn the sub-agent in the background.** Use the Agent tool with
-`run_in_background: true` so the orchestrator can observe it while it runs (a
-foreground agent returns only its final message — no mid-flight visibility).
+`run_in_background: true`. This does NOT give a live token/tool feed — it buys two
+things the orchestrator needs: it stays responsive instead of blocking until the phase
+finishes (so it can enforce a wall-clock budget), and the sub-agent is cancellable via
+`TaskStop`. The completion notification carries the sub-agent's total token count and
+duration, which is the metric the ceiling check uses.
 
-**4. Observe while running (Step 5c).** Poll on a cadence; trip the stuck detector if
-needed.
+**4. Guard while running, then evaluate on return (Step 5c).** Enforce the wall-clock
+budget; check the token total when the sub-agent completes.
 
 **5. On sub-agent return**, the orchestrator (not the sub-agent):
    - Reviews the returned summary
@@ -191,29 +198,37 @@ needed.
      next phase. Do not batch checkbox updates — write after each phase.
    - Appends this phase's summary to the carry-forward for the next phase.
 
-### 5c. Observation & stuck detection
+### 5c. Runaway guard
 
-While a phase sub-agent runs in the background, the orchestrator polls it periodically
-(`TaskGet` / `TaskOutput`; pace with `ScheduleWakeup`/`Monitor`, ~every 2–3 min — short
-enough to catch runaway burn, long enough to avoid wasting orchestrator tokens).
+The orchestrator cannot read a running sub-agent's live token count or inspect its
+individual tool calls mid-flight — a background Agent surfaces its totals only in the
+completion notification. So the guard rests on two primitives that do work: a
+wall-clock timeout while running, and the token total on completion.
 
-Trip the **stuck detector** when EITHER fires:
+**Wall-clock budget (while running).** Set a per-phase time budget (default 15 min;
+scale up for `opus` phases). Pace check-ins with `ScheduleWakeup`. If the sub-agent is
+still running past its budget, treat it as runaway: `TaskStop` it, then page the user
+(below). `TaskStop` returns only status, not partial work — report what the
+orchestrator last knew, not a recovered transcript.
 
-- **Token ceiling** — cumulative sub-agent tokens exceed the budget for its model
-  (defaults: Haiku 80k, Sonnet 150k, Opus 250k; override via `PHASE_TOKEN_CEILING`).
-- **Repeated-call / no-progress** — the same tool call (same tool + near-identical
-  args) repeats ≥3 times consecutively, OR no file write occurs across 2 consecutive
-  polls. Signals a silent loop that the token ceiling alone would miss.
+**Token ceiling (on completion).** When the sub-agent returns, compare its reported
+total tokens against the per-model ceiling in Configuration. If it overran, do NOT
+silently accept the result — page the user before running `/verify` so an overrun phase
+gets a human look (the output may still be fine, but the cost signal is worth a glance,
+and it lets you tune the ceiling).
 
-On a trip:
+**On either trip:**
 
-1. **Pause** the phase — `TaskStop` the sub-agent (capture its partial output first).
-2. **Do NOT** check off the phase, run `/verify`, or advance.
-3. `/notify-me` with the situation and proposed next steps:
+1. **Do NOT** check off the phase, run `/verify`, or advance to the next phase.
+2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
    ```
-   /notify-me "implement-plan paused: Phase <N> sub-agent stuck (<trigger: token ceiling NNNk / repeated call>). Last action: <summary>. Awaiting your call: resume, re-scope, switch model, or take over."
+   <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
    ```
-4. Wait for the user's decision before doing anything else with this phase.
+3. Wait for the user's decision before doing anything else with this phase.
+
+> **Note:** mid-flight repeated-call / no-progress detection is intentionally NOT
+> claimed here — there is no live per-call feed for a sub-agent. The wall-clock budget
+> is what catches silent loops; the token ceiling catches expensive-but-completing ones.
 
 ## Step 6: Quality Verification
 
@@ -228,9 +243,12 @@ After a phase sub-agent returns (Step 5b.5), the orchestrator calls the project'
 Expect response: `pass` or `fail`.
 
 **Retry Logic:**
-- Fail → orchestrator re-delegates the fix to a sub-agent for the SAME phase,
-  passing the verbatim `/verify` error plus the prior summary, then reruns `/verify`.
-  (Observation + stuck detection from Step 5c apply to retry sub-agents too.)
+- Fail → orchestrator re-delegates the fix to a sub-agent for the SAME phase. The
+  prior sub-agent's edits persist on disk in the shared worktree, so instruct the
+  retry agent to FIRST read the current worktree state (its actual diff), then fix —
+  do not re-implement from scratch off the summary. Pass the verbatim `/verify` error
+  plus the prior summary, then rerun `/verify`. (The runaway guard from Step 5c applies
+  to retry sub-agents too.)
 - Max 3 attempts per phase
 - 3rd failure → hard stop
 
@@ -357,8 +375,11 @@ Projects can override via environment or project CLAUDE.md:
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
-- `PHASE_TOKEN_CEILING` — per-phase sub-agent token budget before the stuck detector
-  trips (default by model: Haiku 80k / Sonnet 150k / Opus 250k)
+- `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
+  completion (Step 5c). Defaults by model: `haiku` 80k / `sonnet` 150k / `opus` 250k.
+  This is the single source for these numbers — Step 5c references it.
+- `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
+  sub-agent (Step 5c). Default 15 min; scale up for `opus` phases.
 
 ## Plan Format Example
 

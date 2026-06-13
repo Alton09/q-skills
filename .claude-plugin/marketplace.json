@@ -6,7 +6,7 @@
     "url": "https://github.com/Alton09/q-skills"
   },
   "plugins": [
-    { "name": "workflow-kit", "version": "1.0.0", "source": "./plugins/workflow-kit" },
+    { "name": "workflow-kit", "version": "1.0.1", "source": "./plugins/workflow-kit" },
     { "name": "dev-toolkit", "version": "1.0.0", "source": "./plugins/dev-toolkit" }
   ]
 }

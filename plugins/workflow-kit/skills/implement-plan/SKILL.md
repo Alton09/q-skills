@@ -13,7 +13,8 @@ description: |
   /verify skill and iterates on failures while warm; the orchestrator then delegates an
   independent gate-verify to its own sub-agent, observes phase sub-agents for runaway
   token burn or stuck loops, owns the pass/fail decision, and automatically checks off
-  completed tasks.
+  completed tasks. After all phases pass, it runs a final Opus review of the whole plan
+  diff and auto-fixes severity-gated findings with a cheaper sub-agent.
 
   Perfect for feature implementations, refactors, and bug fixes where you need 
   quality gates, per-phase delegation, and progress visibility.
@@ -43,6 +44,10 @@ and owns the pass/fail decision and task tracking.
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
   real quality gate; it writes no code and makes no decisions.
+- **Review sub-agent** (Step 8, `opus`): reviews the full plan diff via the project's
+  review skill and returns a structured findings list only — no code, no decisions.
+- **Fix sub-agent** (Step 8, Sonnet/Haiku by complexity): applies the severity-gated
+  findings in the integration worktree under the same two-tier verify contract as a phase.
 
 ## Workflow Overview
 
@@ -53,7 +58,8 @@ and owns the pass/fail decision and task tracking.
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
-8. **Report** — summary, per-phase models, worktree path, status
+8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
+9. **Report** — summary, per-phase models, review outcome, worktree path, status
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -362,10 +368,10 @@ reports.
   re-implement from scratch off the summary. Pass the verbatim gate-verify error plus the
   prior summary. Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c
   applies to retry sub-agents too.)
-- Max 3 gate attempts per phase
-- 3rd gate failure → hard stop
+- Max `SELF_VERIFY_LIMIT` gate attempts per phase (default 2)
+- The `SELF_VERIFY_LIMIT`th gate failure → hard stop
 
-**On Hard Stop (3x failure):**
+**On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
 Before paging the user, escalate to `/deep-dive` for a focused rescue attempt with a
 stronger model. The deep-dive skill is the dedicated escalation path for this exact
@@ -379,7 +385,7 @@ case — one sub-agent, capped retry budget, explicit halt if it can't converge.
    ```markdown
    ### Phase <N>: <name>
 
-   > ⚠️ **BLOCKED**: 3x `/verify` failure. Deep-dive in progress.
+   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Deep-dive in progress.
    > **Last error:** <one-line summary of the verify error>
    > **Worktree:** <worktree path>
 
@@ -406,7 +412,7 @@ case — one sub-agent, capped retry budget, explicit halt if it can't converge.
 1. Report what failed (deep-dive halt report already covers attempt history)
 2. Call `/notify-me` with error summary:
    ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification 3x and deep-dive halted. Error: <summary>"
+   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and deep-dive halted. Error: <summary>"
    ```
 3. Wait for user intervention — do NOT check off phase or continue
 4. User fixes issue in the worktree, signals ready to retry
@@ -434,7 +440,69 @@ Phases completed:
 
 The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
 
-## Step 8: Final Report
+## Step 8: Plan Review & Auto-fix
+
+Run ONLY after every phase is implemented and checked off (Step 7). If the plan
+hard-stopped or any phase is BLOCKED/HALTED, SKIP this step — there is nothing coherent
+to review. Disable entirely with `RUN_REVIEW=false`.
+
+This step mirrors Step 5's delegation discipline: Opus reviews (judgment), a cheaper agent
+fixes (mechanical), and the orchestrator holds only the findings list — it never ingests
+the raw diff.
+
+### 8a. Delegate the review (Opus)
+
+Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Payload:
+
+- Integration worktree path + the base ref. There is no GitHub PR at this point (the skill
+  never commits or pushes), so instruct it to review the **cumulative diff of the whole
+  plan**: `git -C <integration> diff <base>...HEAD` — the local diff, not a PR.
+- Invoke the project's review skill (`REVIEW_SKILL`, default `/pr-review`) on that diff.
+- The architecture digest (5a) so findings respect project rules.
+- Required return format: a **structured findings list only** — each item is `severity`,
+  `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
+
+The orchestrator keeps the findings list (small); it does not read the diff itself.
+
+### 8b. Triage by severity
+
+Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and above):
+
+- **At/above threshold** → auto-fix queue (8c).
+- **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
+  touch. Collect them for the report (Step 9). Auto-fixing a reviewer's opinion churns
+  good code — leave that call to the user.
+
+If the auto-fix queue is empty, skip to 8d.
+
+### 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
+
+Review findings cluster on shared files, so fixes run **in the integration worktree, not
+in parallel** — parallel fix agents would collide (the Step 5b file-overlap problem).
+Bundle the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
+
+1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
+   inference); use the max across the bundle. Same table as Step 5b.2. (Escalate to
+   `opus` only for genuinely tricky fixes.)
+2. Spawn ONE fix sub-agent (background; 5c guard) in the integration worktree. Payload:
+   the verbatim findings to fix, the architecture digest, and the **same two-tier verify
+   contract as Step 5** — "after fixing, run /verify and iterate while warm (bounded by
+   `SELF_VERIFY_LIMIT`); report your self-verify result."
+3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
+   integration worktree — independent confirmation, exactly as for a phase.
+4. Gate fail → the Step 6 retry / 3-attempt / deep-dive path, unchanged.
+
+### 8d. Bounded re-review
+
+A fix can introduce new issues or only partly address a finding. After the fixes verify
+clean, re-run 8a→8c. Cap total review rounds at `REVIEW_MAX_ROUNDS` (default 2). Stop when
+the cap is hit OR a round returns no at/above-threshold findings; list anything still open
+in the report. Never loop review↔fix unbounded.
+
+If `REVIEW_SKILL` is not available in the project, skip Step 8 entirely and note it in the
+report.
+
+## Step 9: Final Report
 
 Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
@@ -456,6 +524,13 @@ Once all phases are checked off:
 ## Verification Status
 ✓ All phases passed verification
 
+## Review & Auto-fix
+- Reviewer: Opus 4.8 on `<base>...HEAD` via <REVIEW_SKILL>
+- Findings: <N total> — <M auto-fixed & verified> / <K left for you>
+- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
+- Left for you (below threshold): <one line each, severity + file:line + problem>
+- Rounds: <R> of <REVIEW_MAX_ROUNDS>
+
 ## What's Next
 - Worktree is ready at <path>
 - Review code and decide: merge, iterate, or cleanup
@@ -469,7 +544,7 @@ If hard-stopped due to failure:
 
 **Plan:** <plan-name>
 **Failed Phase:** <phase-name>
-**Failure Point:** 3x verification failure
+**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + deep-dive halted
 
 ## Error Summary
 <error output from last /verify call>
@@ -488,8 +563,10 @@ Projects can override via environment or project CLAUDE.md:
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
   `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
-- `SELF_VERIFY_LIMIT` — max warm self-verify fix rounds inside a phase sub-agent before
-  it stops and reports (Step 5b / Step 6). Default 2.
+- `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
+  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5b);
+  and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
+  deep-dive escalation (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
@@ -500,6 +577,14 @@ Projects can override via environment or project CLAUDE.md:
   sub-agent (Step 5c). Default 15 min; scale up for `opus` phases.
 - `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
   (Step 5b.1/5b.3). Default 3; larger groups run in batches of this size.
+- `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
+  Default `true`; set `false` to stop after implementation.
+- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/pr-review`). If
+  absent, Step 8 is skipped.
+- `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
+  Default: high / correctness and above; lower-severity findings are reported, not touched.
+- `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
+  open (Step 8d). Default 2.
 
 ## Plan Format Example
 
@@ -557,6 +642,9 @@ Add ability to mark recipes as favorites and filter by them.
   integration gate-verify must pass before the group is checked off and advanced.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5c) rather than burning budget unattended.
+- **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent
+  reviews the whole plan diff; only severity-gated findings are auto-fixed (Sonnet/Haiku),
+  the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`; disable with `RUN_REVIEW`.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5b.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).

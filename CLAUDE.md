@@ -10,7 +10,7 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Current Plugins
 
-- `workflow-kit` — Plan → build → rescue pipeline (feature-plan, implement-plan, deep-dive)
+- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan; implement-plan has a built-in opus escalation rescue)
 - `dev-toolkit` — Standalone dev utilities (notify-me, pr-review, skill-sharpener)
 
 ## Dependencies

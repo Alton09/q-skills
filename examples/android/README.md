@@ -4,7 +4,7 @@ These are reference implementations of the delegate skills that [workflow-kit](.
 
 ## What are delegate skills?
 
-workflow-kit's core skills (`/feature-plan`, `/implement-plan`, `/deep-dive`) delegate to project-local skills that you supply. Each consumer project provides its own versions because what "verify" or "create-worktree" means depends on your stack. These examples show what that looks like for Android.
+workflow-kit's core skills (`/feature-plan`, `/implement-plan`) delegate to project-local skills that you supply. Each consumer project provides its own versions because what "verify" or "create-worktree" means depends on your stack. These examples show what that looks like for Android.
 
 ## How to use
 

@@ -33,7 +33,8 @@ and owns the pass/fail decision and task tracking.
   building the dependency-graph schedule, per-phase model selection, child-worktree
   creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
   parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
-  deep-dive escalation, checkbox updates, reporting. Holds all cross-phase state. Never
+  escalation (forced-opus rescue pass), checkbox updates, reporting. Holds all cross-phase
+  state. Never
   runs `/verify` in its own context — it delegates it to keep its window clean.
 - **Phase sub-agent** (one per phase, model auto-selected): implements exactly one
   phase's tasks inside its assigned worktree (the shared integration worktree when run
@@ -280,8 +281,7 @@ duration, which feeds the 5c ceiling check.
    the carry-forward, then clean up (5b.4) and advance to the next layer.
 6. Integration-verify fail → re-delegate the fix to ONE sub-agent on the merged
    integration worktree (warm: read the diff + verbatim error), then re-run the
-   integration gate-verify. This collapses into the Step 6 retry / 3-attempt / deep-dive
-   path. Do NOT clean up child worktrees until the group finally passes.
+   integration gate-verify. This collapses into the Step 6 retry / escalation path. Do NOT clean up child worktrees until the group finally passes.
 
 #### 5b.4 Clean up child worktrees
 
@@ -373,11 +373,13 @@ reports.
 
 **On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
-Before paging the user, escalate to `/deep-dive` for a focused rescue attempt with a
-stronger model. The deep-dive skill is the dedicated escalation path for this exact
-case — one sub-agent, capped retry budget, explicit halt if it can't converge.
+Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation
+loop, but with a stronger model and an extended budget. This is not a separate skill: it
+reuses the orchestrator + sub-agent + two-tier-verify + 5c-guard machinery already
+defined, so the rescue attempt inherits the runaway guard automatically.
 
-1. Capture the last gate-verify error output verbatim
+1. Capture the full failure history for this phase: every prior attempt's summary and
+   every gate-verify error, verbatim.
 2. **Annotate the plan with a BLOCKED marker** so the failure persists across sessions
    and is visible to anyone reading the plan. Append a callout block immediately under
    the failed phase heading:
@@ -385,40 +387,52 @@ case — one sub-agent, capped retry budget, explicit halt if it can't converge.
    ```markdown
    ### Phase <N>: <name>
 
-   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Deep-dive in progress.
+   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Escalation in progress.
    > **Last error:** <one-line summary of the verify error>
    > **Worktree:** <worktree path>
 
    - [ ] Task ...
    ```
 
-   Write the updated plan back to disk before handoff. This way, if the session ends
-   mid-rescue, the plan still reflects reality and a future run can pick up the thread.
+   Write the updated plan back to disk before the escalation pass. This way, if the
+   session ends mid-rescue, the plan still reflects reality and a future run can pick up
+   the thread.
 
-3. Invoke `/deep-dive` with:
-   - Plan file path
-   - Failed phase name/section
-   - Last `/verify` error output (raw)
-   - Worktree path
-   - Model override (default: opus)
-4. Read the deep-dive result:
-   - **Pass** → deep-dive will have cleared the BLOCKED callout. Check off the phase
-     and continue to the next phase.
-   - **Halt** (deep-dive exhausted its 3 attempts) → deep-dive will have replaced the
-     BLOCKED callout with a HALTED callout. Fall through to user-wait below.
+3. **Run the escalation pass** (reuse Step 5b.2 handoff + 5b.3 single-phase execution +
+   Step 6 gate-verify), with these overrides:
+   - **Model forced to `opus`** regardless of the phase's complexity classification.
+   - **Extended 5c budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET`
+     instead of the per-phase defaults (these are the hardest cases; don't strangle the
+     rescue).
+   - **Richer payload** — beyond the normal phase handoff, include the full failure
+     history from step 1 and an explicit instruction: *"diagnose the root cause from the
+     prior attempts and errors BEFORE writing any fix; do not just re-run the same
+     approach."* This is what makes the escalation more than a model bump.
+   - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
+     self-verify) → gate-verify, same as a phase. The runaway guard (5c, extended budget)
+     applies to every escalation attempt.
+4. Outcome:
+   - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the
+     phase (Step 7), and continue to the next phase.
+   - **Exhausted** (`ESCALATION_ATTEMPTS` gate failures) → replace the BLOCKED callout
+     with a HALTED callout, then fall through to user-wait below:
 
-**User-Wait (deep-dive exhausted):**
+     ```markdown
+     > 🛑 **HALTED**: escalation exhausted `ESCALATION_ATTEMPTS` opus rescue attempts.
+     > **Last error:** <one-line summary>
+     > **Worktree:** <worktree path>
+     ```
 
-1. Report what failed (deep-dive halt report already covers attempt history)
+**User-Wait (escalation exhausted):**
+
+1. Report what failed, including the escalation attempt history and last error
 2. Call `/notify-me` with error summary:
    ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and deep-dive halted. Error: <summary>"
+   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and escalation halted. Error: <summary>"
    ```
 3. Wait for user intervention — do NOT check off phase or continue
 4. User fixes issue in the worktree, signals ready to retry
 5. Skill resumes from the failed phase
-
-If `/deep-dive` is not available in the project, skip directly to the user-wait path.
 
 ## Step 7: Task Tracking
 
@@ -490,7 +504,7 @@ Bundle the auto-fix queue into ONE fix pass (or a few, grouped by area). For eac
    `SELF_VERIFY_LIMIT`); report your self-verify result."
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — independent confirmation, exactly as for a phase.
-4. Gate fail → the Step 6 retry / 3-attempt / deep-dive path, unchanged.
+4. Gate fail → the Step 6 retry / escalation path, unchanged.
 
 ### 8d. Bounded re-review
 
@@ -544,7 +558,7 @@ If hard-stopped due to failure:
 
 **Plan:** <plan-name>
 **Failed Phase:** <phase-name>
-**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + deep-dive halted
+**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + escalation halted
 
 ## Error Summary
 <error output from last /verify call>
@@ -566,7 +580,7 @@ Projects can override via environment or project CLAUDE.md:
 - `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
   self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5b);
   and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
-  deep-dive escalation (Step 6). One knob, both retry budgets.
+  escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
@@ -575,6 +589,13 @@ Projects can override via environment or project CLAUDE.md:
   references it.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
   sub-agent (Step 5c). Default 15 min; scale up for `opus` phases.
+- `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
+  before HALTED / user-wait. Default 2.
+- `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
+  the per-phase ceiling for the rescue. Default 400k (above the `opus` phase 250k — these
+  are the hardest cases).
+- `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
+  30 min.
 - `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
   (Step 5b.1/5b.3). Default 3; larger groups run in batches of this size.
 - `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
@@ -629,7 +650,7 @@ Add ability to mark recipes as favorites and filter by them.
 
 ## Notes
 
-- **Orchestrator owns state and decisions, not execution** — plan-file edits, deep-dive,
+- **Orchestrator owns state and decisions, not execution** — plan-file edits, escalation,
   carry-forward, and the pass/fail call live in the orchestrator. It delegates even the
   gate-verify so build/test output never enters its window. Phase sub-agents write code
   and self-verify; the gate-verify sub-agent confirms independently.

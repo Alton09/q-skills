@@ -4,19 +4,13 @@ description: |
   Execute a plan end-to-end with an orchestrator that delegates each phase to a
   dedicated sub-agent, plus automatic quality verification and task tracking.
 
-  Use this skill whenever you have a structured implementation plan (markdown file 
-  with phases and checkboxes) and want to implement it in an isolated worktree with 
-  full verification and automatic task tracking. The main agent acts as an
-  orchestrator (Opus 4.8 by default): it reads the plan, sets up the worktree, and
-  for each phase spawns ONE sub-agent — auto-selecting that sub-agent's model by
-  phase complexity — to implement the phase. Each phase sub-agent runs the project's
-  /verify skill and iterates on failures while warm; the orchestrator then delegates an
-  independent gate-verify to its own sub-agent, observes phase sub-agents for runaway
-  token burn or stuck loops, owns the pass/fail decision, and automatically checks off
-  completed tasks. After all phases pass, it runs a final Opus review of the whole plan
-  diff and auto-fixes severity-gated findings with a cheaper sub-agent.
+  Use this skill whenever you have a structured implementation plan (markdown file
+  with phases and checkboxes) and want to implement it in an isolated worktree with
+  full verification and automatic task tracking. An Opus orchestrator delegates each
+  phase to a model-matched sub-agent, runs two-tier verification, escalates stuck
+  phases, and reviews the finished diff — see the body for the mechanics.
 
-  Perfect for feature implementations, refactors, and bug fixes where you need 
+  Perfect for feature implementations, refactors, and bug fixes where you need
   quality gates, per-phase delegation, and progress visibility.
 ---
 
@@ -100,12 +94,13 @@ Then validate plan structure: must have phases (markdown sections starting with 
 
 ## Step 2: Orchestrator Model
 
-The orchestrator runs on **Opus 4.8 by default** — it holds cross-phase state, judges
-complexity, and supervises sub-agents, which is exactly the work Opus is best at.
+The orchestrator runs on **`ORCHESTRATOR_MODEL` (default Opus 4.8)** — it holds cross-phase
+state, judges complexity, and supervises sub-agents, which is exactly the work Opus is best
+at.
 
-Confirm with the user (one line, default accepts):
+Confirm with the user (one line, default accepts), substituting the configured default:
 ```
-Orchestrator model: Opus 4.8 (default). Press enter to accept, or name another.
+Orchestrator model: <ORCHESTRATOR_MODEL> (default). Press enter to accept, or name another.
 ```
 
 Do NOT ask which model implements each phase — that is decided automatically per phase
@@ -279,9 +274,14 @@ duration, which feeds the 5c ceiling check.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
    passes — check off ALL phases in the group (Step 7), append every member's summary to
    the carry-forward, then clean up (5b.4) and advance to the next layer.
-6. Integration-verify fail → re-delegate the fix to ONE sub-agent on the merged
-   integration worktree (warm: read the diff + verbatim error), then re-run the
-   integration gate-verify. This collapses into the Step 6 retry / escalation path. Do NOT clean up child worktrees until the group finally passes.
+6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
+   phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
+   on the merged integration worktree (warm: read the full merged diff + verbatim error),
+   covering ALL phases in the group; then re-run the integration gate-verify. This is the
+   Step 6 retry path, scoped to the group. If it exhausts `SELF_VERIFY_LIMIT` attempts, the
+   Step 6 escalation runs on the same merged integration worktree and the BLOCKED/HALTED
+   marker is attached to the **first phase heading in the group**, with a note listing all
+   member phases. Do NOT clean up child worktrees until the group finally passes.
 
 #### 5b.4 Clean up child worktrees
 
@@ -302,36 +302,13 @@ inspect it. **Never** remove the integration worktree — that is the user's del
 
 ### 5c. Runaway guard
 
-The orchestrator cannot read a running sub-agent's live token count or inspect its
-individual tool calls mid-flight — a background Agent surfaces its totals only in the
-completion notification. So the guard rests on two primitives that do work: a
-wall-clock timeout while running, and the token total on completion.
+Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`, paced with
+`ScheduleWakeup` + `TaskStop`) and a **token ceiling** checked on completion
+(`PHASE_TOKEN_CEILING`). On either trip, do NOT advance — page the user via `NOTIFY_SKILL`
+and wait. The two primitives are all that work: a background Agent gives no live per-call
+feed, only its totals in the completion notification.
 
-**Wall-clock budget (while running).** Set a per-phase time budget (default 15 min;
-scale up for `opus` phases). Pace check-ins with `ScheduleWakeup`. If the sub-agent is
-still running past its budget, treat it as runaway: `TaskStop` it, then page the user
-(below). `TaskStop` returns only status, not partial work — report what the
-orchestrator last knew, not a recovered transcript.
-
-**Token ceiling (on completion).** When the sub-agent returns, compare its reported
-total tokens against the per-model ceiling in Configuration. The phase agent's total
-now includes its warm self-verify loop, so the ceilings already budget for impl +
-verify — don't double-count. If it overran, do NOT silently accept the result — page
-the user before the gate-verify so an overrun phase gets a human look (the output may
-still be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
-
-**On either trip:**
-
-1. **Do NOT** check off the phase, run `/verify`, or advance to the next phase.
-2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
-   ```
-   <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
-   ```
-3. Wait for the user's decision before doing anything else with this phase.
-
-> **Note:** mid-flight repeated-call / no-progress detection is intentionally NOT
-> claimed here — there is no live per-call feed for a sub-agent. The wall-clock budget
-> is what catches silent loops; the token ceiling catches expensive-but-completing ones.
+→ Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 
 ## Step 6: Quality Verification
 
@@ -357,8 +334,9 @@ actually does:
 | Pure pass/fail (build + tests, exit-code gate) | `haiku` |
 | Behavioral (run the app, observe behavior matches intent) | `sonnet` |
 
-Default `sonnet` (`VERIFY_AGENT_MODEL`); drop to `haiku` only when the project declares
-its verify is deterministic. Spawn it with the worktree path; it writes no code and only
+`VERIFY_AGENT_MODEL` is the configured default (`sonnet`) and wins when set; the table
+above is how you pick it when the project hasn't — drop to `haiku` only when verify is a
+deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
 reports.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
@@ -368,71 +346,26 @@ reports.
   re-implement from scratch off the summary. Pass the verbatim gate-verify error plus the
   prior summary. Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c
   applies to retry sub-agents too.)
-- Max `SELF_VERIFY_LIMIT` gate attempts per phase (default 2)
-- The `SELF_VERIFY_LIMIT`th gate failure → hard stop
+- A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
+  the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
+  intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate
+  retries (one budget, see Configuration) — the old fixed "3x retry" contract is retired.
+- When all `SELF_VERIFY_LIMIT` attempts have failed their gate → hard stop
 
 **On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
-Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation
-loop, but with a stronger model and an extended budget. This is not a separate skill: it
-reuses the orchestrator + sub-agent + two-tier-verify + 5c-guard machinery already
-defined, so the rescue attempt inherits the runaway guard automatically.
+Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation loop
+with the model forced to `opus`, an extended 5c budget (`ESCALATION_TOKEN_CEILING` /
+`ESCALATION_TIME_BUDGET`), a richer payload (full failure history + "diagnose root cause
+before fixing"), and capped at `ESCALATION_ATTEMPTS` (default 2). It reuses the existing
+machinery, so it inherits the runaway guard automatically — not a separate skill. The plan
+gets a BLOCKED marker before the pass and a HALTED marker if it exhausts; for a parallel
+group the marker lands on the group's first phase heading. On exhaustion, fall through to
+user-wait (page via `NOTIFY_SKILL`, do NOT check off, resume from the failed phase on the
+user's signal).
 
-1. Capture the full failure history for this phase: every prior attempt's summary and
-   every gate-verify error, verbatim.
-2. **Annotate the plan with a BLOCKED marker** so the failure persists across sessions
-   and is visible to anyone reading the plan. Append a callout block immediately under
-   the failed phase heading:
-
-   ```markdown
-   ### Phase <N>: <name>
-
-   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Escalation in progress.
-   > **Last error:** <one-line summary of the verify error>
-   > **Worktree:** <worktree path>
-
-   - [ ] Task ...
-   ```
-
-   Write the updated plan back to disk before the escalation pass. This way, if the
-   session ends mid-rescue, the plan still reflects reality and a future run can pick up
-   the thread.
-
-3. **Run the escalation pass** (reuse Step 5b.2 handoff + 5b.3 single-phase execution +
-   Step 6 gate-verify), with these overrides:
-   - **Model forced to `opus`** regardless of the phase's complexity classification.
-   - **Extended 5c budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET`
-     instead of the per-phase defaults (these are the hardest cases; don't strangle the
-     rescue).
-   - **Richer payload** — beyond the normal phase handoff, include the full failure
-     history from step 1 and an explicit instruction: *"diagnose the root cause from the
-     prior attempts and errors BEFORE writing any fix; do not just re-run the same
-     approach."* This is what makes the escalation more than a model bump.
-   - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
-     self-verify) → gate-verify, same as a phase. The runaway guard (5c, extended budget)
-     applies to every escalation attempt.
-4. Outcome:
-   - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the
-     phase (Step 7), and continue to the next phase.
-   - **Exhausted** (`ESCALATION_ATTEMPTS` gate failures) → replace the BLOCKED callout
-     with a HALTED callout, then fall through to user-wait below:
-
-     ```markdown
-     > 🛑 **HALTED**: escalation exhausted `ESCALATION_ATTEMPTS` opus rescue attempts.
-     > **Last error:** <one-line summary>
-     > **Worktree:** <worktree path>
-     ```
-
-**User-Wait (escalation exhausted):**
-
-1. Report what failed, including the escalation attempt history and last error
-2. Call `/notify-me` with error summary:
-   ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and escalation halted. Error: <summary>"
-   ```
-3. Wait for user intervention — do NOT check off phase or continue
-4. User fixes issue in the worktree, signals ready to retry
-5. Skill resumes from the failed phase
+→ Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
+the user-wait steps: **`references/escalation.md`**.
 
 ## Step 7: Task Tracking
 
@@ -456,65 +389,17 @@ The plan file is updated in your working directory — you decide what to do wit
 
 ## Step 8: Plan Review & Auto-fix
 
-Run ONLY after every phase is implemented and checked off (Step 7). If the plan
-hard-stopped or any phase is BLOCKED/HALTED, SKIP this step — there is nothing coherent
-to review. Disable entirely with `RUN_REVIEW=false`.
+Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
+hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
 
-This step mirrors Step 5's delegation discipline: Opus reviews (judgment), a cheaper agent
-fixes (mechanical), and the orchestrator holds only the findings list — it never ingests
-the raw diff.
+Mirrors Step 5's delegation discipline: an **Opus** sub-agent reviews the cumulative plan
+diff (`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
+list only — the orchestrator never ingests the raw diff. Findings are triaged at
+`REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **Sonnet/Haiku** fix pass run
+sequentially in the integration worktree under the same two-tier verify as a phase;
+below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_ROUNDS`.
 
-### 8a. Delegate the review (Opus)
-
-Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Payload:
-
-- Integration worktree path + the base ref. There is no GitHub PR at this point (the skill
-  never commits or pushes), so instruct it to review the **cumulative diff of the whole
-  plan**: `git -C <integration> diff <base>...HEAD` — the local diff, not a PR.
-- Invoke the project's review skill (`REVIEW_SKILL`, default `/pr-review`) on that diff.
-- The architecture digest (5a) so findings respect project rules.
-- Required return format: a **structured findings list only** — each item is `severity`,
-  `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
-
-The orchestrator keeps the findings list (small); it does not read the diff itself.
-
-### 8b. Triage by severity
-
-Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and above):
-
-- **At/above threshold** → auto-fix queue (8c).
-- **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
-  touch. Collect them for the report (Step 9). Auto-fixing a reviewer's opinion churns
-  good code — leave that call to the user.
-
-If the auto-fix queue is empty, skip to 8d.
-
-### 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
-
-Review findings cluster on shared files, so fixes run **in the integration worktree, not
-in parallel** — parallel fix agents would collide (the Step 5b file-overlap problem).
-Bundle the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
-
-1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
-   inference); use the max across the bundle. Same table as Step 5b.2. (Escalate to
-   `opus` only for genuinely tricky fixes.)
-2. Spawn ONE fix sub-agent (background; 5c guard) in the integration worktree. Payload:
-   the verbatim findings to fix, the architecture digest, and the **same two-tier verify
-   contract as Step 5** — "after fixing, run /verify and iterate while warm (bounded by
-   `SELF_VERIFY_LIMIT`); report your self-verify result."
-3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
-   integration worktree — independent confirmation, exactly as for a phase.
-4. Gate fail → the Step 6 retry / escalation path, unchanged.
-
-### 8d. Bounded re-review
-
-A fix can introduce new issues or only partly address a finding. After the fixes verify
-clean, re-run 8a→8c. Cap total review rounds at `REVIEW_MAX_ROUNDS` (default 2). Stop when
-the cap is hit OR a round returns no at/above-threshold findings; list anything still open
-in the report. Never loop review↔fix unbounded.
-
-If `REVIEW_SKILL` is not available in the project, skip Step 8 entirely and note it in the
-report.
+→ Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
 ## Step 9: Final Report
 

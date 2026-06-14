@@ -101,7 +101,7 @@ q-skills/
   plugins/
     workflow-kit/
       .claude-plugin/
-        plugin.json           # Plugin manifest (v1.0.0)
+        plugin.json           # Plugin manifest (v1.1.0)
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)

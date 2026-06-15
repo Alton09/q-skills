@@ -35,6 +35,10 @@ and owns the pass/fail decision and task tracking.
   sequentially, or a dedicated child worktree when run in a parallel group), runs
   `/verify` and iterates on failures while warm (bounded), then returns a structured
   summary including its self-verify result. Does not touch the plan file or advance phases.
+- **Prep sub-agent** (`PREP_AGENT_MODEL`, default `sonnet`): runs the one-time setup reads
+  the orchestrator shouldn't pull into its window — parses the plan into a verbatim
+  normalized extract (Step 1) and distills the `/clean-architecture` digest (Step 5a).
+  Returns load-bearing data verbatim; makes no decisions.
 - **Gate-verify sub-agent** (one per phase after the phase agent returns, model by
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
@@ -46,10 +50,10 @@ and owns the pass/fail decision and task tracking.
 
 ## Workflow Overview
 
-1. **Plan Selection** — file path or inline markdown
+1. **Plan Selection** — file path or inline markdown; parse delegated to a cheap prep agent
 2. **Orchestrator Model** — Opus 4.8 default (per-phase sub-agent models auto-selected)
 3. **Worktree Setup** — delegate to `/create-worktree` skill
-4. **Read Plan Structure**
+4. **Plan Structure** — work from the delegated parse extract
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
@@ -58,8 +62,9 @@ and owns the pass/fail decision and task tracking.
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
-Before reading source files, writing code, or spawning any sub-agent,
-you MUST collect three answers in order:
+Before reading source files, writing code, or spawning any phase/implementation
+sub-agent, you MUST collect three answers in order (the Step 1 plan-parse prep agent
+is part of answering #1 and is allowed):
 
 1. Plan path/content (Step 1)
 2. Orchestrator model confirmation (Step 2) — Opus 4.8 default; per-phase
@@ -67,7 +72,7 @@ you MUST collect three answers in order:
 3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
    and note the new worktree path, then proceed immediately
 
-Do NOT begin Step 4 (Read Plan Structure) or any code reading until
+Do NOT begin Step 4 (Plan Structure) or any code reading until
 Steps 1–3 are answered and the worktree (if requested) exists. Skipping
 Step 3 has caused users to implement features on `main` and then
 manually migrate diffs — never acceptable. Sub-agents inherit the worktree
@@ -88,9 +93,26 @@ Accept either:
 - File path: `docs/plans/add-recipe-favorites.md`, `./my-plan.md`, etc.
 - Inline markdown: (user pastes plan content directly)
 
-If file path, read it. If inline, use content directly.
+**Delegate the parse — do not read the raw plan into the orchestrator window.** Spawn ONE
+prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`) to read the plan (from the path, or
+the inline content you pass it) and return a **verbatim normalized extract** — not a lossy
+summary. The orchestrator schedules and hands off from this extract, so it must preserve the
+load-bearing data exactly:
 
-Then validate plan structure: must have phases (markdown sections starting with `###`) with checkboxes (`- [ ]` for incomplete, `- [x]` for complete).
+- Validate structure first: phases are `###` sections with checkboxes (`- [ ]` / `- [x]`).
+  If the plan lacks this, return a structure error instead of an extract.
+- For each phase, return: phase name/heading, dependency edges (from `(depends on Phase X)`
+  headings and the `## Task Dependency Graph`), the `**Files**:` list, and the **verbatim
+  task lines** (do not paraphrase or drop tasks).
+- Also return the parallel/sequential tag per phase from the dependency graph.
+
+Why verbatim: the orchestrator injects each phase's task list into its handoff (5b.2) and
+feeds the `Files` lists into the file-overlap *safety* check (5b.1) — a lossy summary there
+causes bad scheduling or worktree collisions.
+
+**Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
+right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
+structure error, fix the parse or fall back to reading the plan directly before proceeding.
 
 ## Step 2: Orchestrator Model
 
@@ -112,9 +134,10 @@ Ask: "Should I create a new worktree? (y/n, default: y)"
 
 If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
 
-## Step 4: Read Plan Structure
+## Step 4: Plan Structure
 
-Plans must have this structure:
+You already have the normalized extract from the delegated parse (Step 1) — work from that,
+not a fresh raw read. This is the structure the prep agent parsed:
 
 ```markdown
 # Feature Name
@@ -150,17 +173,20 @@ the plan's **dependency graph**, not blindly in file order: independent phases r
 linear dependency chain degenerates to one phase agent at a time — the old sequential
 behavior, which is exactly correct for that shape.
 
-### 5a. Load architecture rules once
+### 5a. Load architecture rules once (delegated)
 
-Before the first phase, invoke `/clean-architecture` to load the project's rules into
-the orchestrator's context:
+Before the first phase, get the **architecture digest** — but don't pull the whole
+`/clean-architecture` rules doc into the orchestrator window (it would sit in the persistent
+context and be re-processed every turn for the entire run). Delegate the read + distill to
+ONE prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`):
 
-```
-/clean-architecture
-```
+- Instruct it to invoke `/clean-architecture`, then return a short digest of the
+  **load-bearing constraints only** — layering, forbidden dependencies, naming.
+- **Hard rules verbatim, soft guidance paraphrased.** This is extraction, not free
+  summarization: a garbled forbidden-dependency rule propagates to every sub-agent. (Sonnet,
+  not haiku, for exactly this judgment.)
 
-Distill the rules into a short **architecture digest** (the load-bearing constraints,
-not the whole document). The orchestrator injects this digest into every sub-agent
+The orchestrator holds only the returned digest and injects it verbatim into every sub-agent
 prompt — sub-agents start cold and cannot cheaply re-derive it.
 
 ### 5b. Schedule, handoff, and layer execution
@@ -459,6 +485,10 @@ If hard-stopped due to failure:
 
 Projects can override via environment or project CLAUDE.md:
 
+- `PREP_AGENT_MODEL` — model for the delegated setup reads: the plan parse (Step 1) and the
+  architecture digest (Step 5a). Default `sonnet` — keeps the raw plan + rules doc out of the
+  orchestrator's persistent window while preserving load-bearing data verbatim. (Avoid
+  `haiku` here: both extracts are load-bearing and need light judgment.)
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
   `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
@@ -546,6 +576,9 @@ Add ability to mark recipes as favorites and filter by them.
   are demoted to sequential (Step 5b.1).
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before the group is checked off and advanced.
+- **The orchestrator window stays lean** — the raw plan and the `/clean-architecture` rules
+  doc are read by a cheap prep agent (`PREP_AGENT_MODEL`), which returns verbatim extracts;
+  the orchestrator never holds the raw sources, so they don't get re-processed every turn.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5c) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent

@@ -13,10 +13,14 @@ the raw diff.
 
 Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Payload:
 
-- Integration worktree path + the base ref. There is no GitHub PR at this point (the skill
-  never commits or pushes), so instruct it to review the **cumulative diff of the whole
-  plan**: `git -C <integration> diff <base>...HEAD` — the local diff, not a PR.
-- Invoke the project's review skill (`REVIEW_SKILL`, default `/pr-review`) on that diff.
+- Integration worktree path + the base ref. Phases commit to the integration branch (5b.2)
+  but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
+  of the whole plan**: `git -C <integration> diff <base>...HEAD` — the local committed diff,
+  not a PR. (This diff is non-empty precisely because phases commit; uncommitted work would be
+  invisible here.)
+- Invoke the project's review skill (`REVIEW_SKILL`, default `/code-review`) on that diff. It
+  must be **non-interactive** — running headless in a sub-agent, an interactive review skill
+  like `/pr-review` (which prompts for finding selection / posting) would stall.
 - The architecture digest (5a) so findings respect project rules.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.

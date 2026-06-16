@@ -116,17 +116,20 @@ structure error, fix the parse or fall back to reading the plan directly before 
 
 ## Step 2: Orchestrator Model
 
-The orchestrator runs on **`ORCHESTRATOR_MODEL` (default Opus 4.8)** — it holds cross-phase
-state, judges complexity, and supervises sub-agents, which is exactly the work Opus is best
-at.
+The orchestrator runs on **whatever model this session was launched with** — it cannot
+switch its own model mid-run. `ORCHESTRATOR_MODEL` (default Opus 4.8) is the *recommended*
+model because the orchestrator holds cross-phase state, judges complexity, and supervises
+sub-agents, which is exactly the work Opus is best at.
 
-Confirm with the user (one line, default accepts), substituting the configured default:
+Confirm with the user (one line). If the session isn't already on the recommended model,
+they relaunch on it — you can't change it from here:
 ```
-Orchestrator model: <ORCHESTRATOR_MODEL> (default). Press enter to accept, or name another.
+Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> recommended. To use a
+different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
 
 Do NOT ask which model implements each phase — that is decided automatically per phase
-in Step 5 by complexity classification. Store the orchestrator model for the final report.
+in Step 5 by complexity classification. Store the running model for the final report.
 
 ## Step 3: Worktree Setup
 
@@ -191,140 +194,23 @@ prompt — sub-agents start cold and cannot cheaply re-derive it.
 
 ### 5b. Schedule, handoff, and layer execution
 
-#### 5b.1 Build the execution schedule
+The orchestrator parses the dependency graph into topological **layers**, builds a
+cold-start handoff for each phase (model auto-selected by complexity, plus task list,
+worktree path, architecture digest, carry-forward, and self-verify + commit instructions),
+then walks the layers: single-phase layers run in the integration worktree; multi-phase
+layers fan out into **sibling** child worktrees, merge back, and advance atomically.
 
-feature-plan encodes dependencies two ways — use both:
+Two rules are load-bearing and easy to get wrong:
 
-- Phase headings: `### Phase 2 — Name (depends on Phase 1)`
-- A `## Task Dependency Graph` block:
-  ```
-  Phase 1 (parallel): Task 1, Task 2
-  Phase 2 (sequential, depends on Phase 1): Task 3
-  Phase 3 (parallel, depends on Phase 2): Task 4, Task 5
-  ```
+- **File-overlap demotion** — phases that share a file (or any phase missing `**Files**:`
+  metadata) are demoted out of a parallel group. A false-parallel corrupts the worktree;
+  a false-sequential is merely slow.
+- **Every phase commits its work** — the parallel merge and the Step 8 review diff both
+  read committed history, so uncommitted work is invisible to both. The commit stays on the
+  worktree/child branch; nothing is pushed or merged to `main`.
 
-Parse these into a phase → prerequisites map and compute **layers** (topological levels):
-a layer is the set of phases whose prerequisites are all already complete. Phases in the
-same layer have no dependency edge between them → **candidate parallel group**.
-
-If the plan has no dependency notation at all, treat every phase as depending on the
-previous one (pure sequential) — safe default.
-
-**File-overlap demotion (mandatory safety check).** The dependency graph encodes
-*logical* deps, not *file* deps — two "independent" phases can still edit the same file.
-Before parallelizing a candidate group, read each phase's `**Files**:` metadata. If two
-phases in the group share any file, they CANNOT run concurrently: split the group so each
-parallel subset has pairwise-disjoint file sets, and run the leftover phases in a later
-sequential sub-step. When in doubt, demote to sequential — a false-sequential is merely
-slow; a false-parallel corrupts the worktree.
-
-Cap concurrency at `MAX_PARALLEL_AGENTS` (default 3); if a group is larger, run it in
-batches of that size.
-
-#### 5b.2 Per-phase handoff payload
-
-For each phase (sequential or parallel), build its handoff:
-
-**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
-the phase's tasks and map to the Agent tool's `model` parameter:
-
-| Phase character | Agent `model` |
-|---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
-| Normal feature work (typical layer impl, standard tests) | `sonnet` |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
-
-The values are the literal `model` enum tokens — pass them straight to the Agent tool.
-Record the chosen model per phase for the final report.
-
-**2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
-everything the phase needs:
-
-- Plan file path + the **verbatim task list for this phase only**
-- **Worktree path** — depends on how the phase runs (see 5b.3):
-  - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
-  - *Parallel phase* → its own **child worktree** that the orchestrator created off
-    integration HEAD; the agent works ONLY inside that child worktree.
-  In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
-  every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
-  edits and breaks carry-forward. Edits never touch `main`.
-- The architecture digest from 5a — retain the non-negotiable rules (layering,
-  forbidden dependencies, naming) **verbatim**; paraphrase only the soft guidance
-- **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
-  key decisions, public interfaces introduced — covering **all completed prerequisite
-  phases**, so this phase builds correctly on what came before. (Within a parallel group,
-  members do NOT see each other's in-flight work — fine, they have no mutual dependency.)
-- Self-verify instruction: "After implementing, run /verify. If it fails, iterate to
-  fix — up to <SELF_VERIFY_LIMIT, default 2> rounds — then stop regardless. Report your
-  final /verify result (pass/fail) and any remaining errors verbatim."
-- Explicit boundaries: "implement ONLY this phase's tasks; do NOT edit the plan file,
-  do NOT start other phases. Return a structured summary."
-- Required return format: files touched, what each does, decisions made, anything the
-  next phase needs, your final self-verify result (pass/fail + remaining errors), and
-  any tasks you could not complete.
-
-#### 5b.3 Execute each layer
-
-Walk layers in topological order (5b.1). Every phase agent is spawned with the Agent tool
-and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
-the orchestrator needs: it stays responsive instead of blocking (so it can run the 5c
-wall-clock guard, and watch several agents at once), and each agent is cancellable via
-`TaskStop`. The completion notification carries the agent's total token count and
-duration, which feeds the 5c ceiling check.
-
-**Single-phase layer (the common case — unchanged from sequential):**
-1. Spawn the phase agent in the integration worktree (background; 5c guard applies).
-2. On return, review the summary including the agent's self-verify result.
-3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
-   self-reported pass.
-4. Gate pass → IMMEDIATELY check off the phase (Step 7), append its summary to the
-   carry-forward, advance. Do not batch checkbox updates — write after each phase.
-
-**Multi-phase layer (parallel group):**
-1. For each phase, create a child worktree + branch off integration HEAD:
-   ```
-   git -C <integration> worktree add <integration>/.wt/<phase-slug> -b <phase-branch>
-   ```
-2. Spawn all phase agents concurrently (background), each pointed at its own child
-   worktree, capped at `MAX_PARALLEL_AGENTS`. The 5c runaway guard applies per agent.
-3. When ALL agents in the group have returned, merge each child branch into integration
-   in turn:
-   ```
-   git -C <integration> merge --no-ff <phase-branch>
-   ```
-   A clean merge is expected (disjoint files by 5b.1). A real conflict = treat that phase
-   as failed: keep its child worktree for inspection and enter the Step 6 retry path on
-   the conflicted phase.
-4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
-   child can pass alone yet break once merged.
-5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
-   passes — check off ALL phases in the group (Step 7), append every member's summary to
-   the carry-forward, then clean up (5b.4) and advance to the next layer.
-6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
-   phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
-   on the merged integration worktree (warm: read the full merged diff + verbatim error),
-   covering ALL phases in the group; then re-run the integration gate-verify. This is the
-   Step 6 retry path, scoped to the group. If it exhausts `SELF_VERIFY_LIMIT` attempts, the
-   Step 6 escalation runs on the same merged integration worktree and the BLOCKED/HALTED
-   marker is attached to the **first phase heading in the group**, with a note listing all
-   member phases. Do NOT clean up child worktrees until the group finally passes.
-
-#### 5b.4 Clean up child worktrees
-
-Child worktrees and branches are ephemeral scaffolding — remove them once their work is
-safely in integration. Clean up a group's children ONLY after the group's integration
-gate-verify passes (5b.3 step 5):
-
-```
-git -C <integration> worktree remove <integration>/.wt/<phase-slug>
-git -C <integration> branch -d <phase-branch>
-```
-
-Use `branch -d` (not `-D`): git refuses to delete a branch that isn't fully merged, so a
-failed delete is a tripwire that the merge didn't actually land — investigate, don't
-force. If a merge conflicted or the gate failed, KEEP the child worktree so you can
-inspect it. **Never** remove the integration worktree — that is the user's deliverable
-(see Notes / "No auto-cleanup").
+→ Full schedule/handoff/execution/cleanup procedure (5b.1–5b.4):
+**`references/phase-execution.md`**.
 
 ### 5c. Runaway guard
 
@@ -367,11 +253,12 @@ reports.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
-  The prior edits persist on disk in the shared worktree, so instruct the retry agent to
-  FIRST read the current worktree diff, then fix and re-run its warm self-verify — do not
-  re-implement from scratch off the summary. Pass the verbatim gate-verify error plus the
-  prior summary. Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c
-  applies to retry sub-agents too.)
+  The prior phase work is committed (5b.2), so instruct the retry agent to FIRST read the
+  committed diff plus any working changes, then fix and re-run its warm self-verify — do not
+  re-implement from scratch off the summary. It commits the fix when its self-verify passes,
+  same commit contract as 5b.2. Pass the verbatim gate-verify error plus the prior summary.
+  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c applies to retry
+  sub-agents too.)
 - A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
   the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
   intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate
@@ -515,8 +402,10 @@ Projects can override via environment or project CLAUDE.md:
   (Step 5b.1/5b.3). Default 3; larger groups run in batches of this size.
 - `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
   Default `true`; set `false` to stop after implementation.
-- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/pr-review`). If
-  absent, Step 8 is skipped.
+- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
+  **non-interactive**: it runs as a background sub-agent with no user present, so a skill that
+  prompts mid-run (e.g. `/pr-review`, which asks which findings to keep and whether to post)
+  will stall. If absent, Step 8 is skipped.
 - `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
   Default: high / correctness and above; lower-severity findings are reported, not touched.
 - `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
@@ -587,6 +476,9 @@ Add ability to mark recipes as favorites and filter by them.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5b.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).
-- **No auto-commit** — all code is staged/uncommitted in the worktree, ready for your review
+- **Phases commit, but only to the worktree branch** — each phase commits its own work
+  (required so the parallel merge and the Step 8 review diff can see it; see 5b.2). Those
+  commits stay on the integration/child branch in the worktree — nothing is pushed or merged
+  to `main`. The branch is yours to review, squash, merge, or discard.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

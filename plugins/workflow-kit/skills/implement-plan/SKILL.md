@@ -1,47 +1,83 @@
 ---
 name: implement-plan
 description: |
-  Execute a plan end-to-end with automatic quality verification and task tracking.
-  
-  Use this skill whenever you have a structured implementation plan (markdown file 
-  with phases and checkboxes) and want to implement it in an isolated worktree with 
-  full verification and automatic task tracking. The skill reads plans from any 
-  markdown file, implements phase-by-phase sequentially, delegates quality 
-  verification to the project's /verify skill, and automatically checks off completed 
-  tasks in the plan document.
-  
-  Perfect for feature implementations, refactors, and bug fixes where you need 
-  quality gates and progress visibility.
+  Execute a plan end-to-end with an orchestrator that delegates each phase to a
+  dedicated sub-agent, plus automatic quality verification and task tracking.
+
+  Use this skill whenever you have a structured implementation plan (markdown file
+  with phases and checkboxes) and want to implement it in an isolated worktree with
+  full verification and automatic task tracking. An Opus orchestrator delegates each
+  phase to a model-matched sub-agent, runs two-tier verification, escalates stuck
+  phases, and reviews the finished diff — see the body for the mechanics.
+
+  Perfect for feature implementations, refactors, and bug fixes where you need
+  quality gates, per-phase delegation, and progress visibility.
 ---
 
 # Implement Plan
 
-Turn a plan into working, verified, tested code with automatic task tracking.
+Turn a plan into working, verified, tested code. The main agent is the
+**orchestrator**: it never writes phase code itself — it delegates each phase to a
+dedicated sub-agent, watches that sub-agent, delegates the authoritative gate-verify,
+and owns the pass/fail decision and task tracking.
+
+## Roles
+
+- **Orchestrator** (this agent, Opus 4.8 by default): pre-flight, worktree setup,
+  building the dependency-graph schedule, per-phase model selection, child-worktree
+  creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
+  parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
+  escalation (forced-opus rescue pass), checkbox updates, reporting. Holds all cross-phase
+  state. Never
+  runs `/verify` in its own context — it delegates it to keep its window clean.
+- **Phase sub-agent** (one per phase, model auto-selected): implements exactly one
+  phase's tasks inside its assigned worktree (the shared integration worktree when run
+  sequentially, or a dedicated child worktree when run in a parallel group), runs
+  `/verify` and iterates on failures while warm (bounded), then returns a structured
+  summary including its self-verify result. Does not touch the plan file or advance phases.
+- **Prep sub-agent** (`PREP_AGENT_MODEL`, default `sonnet`): runs the one-time setup reads
+  the orchestrator shouldn't pull into its window — parses the plan into a verbatim
+  normalized extract (Step 1) and distills the `/clean-architecture` digest (Step 5a).
+  Returns load-bearing data verbatim; makes no decisions.
+- **Gate-verify sub-agent** (one per phase after the phase agent returns, model by
+  verify nature): runs the project's `/verify` independently of the implementer and
+  returns only `pass | fail + verbatim errors`. The independent confirmation is the
+  real quality gate; it writes no code and makes no decisions.
+- **Review sub-agent** (Step 8, `opus`): reviews the full plan diff via the project's
+  review skill and returns a structured findings list only — no code, no decisions.
+- **Fix sub-agent** (Step 8, Sonnet/Haiku by complexity): applies the severity-gated
+  findings in the integration worktree under the same two-tier verify contract as a phase.
 
 ## Workflow Overview
 
-1. **Plan Selection** — file path or inline markdown
-2. **Model Selection** — pick Sonnet (default), Haiku, or Opus
+1. **Plan Selection** — file path or inline markdown; parse delegated to a cheap prep agent
+2. **Orchestrator Model** — Opus 4.8 default (per-phase sub-agent models auto-selected)
 3. **Worktree Setup** — delegate to `/create-worktree` skill
-4. **Phase-by-Phase Implementation** — sequential execution
-5. **Quality Verification** — delegate to project's `/verify` skill
-6. **Task Tracking** — check off completed phases in plan file
-7. **Report** — summary, worktree path, status
+4. **Plan Structure** — work from the delegated parse extract
+5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
+6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
+7. **Task Tracking** — check off completed phases in plan file
+8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
+9. **Report** — summary, per-phase models, review outcome, worktree path, status
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
-Before reading source files, writing code, or invoking other skills,
-you MUST collect three answers in order:
+Before reading source files, writing code, or spawning any phase/implementation
+sub-agent, you MUST collect three answers in order (the Step 1 plan-parse prep agent
+is part of answering #1 and is allowed):
 
 1. Plan path/content (Step 1)
-2. Model choice (Step 2)
+2. Orchestrator model confirmation (Step 2) — Opus 4.8 default; per-phase
+   sub-agent models are auto-selected later, NOT asked here
 3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
    and note the new worktree path, then proceed immediately
 
-Do NOT begin Step 4 (Read Plan Structure) or any code reading until
+Do NOT begin Step 4 (Plan Structure) or any code reading until
 Steps 1–3 are answered and the worktree (if requested) exists. Skipping
 Step 3 has caused users to implement features on `main` and then
-manually migrate diffs — never acceptable.
+manually migrate diffs — never acceptable. Sub-agents inherit the worktree
+path as their working directory, so the worktree MUST exist before any phase
+is delegated.
 
 If the user supplied a plan path as an argument, you have answered Step 1
 but you have NOT answered Steps 2 and 3. Ask them now.
@@ -57,23 +93,43 @@ Accept either:
 - File path: `docs/plans/add-recipe-favorites.md`, `./my-plan.md`, etc.
 - Inline markdown: (user pastes plan content directly)
 
-If file path, read it. If inline, use content directly.
+**Delegate the parse — do not read the raw plan into the orchestrator window.** Spawn ONE
+prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`) to read the plan (from the path, or
+the inline content you pass it) and return a **verbatim normalized extract** — not a lossy
+summary. The orchestrator schedules and hands off from this extract, so it must preserve the
+load-bearing data exactly:
 
-Then validate plan structure: must have phases (markdown sections starting with `###`) with checkboxes (`- [ ]` for incomplete, `- [x]` for complete).
+- Validate structure first: phases are `###` sections with checkboxes (`- [ ]` / `- [x]`).
+  If the plan lacks this, return a structure error instead of an extract.
+- For each phase, return: phase name/heading, dependency edges (from `(depends on Phase X)`
+  headings and the `## Task Dependency Graph`), the `**Files**:` list, and the **verbatim
+  task lines** (do not paraphrase or drop tasks).
+- Also return the parallel/sequential tag per phase from the dependency graph.
 
-## Step 2: Model Selection
+Why verbatim: the orchestrator injects each phase's task list into its handoff (5b.2) and
+feeds the `Files` lists into the file-overlap *safety* check (5b.1) — a lossy summary there
+causes bad scheduling or worktree collisions.
 
-Prompt:
+**Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
+right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
+structure error, fix the parse or fall back to reading the plan directly before proceeding.
+
+## Step 2: Orchestrator Model
+
+The orchestrator runs on **whatever model this session was launched with** — it cannot
+switch its own model mid-run. `ORCHESTRATOR_MODEL` (default Opus 4.8) is the *recommended*
+model because the orchestrator holds cross-phase state, judges complexity, and supervises
+sub-agents, which is exactly the work Opus is best at.
+
+Confirm with the user (one line). If the session isn't already on the recommended model,
+they relaunch on it — you can't change it from here:
 ```
-Which model?
-  1. Sonnet 4.6 (default) — balanced speed & quality
-  2. Haiku — fast, cost-effective
-  3. Opus — maximum quality for complex work
-
-Enter choice (default: 1):
+Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> recommended. To use a
+different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
 
-Use selected model for implementation phase. Store choice for reference in final report.
+Do NOT ask which model implements each phase — that is decided automatically per phase
+in Step 5 by complexity classification. Store the running model for the final report.
 
 ## Step 3: Worktree Setup
 
@@ -81,9 +137,10 @@ Ask: "Should I create a new worktree? (y/n, default: y)"
 
 If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
 
-## Step 4: Read Plan Structure
+## Step 4: Plan Structure
 
-Plans must have this structure:
+You already have the normalized extract from the delegated parse (Step 1) — work from that,
+not a fresh raw read. This is the structure the prep agent parsed:
 
 ```markdown
 # Feature Name
@@ -111,92 +168,117 @@ Known edge cases to handle.
 
 Key: Each phase is a section with checkboxes for tasks. The skill tracks and updates these.
 
-## Step 5: Phase-by-Phase Implementation
+## Step 5: Phase Delegation
 
-Before starting, invoke `/clean-architecture` to load the project's architectural rules
-into context:
+The orchestrator delegates each phase to a dedicated sub-agent. Phases are scheduled by
+the plan's **dependency graph**, not blindly in file order: independent phases run
+**concurrently**, dependent phases run **after** their prerequisites. A plan with a fully
+linear dependency chain degenerates to one phase agent at a time — the old sequential
+behavior, which is exactly correct for that shape.
 
-```
-/clean-architecture
-```
+### 5a. Load architecture rules once (delegated)
 
-Follow those rules throughout every phase.
+Before the first phase, get the **architecture digest** — but don't pull the whole
+`/clean-architecture` rules doc into the orchestrator window (it would sit in the persistent
+context and be re-processed every turn for the entire run). Delegate the read + distill to
+ONE prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`):
 
-For each phase in the plan:
+- Instruct it to invoke `/clean-architecture`, then return a short digest of the
+  **load-bearing constraints only** — layering, forbidden dependencies, naming.
+- **Hard rules verbatim, soft guidance paraphrased.** This is extraction, not free
+  summarization: a garbled forbidden-dependency rule propagates to every sub-agent. (Sonnet,
+  not haiku, for exactly this judgment.)
 
-1. Read the phase tasks
-2. Implement all tasks in the phase, honoring the architecture rules loaded above
-3. After implementation, run quality verification (Step 6)
-4. If verification fails, retry (Step 6)
-5. **If verification passes, IMMEDIATELY perform Step 7 (check off phase in plan file) before moving to the next phase.** Do not batch checkbox updates — write the file after each phase or they will be forgotten.
+The orchestrator holds only the returned digest and injects it verbatim into every sub-agent
+prompt — sub-agents start cold and cannot cheaply re-derive it.
 
-**No parallelization** — phases run sequentially, one at a time.
+### 5b. Schedule, handoff, and layer execution
 
-**No sub-agents** — implement directly, inline.
+The orchestrator parses the dependency graph into topological **layers**, builds a
+cold-start handoff for each phase (model auto-selected by complexity, plus task list,
+worktree path, architecture digest, carry-forward, and self-verify + commit instructions),
+then walks the layers: single-phase layers run in the integration worktree; multi-phase
+layers fan out into **sibling** child worktrees, merge back, and advance atomically.
+
+Two rules are load-bearing and easy to get wrong:
+
+- **File-overlap demotion** — phases that share a file (or any phase missing `**Files**:`
+  metadata) are demoted out of a parallel group. A false-parallel corrupts the worktree;
+  a false-sequential is merely slow.
+- **Every phase commits its work** — the parallel merge and the Step 8 review diff both
+  read committed history, so uncommitted work is invisible to both. The commit stays on the
+  worktree/child branch; nothing is pushed or merged to `main`.
+
+→ Full schedule/handoff/execution/cleanup procedure (5b.1–5b.4):
+**`references/phase-execution.md`**.
+
+### 5c. Runaway guard
+
+Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`, paced with
+`ScheduleWakeup` + `TaskStop`) and a **token ceiling** checked on completion
+(`PHASE_TOKEN_CEILING`). On either trip, do NOT advance — page the user via `NOTIFY_SKILL`
+and wait. The two primitives are all that work: a background Agent gives no live per-call
+feed, only its totals in the completion notification.
+
+→ Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 
 ## Step 6: Quality Verification
 
-After each phase is implemented, call the project's `/verify` skill:
+Verification is **two-tier**:
 
-```
-/verify
-```
+1. **Warm self-verify (phase agent).** The phase sub-agent runs `/verify` itself and
+   iterates on failures while it still holds full context of the code it just wrote
+   (Step 5b payload). This catches most issues in-context, with no cold re-derivation,
+   and is bounded by `SELF_VERIFY_LIMIT` so it can't loop forever.
 
-Expect response: `pass` or `fail`.
+2. **Authoritative gate-verify (delegated).** Self-report on one's own gate is not a
+   gate — so after the phase agent returns, the **orchestrator delegates an independent
+   `/verify`** to a fresh sub-agent (the implementer never confirms its own work). The
+   orchestrator does NOT run `/verify` in its own context: that would pour build/test
+   output into the expensive Opus window every phase. It gets back only `pass | fail +
+   verbatim errors`.
 
-**Retry Logic:**
-- Fail → fix issues → rerun `/verify`
-- Max 3 attempts per phase
-- 3rd failure → hard stop
+**Gate-verify model** — classify like a phase (Step 5b), by what the project's `/verify`
+actually does:
 
-**On Hard Stop (3x failure):**
+| `/verify` nature | gate-agent `model` |
+|---|---|
+| Pure pass/fail (build + tests, exit-code gate) | `haiku` |
+| Behavioral (run the app, observe behavior matches intent) | `sonnet` |
 
-Before paging the user, escalate to `/deep-dive` for a focused rescue attempt with a
-stronger model. The deep-dive skill is the dedicated escalation path for this exact
-case — one sub-agent, capped retry budget, explicit halt if it can't converge.
+`VERIFY_AGENT_MODEL` is the configured default (`sonnet`) and wins when set; the table
+above is how you pick it when the project hasn't — drop to `haiku` only when verify is a
+deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
+reports.
 
-1. Capture the last `/verify` error output verbatim
-2. **Annotate the plan with a BLOCKED marker** so the failure persists across sessions
-   and is visible to anyone reading the plan. Append a callout block immediately under
-   the failed phase heading:
+**Retry Logic (orchestrator-level, on gate-verify fail):**
+- Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
+  The prior phase work is committed (5b.2), so instruct the retry agent to FIRST read the
+  committed diff plus any working changes, then fix and re-run its warm self-verify — do not
+  re-implement from scratch off the summary. It commits the fix when its self-verify passes,
+  same commit contract as 5b.2. Pass the verbatim gate-verify error plus the prior summary.
+  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c applies to retry
+  sub-agents too.)
+- A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
+  the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
+  intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate
+  retries (one budget, see Configuration) — the old fixed "3x retry" contract is retired.
+- When all `SELF_VERIFY_LIMIT` attempts have failed their gate → hard stop
 
-   ```markdown
-   ### Phase <N>: <name>
+**On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
-   > ⚠️ **BLOCKED**: 3x `/verify` failure. Deep-dive in progress.
-   > **Last error:** <one-line summary of the verify error>
-   > **Worktree:** <worktree path>
+Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation loop
+with the model forced to `opus`, an extended 5c budget (`ESCALATION_TOKEN_CEILING` /
+`ESCALATION_TIME_BUDGET`), a richer payload (full failure history + "diagnose root cause
+before fixing"), and capped at `ESCALATION_ATTEMPTS` (default 2). It reuses the existing
+machinery, so it inherits the runaway guard automatically — not a separate skill. The plan
+gets a BLOCKED marker before the pass and a HALTED marker if it exhausts; for a parallel
+group the marker lands on the group's first phase heading. On exhaustion, fall through to
+user-wait (page via `NOTIFY_SKILL`, do NOT check off, resume from the failed phase on the
+user's signal).
 
-   - [ ] Task ...
-   ```
-
-   Write the updated plan back to disk before handoff. This way, if the session ends
-   mid-rescue, the plan still reflects reality and a future run can pick up the thread.
-
-3. Invoke `/deep-dive` with:
-   - Plan file path
-   - Failed phase name/section
-   - Last `/verify` error output (raw)
-   - Worktree path
-   - Model override (default: opus)
-4. Read the deep-dive result:
-   - **Pass** → deep-dive will have cleared the BLOCKED callout. Check off the phase
-     and continue to the next phase.
-   - **Halt** (deep-dive exhausted its 3 attempts) → deep-dive will have replaced the
-     BLOCKED callout with a HALTED callout. Fall through to user-wait below.
-
-**User-Wait (deep-dive exhausted):**
-
-1. Report what failed (deep-dive halt report already covers attempt history)
-2. Call `/notify-me` with error summary:
-   ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification 3x and deep-dive halted. Error: <summary>"
-   ```
-3. Wait for user intervention — do NOT check off phase or continue
-4. User fixes issue in the worktree, signals ready to retry
-5. Skill resumes from the failed phase
-
-If `/deep-dive` is not available in the project, skip directly to the user-wait path.
+→ Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
+the user-wait steps: **`references/escalation.md`**.
 
 ## Step 7: Task Tracking
 
@@ -218,7 +300,21 @@ Phases completed:
 
 The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
 
-## Step 8: Final Report
+## Step 8: Plan Review & Auto-fix
+
+Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
+hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
+
+Mirrors Step 5's delegation discipline: an **Opus** sub-agent reviews the cumulative plan
+diff (`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
+list only — the orchestrator never ingests the raw diff. Findings are triaged at
+`REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **Sonnet/Haiku** fix pass run
+sequentially in the integration worktree under the same two-tier verify as a phase;
+below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_ROUNDS`.
+
+→ Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
+
+## Step 9: Final Report
 
 Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
@@ -228,17 +324,24 @@ Once all phases are checked off:
 # Implementation Summary
 
 **Plan:** <plan-name>
-**Model:** <selected model>
+**Orchestrator:** <orchestrator model, e.g. Opus 4.8>
 **Worktree:** <path>
 **Branch:** <branch-name>
 
 ## Phases Completed
-- Phase 1: <description>
-- Phase 2: <description>
-- Phase 3: <description>
+- Phase 1: <description> — sub-agent: <model>
+- Phase 2: <description> — sub-agent: <model>
+- Phase 3: <description> — sub-agent: <model>
 
 ## Verification Status
 ✓ All phases passed verification
+
+## Review & Auto-fix
+- Reviewer: Opus 4.8 on `<base>...HEAD` via <REVIEW_SKILL>
+- Findings: <N total> — <M auto-fixed & verified> / <K left for you>
+- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
+- Left for you (below threshold): <one line each, severity + file:line + problem>
+- Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## What's Next
 - Worktree is ready at <path>
@@ -253,7 +356,7 @@ If hard-stopped due to failure:
 
 **Plan:** <plan-name>
 **Failed Phase:** <phase-name>
-**Failure Point:** 3x verification failure
+**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + escalation halted
 
 ## Error Summary
 <error output from last /verify call>
@@ -269,8 +372,44 @@ If hard-stopped due to failure:
 
 Projects can override via environment or project CLAUDE.md:
 
+- `PREP_AGENT_MODEL` — model for the delegated setup reads: the plan parse (Step 1) and the
+  architecture digest (Step 5a). Default `sonnet` — keeps the raw plan + rules doc out of the
+  orchestrator's persistent window while preserving load-bearing data verbatim. (Avoid
+  `haiku` here: both extracts are load-bearing and need light judgment.)
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
+- `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
+  `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
+- `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
+  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5b);
+  and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
+  escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
+- `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
+- `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
+  completion (Step 5c). Now budgets impl + warm self-verify together. Defaults by model:
+  `haiku` 80k / `sonnet` 150k / `opus` 250k. Single source for these numbers — Step 5c
+  references it.
+- `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
+  sub-agent (Step 5c). Default 15 min; scale up for `opus` phases.
+- `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
+  before HALTED / user-wait. Default 2.
+- `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
+  the per-phase ceiling for the rescue. Default 400k (above the `opus` phase 250k — these
+  are the hardest cases).
+- `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
+  30 min.
+- `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
+  (Step 5b.1/5b.3). Default 3; larger groups run in batches of this size.
+- `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
+  Default `true`; set `false` to stop after implementation.
+- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
+  **non-interactive**: it runs as a background sub-agent with no user present, so a skill that
+  prompts mid-run (e.g. `/pr-review`, which asks which findings to keep and whether to post)
+  will stall. If absent, Step 8 is skipped.
+- `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
+  Default: high / correctness and above; lower-severity findings are reported, not touched.
+- `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
+  open (Step 8d). Default 2.
 
 ## Plan Format Example
 
@@ -315,7 +454,31 @@ Add ability to mark recipes as favorites and filter by them.
 
 ## Notes
 
-- **No auto-cleanup** — worktree stays on disk until you decide (merge, delete, etc.)
-- **No auto-commit** — all code is staged/uncommitted in the worktree, ready for your review
+- **Orchestrator owns state and decisions, not execution** — plan-file edits, escalation,
+  carry-forward, and the pass/fail call live in the orchestrator. It delegates even the
+  gate-verify so build/test output never enters its window. Phase sub-agents write code
+  and self-verify; the gate-verify sub-agent confirms independently.
+- **Dependency-graph scheduled** — independent phases run as parallel sub-agents in
+  isolated child worktrees (merged back into integration), dependent phases run after
+  their prerequisites via the carry-forward summary. A linear plan degenerates to pure
+  sequential. Logical independence never overrides file-overlap: phases sharing a file
+  are demoted to sequential (Step 5b.1).
+- **Parallel groups advance atomically** — every member must merge cleanly AND the single
+  integration gate-verify must pass before the group is checked off and advanced.
+- **The orchestrator window stays lean** — the raw plan and the `/clean-architecture` rules
+  doc are read by a cheap prep agent (`PREP_AGENT_MODEL`), which returns verbatim extracts;
+  the orchestrator never holds the raw sources, so they don't get re-processed every turn.
+- **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
+  page you (Step 5c) rather than burning budget unattended.
+- **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent
+  reviews the whole plan diff; only severity-gated findings are auto-fixed (Sonnet/Haiku),
+  the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`; disable with `RUN_REVIEW`.
+- **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
+  and branches are removed after their group's gate-verify passes (Step 5b.4); the
+  integration worktree stays on disk until you decide (merge, delete, etc.).
+- **Phases commit, but only to the worktree branch** — each phase commits its own work
+  (required so the parallel merge and the Step 8 review diff can see it; see 5b.2). Those
+  commits stay on the integration/child branch in the worktree — nothing is pushed or merged
+  to `main`. The branch is yours to review, squash, merge, or discard.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

@@ -13,8 +13,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with quality verification and task tracking |
-| deep-dive | `/workflow-kit:deep-dive` | Rescue a stuck phase with a stronger-model sub-agent when implement-plan hits 3x verify failure |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix |
 
 #### Composable Skills
 
@@ -88,7 +87,6 @@ After installation, skills are available as slash commands:
 ```
 /workflow-kit:feature-plan      # Plan a feature
 /workflow-kit:implement-plan    # Execute a plan
-/workflow-kit:deep-dive         # Rescue a stuck phase with a stronger model
 /dev-toolkit:pr-review          # Review a GitHub PR
 /dev-toolkit:skill-sharpener    # Improve skills from session data
 /dev-toolkit:notify-me          # Send macOS notification
@@ -103,11 +101,10 @@ q-skills/
   plugins/
     workflow-kit/
       .claude-plugin/
-        plugin.json           # Plugin manifest (v1.0.0)
+        plugin.json           # Plugin manifest (v1.1.0)
       skills/
         feature-plan/         # Feature planning skill
-        implement-plan/       # Plan execution skill
-        deep-dive/            # Stuck-phase rescue skill
+        implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)

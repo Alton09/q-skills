@@ -47,7 +47,7 @@ calls after each phase. Run them manually before merging.
 ## Return Values
 
 **On failure** — return `fail` followed by the raw Gradle output verbatim. Do not summarize or truncate.
-implement-plan retries up to 3x on fail; deep-dive reads the raw output to diagnose the issue.
+implement-plan retries on fail (bounded by SELF_VERIFY_LIMIT); the opus escalation pass reads the raw output to diagnose the issue.
 
 ```
 fail

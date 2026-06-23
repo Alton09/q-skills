@@ -45,16 +45,21 @@ Standalone dev utilities that work independently of any planning pipeline.
 
 ## Installation
 
-1. Clone the repo:
+1. Add the marketplace directly from GitHub (no clone required):
 
 ```bash
-git clone https://github.com/Alton09/q-skills.git ~/Workspace/q-skills
+claude plugin marketplace add Alton09/q-skills
 ```
 
-2. Add the local directory as a marketplace and install each plugin:
+   The `owner/repo` shorthand above works, as does the full URL:
 
 ```bash
-claude plugin marketplace add /path/to/q-skills
+claude plugin marketplace add https://github.com/Alton09/q-skills
+```
+
+2. Install each plugin:
+
+```bash
 claude plugin install workflow-kit
 claude plugin install dev-toolkit
 ```
@@ -66,6 +71,17 @@ claude plugin install dev-toolkit
 ```
 
 Run `/doctor` to confirm no errors.
+
+### Local development install
+
+Developing the plugins locally? Point the marketplace at your working copy instead:
+
+```bash
+git clone https://github.com/Alton09/q-skills.git ~/Workspace/q-skills
+claude plugin marketplace add ~/Workspace/q-skills
+claude plugin install workflow-kit
+claude plugin install dev-toolkit
+```
 
 ## Updating
 

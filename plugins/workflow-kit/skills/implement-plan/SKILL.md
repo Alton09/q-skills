@@ -56,7 +56,7 @@ and owns the pass/fail decision and task tracking.
 4. **Plan Structure** — work from the delegated parse extract
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
-7. **Task Tracking** — check off completed phases in plan file
+7. **Task Tracking** — mirror phases into the orchestrator's built-in TodoWrite checklist (live in-session status) and check off completed phases in the plan file
 8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
 9. **Report** — summary, per-phase models, review outcome, worktree path, status
 
@@ -167,6 +167,14 @@ Known edge cases to handle.
 ```
 
 Key: Each phase is a section with checkboxes for tasks. The skill tracks and updates these.
+
+**Seed the orchestrator's built-in TodoWrite checklist now.** Before delegating any phase,
+create one TodoWrite item per phase (`pending`), plus a final item for the Step 8 review. This
+is the orchestrator's own live in-session tracker — it is separate from, and kept in sync with,
+the plan-file checkboxes. Mark exactly one item `in_progress` at a time as phases run (or the
+current parallel group), and flip items to `completed` in lockstep with Step 7. Do NOT use
+TodoWrite inside phase sub-agents — only the orchestrator owns this list, so it reflects true
+cross-phase progress.
 
 ## Step 5: Phase Delegation
 
@@ -282,11 +290,15 @@ the user-wait steps: **`references/escalation.md`**.
 
 ## Step 7: Task Tracking
 
-When a phase passes verification, update the plan file locally:
+When a phase passes verification, update BOTH trackers together:
 
-1. Read the plan file
-2. Change phase checkbox from `- [ ]` to `- [x]`
-3. Write the updated plan back to the file
+1. Mark that phase's TodoWrite item `completed` (and set the next phase / group `in_progress`)
+2. Read the plan file
+3. Change phase checkbox from `- [ ]` to `- [x]`
+4. Write the updated plan back to the file
+
+The TodoWrite checklist is the orchestrator's built-in live status; the plan-file checkboxes are
+the durable on-disk record. Keep them in lockstep — never advance one without the other.
 
 Then print updated plan state so user can see progress:
 
@@ -480,5 +492,9 @@ Add ability to mark recipes as favorites and filter by them.
   (required so the parallel merge and the Step 8 review diff can see it; see 5b.2). Those
   commits stay on the integration/child branch in the worktree — nothing is pushed or merged
   to `main`. The branch is yours to review, squash, merge, or discard.
+- **Two synced trackers** — the orchestrator seeds a built-in TodoWrite checklist (one item per
+  phase + a review item) at Step 4 and flips items `in_progress`/`completed` in lockstep with the
+  plan-file checkboxes (Step 7). TodoWrite is the live in-session view; the plan file is the
+  durable record. Only the orchestrator writes the checklist — phase sub-agents never do.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

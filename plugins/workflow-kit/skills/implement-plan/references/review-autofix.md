@@ -11,9 +11,9 @@ the raw diff.
 
 ## 8a. Delegate the review (Opus)
 
-Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Payload:
+Spawn ONE review sub-agent with `model: opus` (background; 5b guard applies). Payload:
 
-- Integration worktree path + the base ref. Phases commit to the integration branch (5b.2)
+- Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
   of the whole plan**: `git -C <integration> diff <base>...HEAD` — the local committed diff,
   not a PR. (This diff is non-empty precisely because phases commit; uncommitted work would be
@@ -21,7 +21,6 @@ Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Pa
 - Invoke the project's review skill (`REVIEW_SKILL`, default `/code-review`) on that diff. It
   must be **non-interactive** — running headless in a sub-agent, an interactive review skill
   like `/pr-review` (which prompts for finding selection / posting) would stall.
-- The architecture digest (5a) so findings respect project rules.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
 
@@ -41,16 +40,16 @@ If the auto-fix queue is empty, skip to 8d.
 ## 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
 
 Review findings cluster on shared files, so fixes run **in the integration worktree, not in
-parallel** — parallel fix agents would collide (the Step 5b file-overlap problem). Bundle
+parallel** — parallel fix agents would collide (the Step 5a file-overlap problem). Bundle
 the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
 
 1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
-   inference); use the max across the bundle. Same table as Step 5b.2. (Escalate to `opus`
+   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to `opus`
    only for genuinely tricky fixes.)
-2. Spawn ONE fix sub-agent (background; 5c guard) in the integration worktree. Payload: the
-   verbatim findings to fix, the architecture digest, and the **same two-tier verify
-   contract as Step 5** — "after fixing, run /verify and iterate while warm (bounded by
-   `SELF_VERIFY_LIMIT`); report your self-verify result."
+2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
+   verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
+   fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your
+   self-verify result."
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — independent confirmation, exactly as for a phase.
 4. Gate fail → the Step 6 retry / escalation path, unchanged.

@@ -1,4 +1,4 @@
-# Runaway Guard (Step 5c)
+# Runaway Guard (Step 5b)
 
 Referenced from `SKILL.md` Step 5. Applies to every sub-agent the orchestrator spawns —
 phase, retry, escalation, review, and fix agents.

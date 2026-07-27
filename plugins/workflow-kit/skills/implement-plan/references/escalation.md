@@ -5,10 +5,10 @@ gate-verify on all `SELF_VERIFY_LIMIT` attempts.
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation
 loop, but with a stronger model and an extended budget. This is not a separate skill: it
-reuses the orchestrator + sub-agent + two-tier-verify + 5c-guard machinery already defined,
+reuses the orchestrator + sub-agent + two-tier-verify + 5b-guard machinery already defined,
 so the rescue attempt inherits the runaway guard automatically.
 
-**Group failures.** When the failure is a parallel group's *integration* verify (5b.3
+**Group failures.** When the failure is a parallel group's *integration* verify (5a.3
 step 6), the escalation operates on the merged integration worktree and covers ALL member
 phases as a unit. The BLOCKED/HALTED marker is attached to the **first phase heading in the
 group**, with a note listing every member phase. Everywhere "the failed phase" appears
@@ -34,17 +34,17 @@ below, read it as "the failed phase or group."
    Write the updated plan back to disk before the escalation pass. This way, if the session
    ends mid-rescue, the plan still reflects reality and a future run can pick up the thread.
 
-3. **Run the escalation pass** (reuse Step 5b.2 handoff + 5b.3 single-phase execution +
+3. **Run the escalation pass** (reuse Step 5a.2 handoff + 5a.3 single-phase execution +
    Step 6 gate-verify), with these overrides:
    - **Model forced to `opus`** regardless of the phase's complexity classification.
-   - **Extended 5c budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET` instead
+   - **Extended 5b budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET` instead
      of the per-phase defaults (these are the hardest cases; don't strangle the rescue).
    - **Richer payload** — beyond the normal phase handoff, include the full failure history
      from step 1 and an explicit instruction: *"diagnose the root cause from the prior
      attempts and errors BEFORE writing any fix; do not just re-run the same approach."*
      This is what makes the escalation more than a model bump.
    - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
-     self-verify) → gate-verify, same as a phase. The runaway guard (5c, extended budget)
+     self-verify) → gate-verify, same as a phase. The runaway guard (5b, extended budget)
      applies to every escalation attempt.
 4. Outcome:
    - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the

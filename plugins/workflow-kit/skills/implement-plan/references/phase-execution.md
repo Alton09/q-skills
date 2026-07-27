@@ -1,10 +1,10 @@
-# Phase Scheduling, Handoff & Layer Execution (Step 5b)
+# Phase Scheduling, Handoff & Layer Execution (Step 5a)
 
 Referenced from `SKILL.md` Step 5. The orchestrator schedules phases by the plan's
 dependency graph, builds each phase's cold-start handoff, and executes layers — running
 independent phases in parallel and dependent phases in order.
 
-## 5b.1 Build the execution schedule
+## 5a.1 Build the execution schedule
 
 feature-plan encodes dependencies two ways — use both:
 
@@ -36,7 +36,7 @@ the worktree.
 Cap concurrency at `MAX_PARALLEL_AGENTS` (default 3); if a group is larger, run it in
 batches of that size.
 
-## 5b.2 Per-phase handoff payload
+## 5a.2 Per-phase handoff payload
 
 For each phase (sequential or parallel), build its handoff:
 
@@ -56,17 +56,13 @@ Record the chosen model per phase for the final report.
 everything the phase needs:
 
 - Plan file path + the **verbatim task list for this phase only**
-- **Worktree path** — depends on how the phase runs (see 5b.3):
+- **Worktree path** — depends on how the phase runs (see 5a.3):
   - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
   - *Parallel phase* → its own **child worktree** that the orchestrator created off
     integration HEAD; the agent works ONLY inside that child worktree.
   In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
   every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
   edits and breaks carry-forward. Edits never touch `main`.
-- **(Optional) project architecture context** — this skill loads none itself; it comes from
-  the project harness (see SKILL.md 5a). If the project surfaces rules through a doc or
-  skill, reference it here so the cold-start agent honors it; rules in the project's
-  inherited CLAUDE.md reach the agent automatically and need no mention.
 - **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
   key decisions, public interfaces introduced — covering **all completed prerequisite
   phases**, so this phase builds correctly on what came before. (Within a parallel group,
@@ -76,7 +72,7 @@ everything the phase needs:
   final /verify result (pass/fail) and any remaining errors verbatim."
 - **Commit instruction**: "When your self-verify is done, stage and commit your phase's
   work on the current branch (`git add -A && git commit -m \"<phase name>\"`)." This is
-  load-bearing, not optional: the parallel merge (5b.3) and the Step 8 review diff both read
+  load-bearing, not optional: the parallel merge (5a.3) and the Step 8 review diff both read
   **committed** history — uncommitted work is invisible to the merge and to the reviewer. The
   commit lands on the worktree/child branch only; nothing is pushed or merged to `main` (see
   SKILL.md Notes).
@@ -86,17 +82,17 @@ everything the phase needs:
   next phase needs, your final self-verify result (pass/fail + remaining errors), and
   any tasks you could not complete.
 
-## 5b.3 Execute each layer
+## 5a.3 Execute each layer
 
-Walk layers in topological order (5b.1). Every phase agent is spawned with the Agent tool
+Walk layers in topological order (5a.1). Every phase agent is spawned with the Agent tool
 and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
-the orchestrator needs: it stays responsive instead of blocking (so it can run the 5c
+the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
 wall-clock guard, and watch several agents at once), and each agent is cancellable via
 `TaskStop`. The completion notification carries the agent's total token count and
-duration, which feeds the 5c ceiling check.
+duration, which feeds the 5b ceiling check.
 
 **Single-phase layer (the common case — unchanged from sequential):**
-1. Spawn the phase agent in the integration worktree (background; 5c guard applies).
+1. Spawn the phase agent in the integration worktree (background; 5b guard applies).
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
@@ -111,20 +107,20 @@ duration, which feeds the 5c ceiling check.
    git -C <integration> worktree add <integration>/../.wt/<phase-slug> -b <phase-branch>
    ```
 2. Spawn all phase agents concurrently (background), each pointed at its own child
-   worktree, capped at `MAX_PARALLEL_AGENTS`. The 5c runaway guard applies per agent.
+   worktree, capped at `MAX_PARALLEL_AGENTS`. The 5b runaway guard applies per agent.
 3. When ALL agents in the group have returned, merge each child branch into integration
-   in turn (each agent committed its work per 5b.2, so there is something to merge):
+   in turn (each agent committed its work per 5a.2, so there is something to merge):
    ```
    git -C <integration> merge --no-ff <phase-branch>
    ```
-   A clean merge is expected (disjoint files by 5b.1). A real conflict = treat that phase
+   A clean merge is expected (disjoint files by 5a.1). A real conflict = treat that phase
    as failed: keep its child worktree for inspection and enter the Step 6 retry path on
    the conflicted phase.
 4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
    child can pass alone yet break once merged.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
    passes — check off ALL phases in the group (Step 7), append every member's summary to
-   the carry-forward, then clean up (5b.4) and advance to the next layer.
+   the carry-forward, then clean up (5a.4) and advance to the next layer.
 6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
    on the merged integration worktree (warm: read the full merged diff + verbatim error),
@@ -134,11 +130,11 @@ duration, which feeds the 5c ceiling check.
    marker is attached to the **first phase heading in the group**, with a note listing all
    member phases. Do NOT clean up child worktrees until the group finally passes.
 
-## 5b.4 Clean up child worktrees
+## 5a.4 Clean up child worktrees
 
 Child worktrees and branches are ephemeral scaffolding — remove them once their work is
 safely in integration. Clean up a group's children ONLY after the group's integration
-gate-verify passes (5b.3 step 5):
+gate-verify passes (5a.3 step 5):
 
 ```
 git -C <integration> worktree remove <integration>/../.wt/<phase-slug>

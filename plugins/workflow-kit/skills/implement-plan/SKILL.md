@@ -28,8 +28,7 @@ and owns the pass/fail decision and task tracking.
   creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
   parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
   escalation (forced-opus rescue pass), checkbox updates, reporting. Holds all cross-phase
-  state. Never
-  runs `/verify` in its own context — it delegates it to keep its window clean.
+  state. Never runs `/verify` in its own context — it delegates it to keep its window clean.
 - **Phase sub-agent** (one per phase, model auto-selected): implements exactly one
   phase's tasks inside its assigned worktree (the shared integration worktree when run
   sequentially, or a dedicated child worktree when run in a parallel group), runs
@@ -105,8 +104,8 @@ load-bearing data exactly:
   task lines** (do not paraphrase or drop tasks).
 - Also return the parallel/sequential tag per phase from the dependency graph.
 
-Why verbatim: the orchestrator injects each phase's task list into its handoff (5b.2) and
-feeds the `Files` lists into the file-overlap *safety* check (5b.1) — a lossy summary there
+Why verbatim: the orchestrator injects each phase's task list into its handoff (5a.2) and
+feeds the `Files` lists into the file-overlap *safety* check (5a.1) — a lossy summary there
 causes bad scheduling or worktree collisions.
 
 **Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
@@ -175,21 +174,7 @@ the plan's **dependency graph**, not blindly in file order: independent phases r
 linear dependency chain degenerates to one phase agent at a time — the old sequential
 behavior, which is exactly correct for that shape.
 
-### 5a. Architecture context comes from the project harness
-
-This skill loads **no** architecture rules of its own. If a project wants phase agents to
-honor its layering, naming, or forbidden-dependency constraints, it surfaces them through
-its own harness, for example:
-
-- **Inherited project CLAUDE.md** — sub-agents inherit it automatically, so rules placed
-  there reach every phase agent with no work from this skill.
-- **A project-defined skill or doc** referenced in the phase handoff (5b.2), or rules
-  enforced by the project's `/verify`.
-
-The orchestrator injects nothing architecture-specific of its own; whatever the project
-provides flows to sub-agents through those channels.
-
-### 5b. Schedule, handoff, and layer execution
+### 5a. Schedule, handoff, and layer execution
 
 The orchestrator parses the dependency graph into topological **layers**, builds a
 cold-start handoff for each phase (model auto-selected by complexity, plus task list,
@@ -206,10 +191,10 @@ Two rules are load-bearing and easy to get wrong:
   read committed history, so uncommitted work is invisible to both. The commit stays on the
   worktree/child branch; nothing is pushed or merged to `main`.
 
-→ Full schedule/handoff/execution/cleanup procedure (5b.1–5b.4):
+→ Full schedule/handoff/execution/cleanup procedure (5a.1–5a.4):
 **`references/phase-execution.md`**.
 
-### 5c. Runaway guard
+### 5b. Runaway guard
 
 Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`, paced with
 `ScheduleWakeup` + `TaskStop`) and a **token ceiling** checked on completion
@@ -225,7 +210,7 @@ Verification is **two-tier**:
 
 1. **Warm self-verify (phase agent).** The phase sub-agent runs `/verify` itself and
    iterates on failures while it still holds full context of the code it just wrote
-   (Step 5b payload). This catches most issues in-context, with no cold re-derivation,
+   (Step 5a payload). This catches most issues in-context, with no cold re-derivation,
    and is bounded by `SELF_VERIFY_LIMIT` so it can't loop forever.
 
 2. **Authoritative gate-verify (delegated).** Self-report on one's own gate is not a
@@ -235,7 +220,7 @@ Verification is **two-tier**:
    output into the expensive Opus window every phase. It gets back only `pass | fail +
    verbatim errors`.
 
-**Gate-verify model** — classify like a phase (Step 5b), by what the project's `/verify`
+**Gate-verify model** — classify like a phase (Step 5a), by what the project's `/verify`
 actually does:
 
 | `/verify` nature | gate-agent `model` |
@@ -250,11 +235,11 @@ reports.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
-  The prior phase work is committed (5b.2), so instruct the retry agent to FIRST read the
+  The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
-  same commit contract as 5b.2. Pass the verbatim gate-verify error plus the prior summary.
-  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5c applies to retry
+  same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary.
+  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b applies to retry
   sub-agents too.)
 - A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
   the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
@@ -265,7 +250,7 @@ reports.
 **On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation loop
-with the model forced to `opus`, an extended 5c budget (`ESCALATION_TOKEN_CEILING` /
+with the model forced to `opus`, an extended 5b budget (`ESCALATION_TOKEN_CEILING` /
 `ESCALATION_TIME_BUDGET`), a richer payload (full failure history + "diagnose root cause
 before fixing"), and capped at `ESCALATION_ATTEMPTS` (default 2). It reuses the existing
 machinery, so it inherits the runaway guard automatically — not a separate skill. The plan
@@ -376,17 +361,17 @@ Projects can override via environment or project CLAUDE.md:
 - `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
   `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
 - `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
-  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5b);
+  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5a);
   and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
   escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
-  completion (Step 5c). Now budgets impl + warm self-verify together. Defaults by model:
-  `haiku` 80k / `sonnet` 150k / `opus` 250k. Single source for these numbers — Step 5c
+  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by model:
+  `haiku` 80k / `sonnet` 150k / `opus` 250k. Single source for these numbers — Step 5b
   references it.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
-  sub-agent (Step 5c). Default 15 min; scale up for `opus` phases.
+  sub-agent (Step 5b). Default 15 min; scale up for `opus` phases.
 - `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
   before HALTED / user-wait. Default 2.
 - `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
@@ -395,7 +380,7 @@ Projects can override via environment or project CLAUDE.md:
 - `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
   30 min.
 - `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
-  (Step 5b.1/5b.3). Default 3; larger groups run in batches of this size.
+  (Step 5a.1/5a.3). Default 3; larger groups run in batches of this size.
 - `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
   Default `true`; set `false` to stop after implementation.
 - `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
@@ -458,22 +443,22 @@ Add ability to mark recipes as favorites and filter by them.
   isolated child worktrees (merged back into integration), dependent phases run after
   their prerequisites via the carry-forward summary. A linear plan degenerates to pure
   sequential. Logical independence never overrides file-overlap: phases sharing a file
-  are demoted to sequential (Step 5b.1).
+  are demoted to sequential (Step 5a.1).
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before the group is checked off and advanced.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
   (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
   raw source, so it doesn't get re-processed every turn.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
-  page you (Step 5c) rather than burning budget unattended.
+  page you (Step 5b) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent
   reviews the whole plan diff; only severity-gated findings are auto-fixed (Sonnet/Haiku),
   the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`; disable with `RUN_REVIEW`.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
-  and branches are removed after their group's gate-verify passes (Step 5b.4); the
+  and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).
 - **Phases commit, but only to the worktree branch** — each phase commits its own work
-  (required so the parallel merge and the Step 8 review diff can see it; see 5b.2). Those
+  (required so the parallel merge and the Step 8 review diff can see it; see 5a.2). Those
   commits stay on the integration/child branch in the worktree — nothing is pushed or merged
   to `main`. The branch is yours to review, squash, merge, or discard.
 - **User review is required** — don't merge automatically, inspect first

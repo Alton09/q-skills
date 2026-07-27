@@ -63,8 +63,10 @@ everything the phase needs:
   In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
   every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
   edits and breaks carry-forward. Edits never touch `main`.
-- The architecture digest from 5a — retain the non-negotiable rules (layering,
-  forbidden dependencies, naming) **verbatim**; paraphrase only the soft guidance
+- **(Optional) project architecture context** — this skill loads none itself; it comes from
+  the project harness (see SKILL.md 5a). If the project surfaces rules through a doc or
+  skill, reference it here so the cold-start agent honors it; rules in the project's
+  inherited CLAUDE.md reach the agent automatically and need no mention.
 - **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
   key decisions, public interfaces introduced — covering **all completed prerequisite
   phases**, so this phase builds correctly on what came before. (Within a parallel group,

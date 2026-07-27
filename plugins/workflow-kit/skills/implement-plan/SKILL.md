@@ -35,10 +35,9 @@ and owns the pass/fail decision and task tracking.
   sequentially, or a dedicated child worktree when run in a parallel group), runs
   `/verify` and iterates on failures while warm (bounded), then returns a structured
   summary including its self-verify result. Does not touch the plan file or advance phases.
-- **Prep sub-agent** (`PREP_AGENT_MODEL`, default `sonnet`): runs the one-time setup reads
+- **Prep sub-agent** (`PREP_AGENT_MODEL`, default `sonnet`): runs the one-time setup read
   the orchestrator shouldn't pull into its window — parses the plan into a verbatim
-  normalized extract (Step 1) and distills the `/clean-architecture` digest (Step 5a).
-  Returns load-bearing data verbatim; makes no decisions.
+  normalized extract (Step 1). Returns load-bearing data verbatim; makes no decisions.
 - **Gate-verify sub-agent** (one per phase after the phase agent returns, model by
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
@@ -176,29 +175,27 @@ the plan's **dependency graph**, not blindly in file order: independent phases r
 linear dependency chain degenerates to one phase agent at a time — the old sequential
 behavior, which is exactly correct for that shape.
 
-### 5a. Load architecture rules once (delegated)
+### 5a. Architecture context comes from the project harness
 
-Before the first phase, get the **architecture digest** — but don't pull the whole
-`/clean-architecture` rules doc into the orchestrator window (it would sit in the persistent
-context and be re-processed every turn for the entire run). Delegate the read + distill to
-ONE prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`):
+This skill loads **no** architecture rules of its own. If a project wants phase agents to
+honor its layering, naming, or forbidden-dependency constraints, it surfaces them through
+its own harness, for example:
 
-- Instruct it to invoke `/clean-architecture`, then return a short digest of the
-  **load-bearing constraints only** — layering, forbidden dependencies, naming.
-- **Hard rules verbatim, soft guidance paraphrased.** This is extraction, not free
-  summarization: a garbled forbidden-dependency rule propagates to every sub-agent. (Sonnet,
-  not haiku, for exactly this judgment.)
+- **Inherited project CLAUDE.md** — sub-agents inherit it automatically, so rules placed
+  there reach every phase agent with no work from this skill.
+- **A project-defined skill or doc** referenced in the phase handoff (5b.2), or rules
+  enforced by the project's `/verify`.
 
-The orchestrator holds only the returned digest and injects it verbatim into every sub-agent
-prompt — sub-agents start cold and cannot cheaply re-derive it.
+The orchestrator injects nothing architecture-specific of its own; whatever the project
+provides flows to sub-agents through those channels.
 
 ### 5b. Schedule, handoff, and layer execution
 
 The orchestrator parses the dependency graph into topological **layers**, builds a
 cold-start handoff for each phase (model auto-selected by complexity, plus task list,
-worktree path, architecture digest, carry-forward, and self-verify + commit instructions),
-then walks the layers: single-phase layers run in the integration worktree; multi-phase
-layers fan out into **sibling** child worktrees, merge back, and advance atomically.
+worktree path, carry-forward, and self-verify + commit instructions), then walks the layers:
+single-phase layers run in the integration worktree; multi-phase layers fan out into
+**sibling** child worktrees, merge back, and advance atomically.
 
 Two rules are load-bearing and easy to get wrong:
 
@@ -372,10 +369,9 @@ If hard-stopped due to failure:
 
 Projects can override via environment or project CLAUDE.md:
 
-- `PREP_AGENT_MODEL` — model for the delegated setup reads: the plan parse (Step 1) and the
-  architecture digest (Step 5a). Default `sonnet` — keeps the raw plan + rules doc out of the
-  orchestrator's persistent window while preserving load-bearing data verbatim. (Avoid
-  `haiku` here: both extracts are load-bearing and need light judgment.)
+- `PREP_AGENT_MODEL` — model for the delegated plan parse (Step 1). Default `sonnet` — keeps
+  the raw plan out of the orchestrator's persistent window while preserving the load-bearing
+  extract verbatim. (Avoid `haiku`: the extract is load-bearing and needs light judgment.)
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
   `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
@@ -465,9 +461,9 @@ Add ability to mark recipes as favorites and filter by them.
   are demoted to sequential (Step 5b.1).
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before the group is checked off and advanced.
-- **The orchestrator window stays lean** — the raw plan and the `/clean-architecture` rules
-  doc are read by a cheap prep agent (`PREP_AGENT_MODEL`), which returns verbatim extracts;
-  the orchestrator never holds the raw sources, so they don't get re-processed every turn.
+- **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
+  (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
+  raw source, so it doesn't get re-processed every turn.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5c) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent

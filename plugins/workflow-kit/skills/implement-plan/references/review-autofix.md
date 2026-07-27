@@ -21,7 +21,8 @@ Spawn ONE review sub-agent with `model: opus` (background; 5c guard applies). Pa
 - Invoke the project's review skill (`REVIEW_SKILL`, default `/code-review`) on that diff. It
   must be **non-interactive** — running headless in a sub-agent, an interactive review skill
   like `/pr-review` (which prompts for finding selection / posting) would stall.
-- The architecture digest (5a) so findings respect project rules.
+- Project architecture context, if the project surfaces any (see SKILL.md 5a), so findings
+  respect project rules — the inherited project CLAUDE.md applies automatically.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
 
@@ -48,9 +49,9 @@ the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
    inference); use the max across the bundle. Same table as Step 5b.2. (Escalate to `opus`
    only for genuinely tricky fixes.)
 2. Spawn ONE fix sub-agent (background; 5c guard) in the integration worktree. Payload: the
-   verbatim findings to fix, the architecture digest, and the **same two-tier verify
-   contract as Step 5** — "after fixing, run /verify and iterate while warm (bounded by
-   `SELF_VERIFY_LIMIT`); report your self-verify result."
+   verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
+   fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your
+   self-verify result."
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — independent confirmation, exactly as for a phase.
 4. Gate fail → the Step 6 retry / escalation path, unchanged.

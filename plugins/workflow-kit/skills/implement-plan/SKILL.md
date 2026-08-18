@@ -292,7 +292,7 @@ the **layer-SHA ledger** you hold in cross-phase state:
 layer 2  phases: [Data, Cache]  sha: <git rev-parse HEAD in the integration worktree>
 ```
 
-Step 9 cuts one stacked-PR branch per layer at these SHAs. They can only be captured here —
+Step 9 hands these SHAs to `PR_SKILL` as stack cut points. They can only be captured here —
 once a parallel group's merges are behind you, its commits are interleaved and the layer
 boundary is gone.
 
@@ -320,35 +320,28 @@ Runs only after Step 8 has fully settled — every review round finished, every 
 committed and gate-verified. Branches cut before that would leave fix commits outside the
 PRs people actually review.
 
-`CREATE_PR` defaults to **true**, so a successful run ends with pushed branches and open
-draft PRs. That is a deliberate change from this skill's earlier "nothing leaves the
-worktree" contract: drafts don't merge anything, and the alternative — a finished branch
-sitting on disk — is where this work used to stall. Set `CREATE_PR=false` to keep the old
-behavior. Skip silently and explain in Step 10 if any precondition fails (no remote, `gh`
-not authenticated, plan not fully checked off, BLOCKED/HALTED phases).
+**Delegate to `PR_SKILL`** (default `/dev-toolkit:create-pr`). It owns measuring the branch,
+choosing single-PR vs stacked, and driving `gh` — none of which is plan-execution work, and
+all of which a project may want to swap out (GitLab, internal tooling). Hand it:
 
-The shape depends on size, measured as **production lines added + deleted** — excluding
-tests, generated code, comments, and blanks, because the threshold is about reviewer burden:
+- the integration worktree path and branch
+- `PR_BASE_BRANCH`
+- the **layer-SHA ledger** from Step 7, oldest-first — these are its cut points, and they are
+  better than anything it could derive on its own, because each one is a checkpoint that
+  passed its gate-verify
+- the plan path and Overview, for PR titles and bodies
+- the Step 8 review outcome, which belongs in the top PR's body
 
-```
-scripts/count-prod-lines.sh <base>...HEAD
-```
+`CREATE_PR` defaults to **true**, so a successful run ends with pushed branches and open draft
+PRs. That is a deliberate change from this skill's earlier "nothing leaves the worktree"
+contract: drafts merge nothing, and a finished branch sitting on disk is where this work used
+to stall. Set `CREATE_PR=false` to end at the local branch.
 
-- `PROD_LINES` ≤ `STACK_THRESHOLD_LINES` (default 500) → **one draft PR** off the
-  integration branch.
-- Over the threshold with ≥2 layers in the ledger → a **stack of draft PRs**, one per
-  topological layer, bottom targeting the trunk and each one above targeting the branch
-  below it. Layers are the only honest cut point: phases inside a parallel group are
-  interleaved by their merge and can't be separated afterwards.
-- Over the threshold with a single layer → one PR plus a warning with the count. Nothing to
-  stack against.
-
-Step 8's fix commits sit on integration HEAD, so they land in the **top** PR rather than the
-layer that owns each file. Call that out in the top PR's body and in Step 10 — a reviewer
-looking for them in the owning layer won't find them.
-
-→ Preconditions, the counting contract, `gh stack` mechanics, PR body templates, and the
-full fallback matrix: **`references/pr-creation.md`**.
+Don't prompt the user mid-run about any of this — but always report the outcome in Step 10,
+including the reason when nothing was opened. Skip when `CREATE_PR=false`, when `PR_SKILL` is
+absent (say which plugin provides it), or when the plan hard-stopped or has BLOCKED/HALTED
+phases. If the ledger has fewer than two entries there is nothing to stack against; the PR
+skill handles that itself and opens a single PR.
 
 ## Step 10: Final Report
 
@@ -380,11 +373,7 @@ Once all phases are checked off:
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## Pull Request
-- Production lines changed: <PROD_LINES> (added <A> / deleted <D>, excludes tests, comments,
-  generated code) vs threshold <STACK_THRESHOLD_LINES> → <single PR | stack of N>
-- <url> — [1/N] <layer phases>
-- <url> — [2/N] <layer phases>
-- All opened as drafts; merge bottom-up (layer 1 first)
+- <as reported by PR_SKILL: urls, per-layer sizes, merge order>
 - Review auto-fixes are in the top PR, not the layers that own the files
 
 (or: `PR creation skipped — <reason>`)
@@ -455,16 +444,13 @@ Projects can override via environment or project CLAUDE.md:
   Default: high / correctness and above; lower-severity findings are reported, not touched.
 - `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
   open (Step 8d). Default 2.
-- `CREATE_PR` — whether Step 9 pushes and opens PRs. Default `true`; set `false` to end at
-  the local worktree branch.
-- `PR_BASE_BRANCH` — trunk the bottom/single PR targets. Default: the repo's default branch.
-- `PR_DRAFT` — open PRs as drafts. Default `true`, matching "user review is required".
-- `STACK_THRESHOLD_LINES` — production lines changed (added + deleted) above which Step 9
-  splits into a stack instead of one PR. Default 500.
-- `PR_PROD_EXCLUDES` — space-separated git pathspecs replacing the counting script's default
-  test/generated excludes. Set it when the project's test layout is unusual (e.g. tests in
-  `spec/`); the defaults already cover `**/test/**`, `**/androidTest/**`, `**/*Test.*`,
-  `**/*.spec.*`, build output, vendored code, and non-code files.
+- `CREATE_PR` — whether Step 9 opens PRs. Default `true`; set `false` to end at the local
+  worktree branch.
+- `PR_SKILL` — skill that opens the PRs (Step 9). Default `/dev-toolkit:create-pr`, which
+  measures the branch and stacks it when it exceeds its own threshold. Swap it for a
+  project-local equivalent on non-GitHub hosts. Its own knobs (`PR_BASE_BRANCH`,
+  `STACK_THRESHOLD_LINES`, `PR_DRAFT`, `PR_PROD_EXCLUDES`) are documented there, not here —
+  one owner per setting.
 
 ## Plan Format Example
 
@@ -498,11 +484,12 @@ cleanly in Step 1 and you need to show them the expected shape.
   integration worktree stays on disk until you decide (merge, delete, etc.).
 - **Phases commit locally; only Step 9 pushes** — each phase commits its own work (required
   so the parallel merge and the Step 8 review diff can see it; see 5a.2). Nothing leaves the
-  machine until Step 9, which pushes the branches and opens **draft** PRs. Nothing is ever
-  merged for you.
-- **Big changes ship as a stack** — over `STACK_THRESHOLD_LINES` production lines (tests,
-  comments, and generated code excluded), Step 9 splits the branch into one draft PR per
-  dependency layer so each is reviewable on its own. Layer cut points come from the SHA
-  ledger recorded during Step 7 — they cannot be reconstructed after the fact.
+  machine until Step 9, which delegates to `PR_SKILL` to push the branches and open **draft**
+  PRs. Nothing is ever merged for you.
+- **Big changes ship as a stack** — `PR_SKILL` splits a branch that changed a lot of
+  production code into one draft PR per dependency layer, so each is reviewable on its own.
+  The cut points come from the SHA ledger recorded during Step 7; they cannot be
+  reconstructed afterwards, which is why the ledger is written as layers pass rather than
+  computed at the end.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

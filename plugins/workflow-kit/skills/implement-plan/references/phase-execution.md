@@ -158,7 +158,7 @@ layer 1  phases: [Domain]         sha: a1b2c3d
 layer 2  phases: [Data, Cache]    sha: e4f5a6b
 ```
 
-Step 9 cuts one stacked-PR branch per entry (`references/pr-creation.md` 9d). Record it at
+Step 9 hands this ledger to `PR_SKILL`, which cuts one stacked-PR branch per entry. Record it at
 the moment the layer's gate-verify passes — for a parallel group, after its merges land.
 Afterwards the boundary is unrecoverable: the group's commits are interleaved by the merge,
 and no later `git log` walk can tell you which prefix of history was "layer 2".

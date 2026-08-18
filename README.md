@@ -27,11 +27,10 @@ your project's `.claude/skills/` before running implement-plan or feature-plan:
 | `/clean-architecture` | Required | Load layer rules and naming conventions into context |
 | `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
 
-implement-plan's final step pushes the branch and opens **draft** pull requests via the `gh`
-CLI (authenticated `gh auth status` required). Stacked PRs additionally need the
-[`github/gh-stack`](https://github.com/github/gh-stack) extension — without it the PRs are
-still chained by base branch, just without GitHub's stack UI. Set `CREATE_PR=false` to stop
-at the local worktree branch instead.
+implement-plan's final step delegates to `PR_SKILL` (default `/dev-toolkit:create-pr`) to
+open **draft** pull requests — so running the full pipeline means installing dev-toolkit too.
+If it's absent, implement-plan reports that and stops at the local branch; `CREATE_PR=false`
+disables the step outright.
 
 See [`examples/android/`](examples/android/) for a working reference implementation targeting
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those
@@ -46,6 +45,7 @@ Standalone dev utilities that work independently of any planning pipeline.
 | Skill | Command | Description |
 |-------|---------|-------------|
 | pr-review | `/dev-toolkit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
+| create-pr | `/dev-toolkit:create-pr` | Open a draft PR for a branch — split into stacked PRs when it changes more than 500 production lines |
 | skill-sharpener | `/dev-toolkit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
 | notify-me | `/dev-toolkit:notify-me` | Send macOS system notifications during long-running tasks (macOS only) |
 
@@ -131,6 +131,7 @@ q-skills/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)
       skills/
+        create-pr/            # Draft PR creation, stacked when large
         pr-review/            # GitHub PR review skill
         skill-sharpener/      # Skill improvement skill
         notify-me/            # macOS notification skill

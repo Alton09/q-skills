@@ -1,0 +1,29 @@
+{
+  "skill_name": "create-pr",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "ok i finally finished the offline-sync branch, can you put up a PR? base is main. fair warning it got away from me a bit, theres like 15 commits on there",
+      "expected_output": "Measures production churn, finds it over 500 lines, proposes a balanced multi-layer split with per-layer sizes and commit subjects, and waits for confirmation before creating branches. Does not silently open one huge PR.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "open a pr for this branch please",
+      "expected_output": "Small branch (under threshold). Opens a single draft PR against the default branch without proposing a split or mentioning stacking machinery. Still reports the line count.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "this branch is way too big for one review — its about 900 lines of new kotlin. can we do stacked prs? its all one squashed commit right now though",
+      "expected_output": "Recognizes a single-commit branch cannot be split into a contiguous stack (propose-cuts.sh exits 3), says so plainly, opens one draft PR with the count, and does not fabricate cut points or attempt cherry-picking.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "how many lines does this branch actually change? i only care about real code, not the tests i wrote or the generated protobuf stuff",
+      "expected_output": "Runs count-prod-lines.sh and reports PROD_LINES with the added/deleted split and what was excluded. Does not create any branches or PRs — this is a measurement request only.",
+      "files": []
+    }
+  ]
+}

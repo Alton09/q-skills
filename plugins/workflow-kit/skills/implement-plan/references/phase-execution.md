@@ -96,8 +96,9 @@ duration, which feeds the 5b ceiling check.
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
-4. Gate pass → IMMEDIATELY check off the phase (Step 7), append its summary to the
-   carry-forward, advance. Do not batch checkbox updates — write after each phase.
+4. Gate pass → IMMEDIATELY check off the phase (Step 7), record the layer's head SHA in the
+   ledger (`git -C <integration> rev-parse HEAD`), append its summary to the carry-forward,
+   advance. Do not batch checkbox updates — write after each phase.
 
 **Multi-phase layer (parallel group):**
 1. For each phase, create a child worktree + branch off integration HEAD, as a **sibling**
@@ -119,8 +120,9 @@ duration, which feeds the 5b ceiling check.
 4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
    child can pass alone yet break once merged.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
-   passes — check off ALL phases in the group (Step 7), append every member's summary to
-   the carry-forward, then clean up (5a.4) and advance to the next layer.
+   passes — check off ALL phases in the group (Step 7), record the layer's head SHA in the
+   ledger (`git -C <integration> rev-parse HEAD`, i.e. after every merge has landed), append
+   every member's summary to the carry-forward, then clean up (5a.4) and advance.
 6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
    on the merged integration worktree (warm: read the full merged diff + verbatim error),
@@ -146,3 +148,17 @@ failed delete is a tripwire that the merge didn't actually land — investigate,
 force. If a merge conflicted or the gate failed, KEEP the child worktree so you can
 inspect it. **Never** remove the integration worktree — that is the user's deliverable
 (see SKILL.md Notes / "No auto-cleanup").
+
+## 5a.5 The layer-SHA ledger
+
+Alongside the carry-forward, keep one line per completed layer:
+
+```
+layer 1  phases: [Domain]         sha: a1b2c3d
+layer 2  phases: [Data, Cache]    sha: e4f5a6b
+```
+
+Step 9 cuts one stacked-PR branch per entry (`references/pr-creation.md` 9d). Record it at
+the moment the layer's gate-verify passes — for a parallel group, after its merges land.
+Afterwards the boundary is unrecoverable: the group's commits are interleaved by the merge,
+and no later `git log` walk can tell you which prefix of history was "layer 2".

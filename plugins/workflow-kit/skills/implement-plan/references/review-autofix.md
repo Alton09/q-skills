@@ -32,7 +32,7 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
 
 - **At/above threshold** → auto-fix queue (8c).
 - **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
-  touch. Collect them for the report (Step 9). Auto-fixing a reviewer's opinion churns good
+  touch. Collect them for the report (Step 10). Auto-fixing a reviewer's opinion churns good
   code — leave that call to the user.
 
 If the auto-fix queue is empty, skip to 8d.

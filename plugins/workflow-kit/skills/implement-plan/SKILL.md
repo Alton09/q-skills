@@ -8,7 +8,9 @@ description: |
   with phases and checkboxes) and want to implement it in an isolated worktree with
   full verification and automatic task tracking. An Opus orchestrator delegates each
   phase to a model-matched sub-agent, runs two-tier verification, escalates stuck
-  phases, and reviews the finished diff — see the body for the mechanics.
+  phases, reviews the finished diff, and opens the pull request — as a stack of PRs,
+  one per dependency layer, when the plan changed a lot of production code. See the
+  body for the mechanics.
 
   Perfect for feature implementations, refactors, and bug fixes where you need
   quality gates, per-phase delegation, and progress visibility.
@@ -27,7 +29,8 @@ and owns the pass/fail decision and task tracking.
   building the dependency-graph schedule, per-phase model selection, child-worktree
   creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
   parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
-  escalation (forced-opus rescue pass), checkbox updates, reporting. Holds all cross-phase
+  escalation (forced-opus rescue pass), checkbox updates, the layer-SHA ledger, pull-request
+  creation, reporting. Holds all cross-phase
   state. Never runs `/verify` in its own context — it delegates it to keep its window clean.
 - **Phase sub-agent** (one per phase, model auto-selected): implements exactly one
   phase's tasks inside its assigned worktree (the shared integration worktree when run
@@ -56,7 +59,9 @@ and owns the pass/fail decision and task tracking.
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
-9. **Report** — summary, per-phase models, review outcome, worktree path, status
+9. **Pull Request** — measure production churn; one draft PR, or a stack of draft PRs (one
+   per dependency layer) when it exceeds `STACK_THRESHOLD_LINES`
+10. **Report** — summary, per-phase models, review outcome, PR links, worktree path, status
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -189,7 +194,7 @@ Two rules are load-bearing and easy to get wrong:
   a false-sequential is merely slow.
 - **Every phase commits its work** — the parallel merge and the Step 8 review diff both
   read committed history, so uncommitted work is invisible to both. The commit stays on the
-  worktree/child branch; nothing is pushed or merged to `main`.
+  worktree/child branch; nothing is pushed until Step 9 and nothing is ever merged for you.
 
 → Full schedule/handoff/execution/cleanup procedure (5a.1–5a.4):
 **`references/phase-execution.md`**.
@@ -280,7 +285,20 @@ Phases completed:
 - Phase 4: Documentation (pending)
 ```
 
-The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
+**Also record the layer's head SHA.** When a layer's gate-verify passes, append one line to
+the **layer-SHA ledger** you hold in cross-phase state:
+
+```
+layer 2  phases: [Data, Cache]  sha: <git rev-parse HEAD in the integration worktree>
+```
+
+Step 9 cuts one stacked-PR branch per layer at these SHAs. They can only be captured here —
+once a parallel group's merges are behind you, its commits are interleaved and the layer
+boundary is gone.
+
+The plan file is updated in the integration worktree. If Step 9 is going to run, commit it
+before then (`docs: check off completed phases`) so the tree is clean and the plan's final
+state ships with the PR.
 
 ## Step 8: Plan Review & Auto-fix
 
@@ -296,7 +314,43 @@ below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_R
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
-## Step 9: Final Report
+## Step 9: Pull Request
+
+Runs only after Step 8 has fully settled — every review round finished, every auto-fix
+committed and gate-verified. Branches cut before that would leave fix commits outside the
+PRs people actually review.
+
+`CREATE_PR` defaults to **true**, so a successful run ends with pushed branches and open
+draft PRs. That is a deliberate change from this skill's earlier "nothing leaves the
+worktree" contract: drafts don't merge anything, and the alternative — a finished branch
+sitting on disk — is where this work used to stall. Set `CREATE_PR=false` to keep the old
+behavior. Skip silently and explain in Step 10 if any precondition fails (no remote, `gh`
+not authenticated, plan not fully checked off, BLOCKED/HALTED phases).
+
+The shape depends on size, measured as **production lines added + deleted** — excluding
+tests, generated code, comments, and blanks, because the threshold is about reviewer burden:
+
+```
+scripts/count-prod-lines.sh <base>...HEAD
+```
+
+- `PROD_LINES` ≤ `STACK_THRESHOLD_LINES` (default 500) → **one draft PR** off the
+  integration branch.
+- Over the threshold with ≥2 layers in the ledger → a **stack of draft PRs**, one per
+  topological layer, bottom targeting the trunk and each one above targeting the branch
+  below it. Layers are the only honest cut point: phases inside a parallel group are
+  interleaved by their merge and can't be separated afterwards.
+- Over the threshold with a single layer → one PR plus a warning with the count. Nothing to
+  stack against.
+
+Step 8's fix commits sit on integration HEAD, so they land in the **top** PR rather than the
+layer that owns each file. Call that out in the top PR's body and in Step 10 — a reviewer
+looking for them in the owning layer won't find them.
+
+→ Preconditions, the counting contract, `gh stack` mechanics, PR body templates, and the
+full fallback matrix: **`references/pr-creation.md`**.
+
+## Step 10: Final Report
 
 Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
@@ -325,9 +379,19 @@ Once all phases are checked off:
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
+## Pull Request
+- Production lines changed: <PROD_LINES> (added <A> / deleted <D>, excludes tests, comments,
+  generated code) vs threshold <STACK_THRESHOLD_LINES> → <single PR | stack of N>
+- <url> — [1/N] <layer phases>
+- <url> — [2/N] <layer phases>
+- All opened as drafts; merge bottom-up (layer 1 first)
+- Review auto-fixes are in the top PR, not the layers that own the files
+
+(or: `PR creation skipped — <reason>`)
+
 ## What's Next
 - Worktree is ready at <path>
-- Review code and decide: merge, iterate, or cleanup
+- Review the PRs and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
 
@@ -391,47 +455,22 @@ Projects can override via environment or project CLAUDE.md:
   Default: high / correctness and above; lower-severity findings are reported, not touched.
 - `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
   open (Step 8d). Default 2.
+- `CREATE_PR` — whether Step 9 pushes and opens PRs. Default `true`; set `false` to end at
+  the local worktree branch.
+- `PR_BASE_BRANCH` — trunk the bottom/single PR targets. Default: the repo's default branch.
+- `PR_DRAFT` — open PRs as drafts. Default `true`, matching "user review is required".
+- `STACK_THRESHOLD_LINES` — production lines changed (added + deleted) above which Step 9
+  splits into a stack instead of one PR. Default 500.
+- `PR_PROD_EXCLUDES` — space-separated git pathspecs replacing the counting script's default
+  test/generated excludes. Set it when the project's test layout is unusual (e.g. tests in
+  `spec/`); the defaults already cover `**/test/**`, `**/androidTest/**`, `**/*Test.*`,
+  `**/*.spec.*`, build output, vendored code, and non-code files.
 
 ## Plan Format Example
 
-```markdown
-# Feature: Recipe Favorites
-
-## Overview
-Add ability to mark recipes as favorites and filter by them.
-
-## Phases
-
-### Phase 1: Domain Layer
-- [ ] Create Favorite use case in domain/favorites/
-- [ ] Create FavoritesRepository interface
-- [ ] Add unit tests for use case
-
-### Phase 2: Data Layer
-- [ ] Implement FavoritesRepositoryImpl
-- [ ] Add Room entity and DAO
-- [ ] Add data layer tests
-
-### Phase 3: UI Layer
-- [ ] Create FavoritesViewModel with UDF state
-- [ ] Build Favorites Compose screens
-- [ ] Add UI tests
-
-### Phase 4: Integration
-- [ ] Wire up navigation
-- [ ] Integration tests across layers
-- [ ] Manual testing (happy path + edge cases)
-
-## Tests
-- FavoritesUseCaseTest: ≥80% coverage
-- FavoritesRepositoryImplTest: ≥80% coverage
-- FavoritesViewModelTest: ≥80% coverage
-
-## Edge Cases
-- Favorite a recipe, then delete it from system
-- Toggle favorite state rapidly
-- Sync favorites across multiple devices (if applicable)
-```
+A complete worked plan — phases, dependency notation, `**Files**:` metadata, tests, and edge
+cases — is in **`references/plan-format.md`**. Read it when a user's plan doesn't parse
+cleanly in Step 1 and you need to show them the expected shape.
 
 ## Notes
 
@@ -457,9 +496,13 @@ Add ability to mark recipes as favorites and filter by them.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).
-- **Phases commit, but only to the worktree branch** — each phase commits its own work
-  (required so the parallel merge and the Step 8 review diff can see it; see 5a.2). Those
-  commits stay on the integration/child branch in the worktree — nothing is pushed or merged
-  to `main`. The branch is yours to review, squash, merge, or discard.
+- **Phases commit locally; only Step 9 pushes** — each phase commits its own work (required
+  so the parallel merge and the Step 8 review diff can see it; see 5a.2). Nothing leaves the
+  machine until Step 9, which pushes the branches and opens **draft** PRs. Nothing is ever
+  merged for you.
+- **Big changes ship as a stack** — over `STACK_THRESHOLD_LINES` production lines (tests,
+  comments, and generated code excluded), Step 9 splits the branch into one draft PR per
+  dependency layer so each is reviewable on its own. Layer cut points come from the SHA
+  ledger recorded during Step 7 — they cannot be reconstructed after the fact.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

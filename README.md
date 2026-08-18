@@ -13,7 +13,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, a post-plan review + auto-fix, and draft PR creation — stacked one-PR-per-layer when the change exceeds 500 production lines |
 
 #### Composable Skills
 
@@ -26,6 +26,12 @@ your project's `.claude/skills/` before running implement-plan or feature-plan:
 | `/create-worktree` | Required | Create an isolated git worktree and branch; return its path |
 | `/clean-architecture` | Required | Load layer rules and naming conventions into context |
 | `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
+
+implement-plan's final step pushes the branch and opens **draft** pull requests via the `gh`
+CLI (authenticated `gh auth status` required). Stacked PRs additionally need the
+[`github/gh-stack`](https://github.com/github/gh-stack) extension — without it the PRs are
+still chained by base branch, just without GitHub's stack UI. Set `CREATE_PR=false` to stop
+at the local worktree branch instead.
 
 See [`examples/android/`](examples/android/) for a working reference implementation targeting
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those
@@ -120,7 +126,7 @@ q-skills/
         plugin.json           # Plugin manifest (v1.1.0)
       skills/
         feature-plan/         # Feature planning skill
-        implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
+        implement-plan/       # Plan execution skill (opus escalation rescue + stacked PR creation)
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)

@@ -143,33 +143,15 @@ If yes, call `/create-worktree` skill. Let the project implement worktree creati
 ## Step 4: Plan Structure
 
 You already have the normalized extract from the delegated parse (Step 1) — work from that,
-not a fresh raw read. This is the structure the prep agent parsed:
+not a fresh raw read.
 
-```markdown
-# Feature Name
+Each phase is a `###` section whose tasks are checkboxes (`- [ ]` / `- [x]`); the skill reads
+and rewrites those boxes to track progress. Two optional-but-load-bearing extras drive later
+steps: `**Files**:` per phase (the file-overlap safety check, 5a.1) and a
+`## Task Dependency Graph` block (parallel scheduling).
 
-## Overview
-Brief description of what's being implemented.
-
-## Phases
-
-### Phase 1: Foundation Setup
-- [ ] Task 1a: description
-- [ ] Task 1b: description
-
-### Phase 2: Core Implementation
-- [ ] Task 2a: description
-- [ ] Task 2b: description
-- [ ] Task 2c: description
-
-## Tests
-List of expected test coverage.
-
-## Edge Cases
-Known edge cases to handle.
-```
-
-Key: Each phase is a section with checkboxes for tasks. The skill tracks and updates these.
+A full worked example is in **`references/plan-format.md`** — read it when a plan doesn't
+parse cleanly and you need to show the user the expected shape.
 
 ## Step 5: Phase Delegation
 
@@ -320,9 +302,24 @@ Runs only after Step 8 has fully settled — every review round finished, every 
 committed and gate-verified. Branches cut before that would leave fix commits outside the
 PRs people actually review.
 
-**Delegate to `PR_SKILL`** (default `/dev-toolkit:create-pr`). It owns measuring the branch,
-choosing single-PR vs stacked, and driving `gh` — none of which is plan-execution work, and
-all of which a project may want to swap out (GitLab, internal tooling). Hand it:
+**Delegate to `PR_SKILL`.** It owns measuring the branch, choosing single-PR vs stacked, and
+driving `gh` — none of which is plan-execution work, and all of which a project may want to
+swap out (GitLab, internal tooling, a required template).
+
+Resolve it in this order, taking the first that exists:
+
+1. `PR_SKILL`, when the project set it explicitly — an explicit choice outranks discovery
+2. a **project-local `/create-pr`** — same convention as `/verify` and `/create-worktree`:
+   the project knows its own conventions better than a generic skill does
+3. `/dev-toolkit:create-pr` — the bundled implementation
+4. none of the above → skip Step 9 and say so in Step 10
+
+Judge existence from the skills available to you in this session, not from the filesystem
+alone. A `.claude/skills/create-pr/SKILL.md` that was added after the session started isn't
+invokable until the harness reloads, so a file on disk is not proof you can call it — if you
+see the file but not the skill, say that in Step 10 rather than failing at the call.
+
+Hand the resolved skill:
 
 - the integration worktree path and branch
 - `PR_BASE_BRANCH`
@@ -338,9 +335,9 @@ contract: drafts merge nothing, and a finished branch sitting on disk is where t
 to stall. Set `CREATE_PR=false` to end at the local branch.
 
 Don't prompt the user mid-run about any of this — but always report the outcome in Step 10,
-including the reason when nothing was opened. Skip when `CREATE_PR=false`, when `PR_SKILL` is
-absent (say which plugin provides it), or when the plan hard-stopped or has BLOCKED/HALTED
-phases. If the ledger has fewer than two entries there is nothing to stack against; the PR
+including which skill ran, or the reason nothing was opened. Skip when `CREATE_PR=false`,
+when resolution finds nothing (name `dev-toolkit:create-pr` as the way to get one), or when
+the plan hard-stopped or has BLOCKED/HALTED phases. If the ledger has fewer than two entries there is nothing to stack against; the PR
 skill handles that itself and opens a single PR.
 
 ## Step 10: Final Report
@@ -373,7 +370,8 @@ Once all phases are checked off:
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## Pull Request
-- <as reported by PR_SKILL: urls, per-layer sizes, merge order>
+- Opened by: <resolved skill name>
+- <as reported by that skill: urls, per-layer sizes, merge order>
 - Review auto-fixes are in the top PR, not the layers that own the files
 
 (or: `PR creation skipped — <reason>`)
@@ -446,17 +444,15 @@ Projects can override via environment or project CLAUDE.md:
   open (Step 8d). Default 2.
 - `CREATE_PR` — whether Step 9 opens PRs. Default `true`; set `false` to end at the local
   worktree branch.
-- `PR_SKILL` — skill that opens the PRs (Step 9). Default `/dev-toolkit:create-pr`, which
-  measures the branch and stacks it when it exceeds its own threshold. Swap it for a
-  project-local equivalent on non-GitHub hosts. Its own knobs (`PR_BASE_BRANCH`,
-  `STACK_THRESHOLD_LINES`, `PR_DRAFT`, `PR_PROD_EXCLUDES`) are documented there, not here —
-  one owner per setting.
+- `PR_SKILL` — skill that opens the PRs (Step 9). Unset by default: Step 9 prefers a
+  project-local `/create-pr`, then falls back to `/dev-toolkit:create-pr`. Set this to force
+  one, e.g. on a non-GitHub host. Whichever wins owns its own knobs (`PR_BASE_BRANCH`,
+  `STACK_THRESHOLD_LINES`, `PR_DRAFT`, `PR_PROD_EXCLUDES`) — they're documented there, not
+  here, so there's one owner per setting.
 
-## Plan Format Example
-
-A complete worked plan — phases, dependency notation, `**Files**:` metadata, tests, and edge
-cases — is in **`references/plan-format.md`**. Read it when a user's plan doesn't parse
-cleanly in Step 1 and you need to show them the expected shape.
+  A project-local skill that ignores the layer ledger still works; you just get one PR
+  instead of a stack. Report which skill ran, so a missing stack is traceable to the
+  substitution rather than looking like a bug.
 
 ## Notes
 

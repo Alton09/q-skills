@@ -10,7 +10,7 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Current Plugins
 
-- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan; implement-plan has a built-in opus escalation rescue)
+- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan; implement-plan has a built-in opus escalation rescue and delegates PR creation to the consuming project's `/create-pr`)
 - `dev-toolkit` — Standalone dev utilities (notify-me, pr-review, skill-sharpener)
 
 ## Dependencies
@@ -20,5 +20,7 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/clean-architecture`
 - `/verify`
 - `/research` (optional)
+- `/create-pr` (optional) — implement-plan Step 9 delegates PR creation here; no bundled
+  implementation ships in this repo
 
 See `examples/android/` for reference implementations targeting Kotlin/Compose/Hilt.

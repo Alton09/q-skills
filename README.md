@@ -13,7 +13,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, a post-plan review + auto-fix, and draft PR creation via the project's `/create-pr` — handing it one verified cut point per dependency layer so large changes can ship as a stack |
 
 #### Composable Skills
 
@@ -26,6 +26,18 @@ your project's `.claude/skills/` before running implement-plan or feature-plan:
 | `/create-worktree` | Required | Create an isolated git worktree and branch; return its path |
 | `/clean-architecture` | Required | Load layer rules and naming conventions into context |
 | `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
+| `/create-pr` | **Optional** | Open **draft** PR(s) for a finished branch, never merging. Takes the worktree path and branch, the base branch, the plan path and Overview, the review outcome, and an optional oldest-first list of layer cut-point SHAs; opens one draft PR per cut point, or a single PR when given none. Must run unattended and return the PR URL(s). Skipped gracefully if absent. |
+
+implement-plan's final step opens **draft** pull requests, resolving the skill that does it
+in order: an explicitly configured `PR_SKILL`, then a project-local `/create-pr`. There is no
+bundled implementation — PR conventions vary too much between projects and hosts, so this is
+a slot you fill. If neither exists, implement-plan reports that and stops at the local
+branch; `CREATE_PR=false` disables the step outright.
+
+The layer cut-point SHAs are optional to consume. A `/create-pr` that ignores them opens one
+PR for the whole branch; one that uses them can split a large change into a stack of draft
+PRs, one per verified dependency layer. Step 9 of implement-plan's SKILL.md has the full
+contract.
 
 See [`examples/android/`](examples/android/) for a working reference implementation targeting
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those
@@ -120,7 +132,7 @@ q-skills/
         plugin.json           # Plugin manifest (v1.1.0)
       skills/
         feature-plan/         # Feature planning skill
-        implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
+        implement-plan/       # Plan execution skill (opus escalation rescue + draft PR creation)
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)

@@ -20,7 +20,6 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/clean-architecture`
 - `/verify`
 - `/research` (optional)
-- `/create-pr` (optional) — implement-plan Step 9 delegates PR creation here; no bundled
-  implementation ships in this repo
+- `/create-pr` (optional) — implement-plan's final step delegates PR creation here; skipped if absent
 
 See `examples/android/` for reference implementations targeting Kotlin/Compose/Hilt.

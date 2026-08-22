@@ -8,9 +8,8 @@ description: |
   with phases and checkboxes) and want to implement it in an isolated worktree with
   full verification and automatic task tracking. An Opus orchestrator delegates each
   phase to a model-matched sub-agent, runs two-tier verification, escalates stuck
-  phases, reviews the finished diff, and opens the pull request — as a stack of PRs,
-  one per dependency layer, when the plan changed a lot of production code. See the
-  body for the mechanics.
+  phases, reviews the finished diff, and opens a draft PR via the project's
+  `/create-pr` (when one exists) — see the body for the mechanics.
 
   Perfect for feature implementations, refactors, and bug fixes where you need
   quality gates, per-phase delegation, and progress visibility.
@@ -29,8 +28,7 @@ and owns the pass/fail decision and task tracking.
   building the dependency-graph schedule, per-phase model selection, child-worktree
   creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
   parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
-  escalation (forced-opus rescue pass), checkbox updates, the layer-SHA ledger, pull-request
-  creation, reporting. Holds all cross-phase
+  escalation (forced-opus rescue pass), checkbox updates, reporting. Holds all cross-phase
   state. Never runs `/verify` in its own context — it delegates it to keep its window clean.
 - **Phase sub-agent** (one per phase, model auto-selected): implements exactly one
   phase's tasks inside its assigned worktree (the shared integration worktree when run
@@ -59,9 +57,8 @@ and owns the pass/fail decision and task tracking.
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
-9. **Pull Request** — delegate to the project's `/create-pr`, handing it the verified
-   per-layer cut points so a large change can ship as a stack of draft PRs
-10. **Report** — summary, per-phase models, review outcome, PR links, worktree path, status
+9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
+10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -143,15 +140,33 @@ If yes, call `/create-worktree` skill. Let the project implement worktree creati
 ## Step 4: Plan Structure
 
 You already have the normalized extract from the delegated parse (Step 1) — work from that,
-not a fresh raw read.
+not a fresh raw read. This is the structure the prep agent parsed:
 
-Each phase is a `###` section whose tasks are checkboxes (`- [ ]` / `- [x]`); the skill reads
-and rewrites those boxes to track progress. Two optional-but-load-bearing extras drive later
-steps: `**Files**:` per phase (the file-overlap safety check, 5a.1) and a
-`## Task Dependency Graph` block (parallel scheduling).
+```markdown
+# Feature Name
 
-A full worked example is in **`references/plan-format.md`** — read it when a plan doesn't
-parse cleanly and you need to show the user the expected shape.
+## Overview
+Brief description of what's being implemented.
+
+## Phases
+
+### Phase 1: Foundation Setup
+- [ ] Task 1a: description
+- [ ] Task 1b: description
+
+### Phase 2: Core Implementation
+- [ ] Task 2a: description
+- [ ] Task 2b: description
+- [ ] Task 2c: description
+
+## Tests
+List of expected test coverage.
+
+## Edge Cases
+Known edge cases to handle.
+```
+
+Key: Each phase is a section with checkboxes for tasks. The skill tracks and updates these.
 
 ## Step 5: Phase Delegation
 
@@ -176,7 +191,7 @@ Two rules are load-bearing and easy to get wrong:
   a false-sequential is merely slow.
 - **Every phase commits its work** — the parallel merge and the Step 8 review diff both
   read committed history, so uncommitted work is invisible to both. The commit stays on the
-  worktree/child branch; nothing is pushed until Step 9 and nothing is ever merged for you.
+  worktree/child branch; nothing is pushed or merged to `main`.
 
 → Full schedule/handoff/execution/cleanup procedure (5a.1–5a.4):
 **`references/phase-execution.md`**.
@@ -267,20 +282,7 @@ Phases completed:
 - Phase 4: Documentation (pending)
 ```
 
-**Also record the layer's head SHA.** When a layer's gate-verify passes, append one line to
-the **layer-SHA ledger** you hold in cross-phase state:
-
-```
-layer 2  phases: [Data, Cache]  sha: <git rev-parse HEAD in the integration worktree>
-```
-
-Step 9 hands these SHAs to `PR_SKILL` as stack cut points. They can only be captured here —
-once a parallel group's merges are behind you, its commits are interleaved and the layer
-boundary is gone.
-
-The plan file is updated in the integration worktree. If Step 9 is going to run, commit it
-before then (`docs: check off completed phases`) so the tree is clean and the plan's final
-state ships with the PR.
+The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
 
 ## Step 8: Plan Review & Auto-fix
 
@@ -299,61 +301,15 @@ below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_R
 ## Step 9: Pull Request
 
 Runs only after Step 8 has fully settled — every review round finished, every auto-fix
-committed and gate-verified. Branches cut before that would leave fix commits outside the
-PRs people actually review.
+committed and gate-verified. If the project provides a `/create-pr` skill and `CREATE_PR`
+is not `false`, invoke it from the integration worktree, passing the branch, and let it own
+everything else — push, title, body, templates, host tooling. PR conventions vary too much
+between projects for this skill to bundle an implementation.
 
-**Delegate to `PR_SKILL`.** Measuring the branch, choosing single-PR vs stacked, and driving
-`gh` (or `glab`, or an internal tool) is not plan-execution work, and every project does it
-differently — templates, host, branch naming, review conventions. This skill supplies the
-inputs and owns none of the mechanics.
-
-Resolve it in this order, taking the first that exists:
-
-1. `PR_SKILL`, when the project set it explicitly — an explicit choice outranks discovery
-2. a **project-local `/create-pr`** — same convention as `/verify` and `/create-worktree`:
-   the project knows its own conventions better than a generic skill does
-3. neither → skip Step 9 and say so in Step 10
-
-Judge existence from the skills available to you in this session, not from the filesystem
-alone. A `.claude/skills/create-pr/SKILL.md` that was added after the session started isn't
-invokable until the harness reloads, so a file on disk is not proof you can call it — if you
-see the file but not the skill, say that in Step 10 rather than failing at the call.
-
-### The PR skill contract
-
-Any skill that fills this slot is handed:
-
-- the integration worktree path and branch
-- `PR_BASE_BRANCH` — the base the PR(s) target
-- the **layer-SHA ledger** from Step 7, oldest-first — candidate stack cut points, each one a
-  checkpoint that passed its gate-verify. Better than anything the skill could derive on its
-  own, and unreconstructable after the fact
-- the plan path and Overview, for PR titles and bodies
-- the Step 8 review outcome, which belongs in the top PR's body
-
-It must:
-
-- open **draft** PRs and **never merge anything**
-- run without prompting — Step 9 is unattended, so a skill that asks the user mid-run stalls
-  the whole thing (this rules out `/pr-review`-style interactive skills)
-- return the PR URL(s), for the Step 10 report
-
-The ledger is **optional to consume**. A skill that ignores it — or one handed fewer than two
-entries, which is nothing to stack against — opens a single PR covering the branch, which is
-a valid outcome, not a failure. Whichever skill wins also owns its own knobs (stack
-threshold, draft flag, what counts as production code); those are documented there, not here,
-so there is one owner per setting.
-
-`CREATE_PR` defaults to **true**, so a successful run ends with pushed branches and open draft
-PRs. That is a deliberate change from this skill's earlier "nothing leaves the worktree"
-contract: drafts merge nothing, and a finished branch sitting on disk is where this work used
-to stall. Projects with no `/create-pr` are unaffected — resolution finds nothing and the run
-ends at the local branch as before. Set `CREATE_PR=false` to force that outright.
-
-Don't prompt the user mid-run about any of this — but always report the outcome in Step 10,
-including which skill ran, or the reason nothing was opened. Skip when `CREATE_PR=false`,
-when resolution finds nothing (name a project-local `/create-pr` as the way to get one), or
-when the plan hard-stopped or has BLOCKED/HALTED phases.
+Expectations on the project's `/create-pr`: open a **draft** PR, never merge anything, run
+without prompting (Step 9 is unattended), and return the PR URL for the report. If no
+`/create-pr` skill exists in the session, skip this step and say so in the report — the run
+ends at the local worktree branch, as before.
 
 ## Step 10: Final Report
 
@@ -368,6 +324,7 @@ Once all phases are checked off:
 **Orchestrator:** <orchestrator model, e.g. Opus 4.8>
 **Worktree:** <path>
 **Branch:** <branch-name>
+**PR:** <url, or `skipped — <reason>`>
 
 ## Phases Completed
 - Phase 1: <description> — sub-agent: <model>
@@ -384,16 +341,9 @@ Once all phases are checked off:
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
-## Pull Request
-- Opened by: <resolved skill name>
-- <as reported by that skill: urls, per-layer sizes, merge order>
-- Review auto-fixes are in the top PR, not the layers that own the files
-
-(or: `PR creation skipped — <reason>`)
-
 ## What's Next
 - Worktree is ready at <path>
-- Review the PRs and decide: merge, iterate, or cleanup
+- Review code and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
 
@@ -457,20 +407,50 @@ Projects can override via environment or project CLAUDE.md:
   Default: high / correctness and above; lower-severity findings are reported, not touched.
 - `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
   open (Step 8d). Default 2.
-- `CREATE_PR` — whether Step 9 opens PRs. Default `true`; set `false` to end at the local
-  worktree branch.
-- `PR_BASE_BRANCH` — base branch the PR(s) target (Step 9). Defaults to the branch the
-  integration worktree was cut from. Owned here because Step 9 hands it to the PR skill;
-  everything about how the PRs get built (stack threshold, draft flag, templates) belongs to
-  that skill instead.
-- `PR_SKILL` — skill that opens the PRs (Step 9). Unset by default: Step 9 discovers a
-  project-local `/create-pr`. Set this to point at a differently-named skill. There is no
-  bundled implementation — the project supplies one, and it must satisfy the contract in
-  Step 9. If neither exists, Step 9 is skipped.
+- `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
+  set `false` to end the run at the local worktree branch. Has no effect when the project has
+  no `/create-pr` — the step is skipped either way.
 
-  A skill that ignores the layer ledger still works; you just get one PR instead of a stack.
-  Report which skill ran, so a missing stack is traceable to the substitution rather than
-  looking like a bug.
+## Plan Format Example
+
+```markdown
+# Feature: Recipe Favorites
+
+## Overview
+Add ability to mark recipes as favorites and filter by them.
+
+## Phases
+
+### Phase 1: Domain Layer
+- [ ] Create Favorite use case in domain/favorites/
+- [ ] Create FavoritesRepository interface
+- [ ] Add unit tests for use case
+
+### Phase 2: Data Layer
+- [ ] Implement FavoritesRepositoryImpl
+- [ ] Add Room entity and DAO
+- [ ] Add data layer tests
+
+### Phase 3: UI Layer
+- [ ] Create FavoritesViewModel with UDF state
+- [ ] Build Favorites Compose screens
+- [ ] Add UI tests
+
+### Phase 4: Integration
+- [ ] Wire up navigation
+- [ ] Integration tests across layers
+- [ ] Manual testing (happy path + edge cases)
+
+## Tests
+- FavoritesUseCaseTest: ≥80% coverage
+- FavoritesRepositoryImplTest: ≥80% coverage
+- FavoritesViewModelTest: ≥80% coverage
+
+## Edge Cases
+- Favorite a recipe, then delete it from system
+- Toggle favorite state rapidly
+- Sync favorites across multiple devices (if applicable)
+```
 
 ## Notes
 
@@ -496,14 +476,10 @@ Projects can override via environment or project CLAUDE.md:
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).
-- **Phases commit locally; only Step 9 pushes** — each phase commits its own work (required
-  so the parallel merge and the Step 8 review diff can see it; see 5a.2). Nothing leaves the
-  machine until Step 9, which delegates to `PR_SKILL` to push the branches and open **draft**
-  PRs. Nothing is ever merged for you.
-- **Big changes can ship as a stack** — Step 9 hands `PR_SKILL` the SHA ledger recorded
-  during Step 7, one entry per verified dependency layer, so a PR skill that supports
-  stacking can split a large branch into one reviewable draft PR per layer. Those cut points
-  cannot be reconstructed afterwards, which is why the ledger is written as layers pass
-  rather than computed at the end. A PR skill that ignores it opens a single PR.
+- **Phases commit, but only to the worktree branch** — each phase commits its own work
+  (required so the parallel merge and the Step 8 review diff can see it; see 5a.2). Those
+  commits stay on the integration/child branch in the worktree — nothing is merged for you.
+  Only Step 9's delegated `/create-pr` pushes the branch, and only to open a draft PR. The
+  branch is yours to review, squash, merge, or discard.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

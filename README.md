@@ -84,6 +84,125 @@ claude plugin install workflow-kit
 claude plugin install dev-toolkit
 ```
 
+## Using implement-plan on opencode
+
+> Claude Code is the default and unchanged host for all workflow-kit skills.
+> `workflow-kit:implement-plan` also runs natively on **opencode** — launch the skill
+> inside an opencode session and the entire run stays on that host. No Claude Code
+> involvement required unless escalation rung 2 is reached (see below).
+
+### Install and authenticate
+
+Install the opencode CLI and subscribe to OpenCode Go (flat-rate, $10/month):
+
+- See [opencode.ai/docs](https://opencode.ai/docs) for the current install command.
+- Sign up for OpenCode Go at [opencode.ai/docs/go](https://opencode.ai/docs/go);
+  credentials are written to `~/.local/share/opencode/auth.json` on first login.
+
+Verify your subscription is active:
+
+```bash
+opencode providers list
+# Expected: ● OpenCode Go [api]  1 credentials
+```
+
+### Register skills in opencode.jsonc
+
+opencode loads skills from `skills.paths`. **Critical: a project-local `opencode.jsonc`
+with `skills.paths` overrides the global config entirely — it does not merge.** Every
+path you need must appear in one place.
+
+Add to `~/.config/opencode/opencode.jsonc` (global, recommended) or to your project's
+`opencode.jsonc`, listing **both** this repo's skills directories **and** your consumer
+project's own skills directory:
+
+```jsonc
+{
+  "skills": {
+    "paths": [
+      "/path/to/q-skills/plugins/workflow-kit/skills",
+      "/path/to/q-skills/plugins/dev-toolkit/skills",
+      "/your/project/.claude/skills"
+    ]
+  }
+}
+```
+
+> If you place this in a project-local `opencode.jsonc`, the global `skills.paths` list
+> disappears. Include every path you need in that one file — the q-skills plugin
+> directories and your own project's skills (`/verify`, `/create-worktree`, etc.).
+
+Named subagent definitions are required for per-role model routing. Add these to the
+same file (values shown are the bake-off-measured defaults):
+
+```jsonc
+{
+  "agent": {
+    "phase-light": {
+      "model": "opencode-go/minimax-m3",
+      "mode": "subagent",
+      "description": "Light-tier phase worker (mechanical tasks)"
+    },
+    "phase-standard": {
+      "model": "opencode-go/glm-5.3",
+      "mode": "subagent",
+      "description": "Standard-tier phase worker (normal tasks)"
+    },
+    "phase-deep": {
+      "model": "opencode-go/kimi-k3",
+      "mode": "subagent",
+      "description": "Deep-tier phase worker (complex tasks)"
+    },
+    "gate-verify": {
+      "model": "opencode-go/grok-4.5",
+      "mode": "subagent",
+      "description": "Behavioral gate-verify — family-diverse from all implementers"
+    },
+    "review": {
+      "model": "opencode-go/grok-4.5",
+      "mode": "subagent",
+      "description": "Post-plan review — family-diverse from all implementers"
+    }
+  }
+}
+```
+
+### Model overrides
+
+Per-role models can be overridden via environment variables (same surface as Claude Code):
+
+```bash
+ORCHESTRATOR_MODEL=opencode-go/qwen3.8-max
+PHASE_MODEL_LIGHT=opencode-go/minimax-m3
+PHASE_MODEL_STANDARD=opencode-go/glm-5.3
+PHASE_MODEL_DEEP=opencode-go/kimi-k3
+VERIFY_MODEL=opencode-go/grok-4.5
+REVIEW_MODEL=opencode-go/grok-4.5
+FIX_MODEL=opencode-go/glm-5.3
+```
+
+Use `opencode-go/<model-id>` format for flat-rate models. Unknown model ids halt
+the run immediately with an explicit error — no silent substitution.
+
+### What's weaker on opencode
+
+The following capabilities are degraded relative to Claude Code. The skill discloses
+them at Step 2 before any work starts:
+
+- **No first-class worker cancellation.** The `STOP_WORKER` primitive is unavailable
+  from within a running skill. A runaway subagent burns to completion before the token
+  ceiling stops its successor — the runaway guard is post-hoc only.
+- **Parallel phase groups demote to sequential.** The opencode `task` tool has no
+  background-run equivalent; all 14 empirically observed subagent sessions ran
+  sequentially. Phases that would run concurrently on Claude Code run one at a time.
+- **Model pinning is static config only.** Per-spawn model override at call time is
+  not supported. Named subagent definitions in `opencode.jsonc` (see above) are the
+  only pinning mechanism and must be defined before the run begins.
+- **Escalation rung 2 is a manual handoff.** When automatic rung-1 rescue exhausts
+  its budget, the skill halts and emits a "Resume in Claude Code" block with the
+  worktree path and relaunch instruction. You reopen that worktree in Claude Code to
+  continue with full capabilities.
+
 ## Updating
 
 ```bash

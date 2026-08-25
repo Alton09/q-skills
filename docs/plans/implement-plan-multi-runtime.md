@@ -266,5 +266,5 @@ its "Adding a host" section (Stage 2a):
 - [x] Stage 2 — Runtime layer (2a runtimes.md, 2b model-routing.md)
 - [x] Stage 3 — Rewrite SKILL.md
 - [x] Stage 4 — Propagate (4a phase-execution, 4b runaway-guard, 4c escalation, 4d consumer docs)
-- [ ] Stage 5 — Validate (dual-host end-to-end)
+- [x] Stage 5 — Validate (dual-host end-to-end)
 - [ ] Stage 6 — Release v3.0.0

@@ -40,17 +40,19 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
-**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
-the phase's tasks and map to the Agent tool's `model` parameter:
+**1. Classify complexity → pick the sub-agent tier** (auto, no user prompt). Judge
+the phase's tasks and assign a tier:
 
-| Phase character | Agent `model` |
+| Phase character | Tier |
 |---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
-| Normal feature work (typical layer impl, standard tests) | `sonnet` |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
+| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `light` |
+| Normal feature work (typical layer impl, standard tests) | `standard` |
+| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `deep` |
 
-The values are the literal `model` enum tokens — pass them straight to the Agent tool.
-Record the chosen model per phase for the final report.
+The tier resolves to a host-specific model via `references/model-routing.md`
+(`PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, `PHASE_MODEL_DEEP`). The orchestrator
+resolves the model at spawn time using the active host binding. Record the chosen tier
+and model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
 everything the phase needs:
@@ -60,9 +62,10 @@ everything the phase needs:
   - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
   - *Parallel phase* → its own **child worktree** that the orchestrator created off
     integration HEAD; the agent works ONLY inside that child worktree.
-  In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
-  every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
-  edits and breaks carry-forward. Edits never touch `main`.
+  **Worktree-ownership rule (normative):** the orchestrator creates and owns every
+  worktree explicitly — workers must never create worktrees of their own. A worker
+  spawning its own worktree (e.g. via `isolation: "worktree"` on claude-code) scatters
+  each phase's edits and breaks carry-forward. Edits never touch `main`.
 - **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
   key decisions, public interfaces introduced — covering **all completed prerequisite
   phases**, so this phase builds correctly on what came before. (Within a parallel group,
@@ -84,12 +87,24 @@ everything the phase needs:
 
 ## 5a.3 Execute each layer
 
-Walk layers in topological order (5a.1). Every phase agent is spawned with the Agent tool
-and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
-the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
-wall-clock guard, and watch several agents at once), and each agent is cancellable via
-`TaskStop`. The completion notification carries the agent's total token count and
-duration, which feeds the 5b ceiling check.
+Walk layers in topological order (5a.1). Every phase agent is spawned via **SPAWN_WORKER**
+(on claude-code: the `Agent` tool with `run_in_background: true`). This gives no live
+token/tool feed, but it buys two things the orchestrator needs: it stays responsive instead
+of blocking (so it can run the 5b wall-clock guard, and watch several agents at once), and
+each spawned worker is stoppable via **STOP_WORKER**. On hosts without STOP_WORKER
+(opencode: no first-class cancellation tool — see `references/runtimes.md`), the guard
+is post-hoc only: a runaway worker burns to completion before the token ceiling stops its
+successor. The completion notification carries the agent's total token count and duration,
+which feeds the 5b ceiling check.
+
+**PACE and parallel-group demotion:** Where PACE is unavailable (opencode: empirically
+sequential across all observed sessions — no background parallel subagent mechanism; see
+`docs/research/opencode-host-primitives.md` Q2), the entire parallel group demotes to
+sequential — phases run one at a time in the integration worktree rather than in isolated
+child worktrees. The orchestrator's dependency graph is still computed and its ordering
+respected; the atomic-advance contract (all phases in the group checked off only when the
+whole group passes the integration gate-verify) is unchanged. Child worktree creation is
+skipped for groups that are sequential-demoted.
 
 **Single-phase layer (the common case — unchanged from sequential):**
 1. Spawn the phase agent in the integration worktree (background; 5b guard applies).

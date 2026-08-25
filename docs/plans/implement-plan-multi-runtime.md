@@ -263,7 +263,7 @@ its "Adding a host" section (Stage 2a):
 ## Progress
 
 - [x] Stage 1 — Ground truth (1a probe, 1b bake-off)
-- [ ] Stage 2 — Runtime layer (2a runtimes.md, 2b model-routing.md)
+- [x] Stage 2 — Runtime layer (2a runtimes.md, 2b model-routing.md)
 - [ ] Stage 3 — Rewrite SKILL.md
 - [ ] Stage 4 — Propagate (4a phase-execution, 4b runaway-guard, 4c escalation, 4d consumer docs)
 - [ ] Stage 5 — Validate (dual-host end-to-end)

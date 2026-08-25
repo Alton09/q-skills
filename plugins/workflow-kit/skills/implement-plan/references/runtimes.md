@@ -28,7 +28,7 @@ The orchestrator resolves its host at **Step 0.5** (before any other work):
    a column exists in this file. If not, fail loudly with the host name and
    "no column in runtimes.md — see 'Adding a host'."
 
-The host name is logged at Step 2 (disclosure) and Step 9 (report). Wrong
+The host name is logged at Step 2 (disclosure) and Step 10 (report). Wrong
 detection fails the run before any code is written — the cost of silent
 mismatch is greater than the cost of a user restart with `HOST_RUNTIME` set.
 
@@ -64,7 +64,7 @@ Sourced from Stage 1a Q2 findings.
 | `opencode` | **Demote to sequential** | All parallel groups are run sequentially — one phase at a time — regardless of declared independence; worktree-per-phase ownership contract is unaffected; the orchestrator's dependency graph is still computed and respected (order within a group becomes arbitrary but stable) |
 
 The parallel demotion on opencode is disclosed at Step 2 and noted in the
-Step 9 `Runtime & Models` report section.
+Step 10 `Runtime & Models` report section.
 
 ---
 
@@ -97,9 +97,9 @@ If the consumer has a local `opencode.jsonc` with `skills.paths`, add:
   `opencode.jsonc` overrides global config. Confirm `/verify`, `/create-worktree`,
   and `/notify-me` are reachable before proceeding.
 
-### Step 9 — Runtime & Models Report Section
+### Step 10 — Runtime & Models Report Section
 
-The Step 9 summary MUST include a `Runtime & Models` section:
+The Step 10 summary MUST include a `Runtime & Models` section:
 
 ```
 ## Runtime & Models

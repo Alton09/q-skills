@@ -53,8 +53,9 @@ must be treated as misconfiguration.
    = pass) is the measurement basis for these roles. kimi-k3's 4/10 failure is the direct
    evidence for this principle.
 
-2. **Diversity rule:** gate-verify and review must use a **different model family** than the
-   implementer they check. Escalation rung 1 switches family from the failed implementer.
+2. **Diversity rule** (where the host's catalog has more than one model family): gate-verify
+   and review must use a **different model family** than the implementer they check.
+   Escalation rung 1 switches family from the failed implementer.
    Minimum: different company/training lineage (within-cluster diversity). Preferred: cross-cluster
    (Chinese-family implementer + Western-family gate/review). This rule exists because
    same-family models share blind spots; cross-family checking is free on a flat-rate plan.
@@ -124,13 +125,16 @@ budget is still rung 1).
 
 Triggered when: rung 1 exhausts `ESCALATION_ATTEMPTS` without clearing the gate.
 
-Action: emit a `HALTED` report. The HALTED report must include a **"Resume in Claude Code"
-block** with:
+Action: emit a `HALTED` report. On a host other than Claude Code, the HALTED report must
+additionally include a **"Resume in Claude Code" block** with:
 - Worktree path (absolute)
 - Failed phase name and description
 - Models run at rung 1 and their families (for the user's context)
 - Verbatim relaunch instruction: "Open this worktree in Claude Code and run `/implement-plan`
   to continue from this phase with full Claude Code capabilities."
+
+On Claude Code, the HALTED report is emitted as-is — no rescue block is appended (the run
+is already on Claude Code).
 
 Rationale: automatic cross-harness escalation was evaluated and dropped — it requires
 resurrecting the subprocess bridge for a path that fires rarely, and manual user-wait matches

@@ -159,12 +159,20 @@ project's own skills directory:
 > disappears. Include every path you need in that one file — the q-skills plugin
 > directories and your own project's skills (`/verify`, `/create-worktree`, etc.).
 
-Named subagent definitions are required for per-role model routing. Add these to the
-same file (values shown are the bake-off-measured defaults):
+Named subagent definitions are the **only** model-pinning mechanism on opencode — per-spawn
+override at call time is not supported. Every role listed in the
+[agent-name registry](plugins/workflow-kit/skills/implement-plan/references/model-routing.md)
+must have an entry here before the run begins. Add these to the same file (values shown are
+the bake-off-measured defaults from the registry):
 
 ```jsonc
 {
   "agent": {
+    "prep": {
+      "model": "opencode-go/qwen3.7-plus",
+      "mode": "subagent",
+      "description": "Standard-tier prep — parses the plan into a normalized extract (Step 1)"
+    },
     "phase-light": {
       "model": "opencode-go/minimax-m3",
       "mode": "subagent",
@@ -181,14 +189,29 @@ same file (values shown are the bake-off-measured defaults):
       "description": "Deep-tier phase worker (complex tasks)"
     },
     "gate-verify": {
+      "model": "opencode-go/qwen3.7-plus",
+      "mode": "subagent",
+      "description": "Light-tier exit-code gate-verify — runs /verify and reports pass/fail only"
+    },
+    "gate-verify-behavioral": {
       "model": "opencode-go/grok-4.6",
       "mode": "subagent",
-      "description": "Behavioral gate-verify — family-diverse from all implementers"
+      "description": "Standard-tier behavioral gate-verify — family-diverse from all implementers"
     },
     "review": {
       "model": "opencode-go/grok-4.6",
       "mode": "subagent",
-      "description": "Post-plan review — family-diverse from all implementers"
+      "description": "Deep-tier post-plan review — family-diverse from all implementers"
+    },
+    "fix": {
+      "model": "opencode-go/glm-5.3",
+      "mode": "subagent",
+      "description": "Standard-tier fix agent — applies review findings in the integration worktree"
+    },
+    "escalation": {
+      "model": "opencode-go/qwen3.8-max",
+      "mode": "subagent",
+      "description": "Deep-tier rung-1 escalation rescue — family-switch from failed implementer"
     }
   }
 }
@@ -196,20 +219,35 @@ same file (values shown are the bake-off-measured defaults):
 
 ### Model overrides
 
-Per-role models can be overridden via environment variables (same surface as Claude Code):
+**On opencode, the two config surfaces do different things — they do not compose:**
+
+| Surface | What it controls | How to change a model |
+|---|---|---|
+| `agent.<name>.model` in `opencode.jsonc` | The actual model each named subagent uses. This is the **only** mechanism that pins models on opencode — per-spawn override at call time is not supported. | Edit the `model` field in the agent block above and restart the session. |
+| Environment variables (below) | Read by the orchestrator at Step 0.5 to select *which* named agent or tier serves a role where that selection is dynamic (e.g. `ORCHESTRATOR_MODEL`, `PHASE_MODEL_DEEP`). They do **not** change the model the named agent uses — that is set only in `opencode.jsonc`. | Set before launching; the orchestrator reads them once at startup. |
+
+Environment variables the orchestrator reads on opencode (values shown are the registry defaults):
 
 ```bash
-ORCHESTRATOR_MODEL=opencode-go/qwen3.8-max
-PHASE_MODEL_LIGHT=opencode-go/minimax-m3
-PHASE_MODEL_STANDARD=opencode-go/glm-5.3
-PHASE_MODEL_DEEP=opencode-go/kimi-k3
-VERIFY_MODEL=opencode-go/grok-4.6
-REVIEW_MODEL=opencode-go/grok-4.6
-FIX_MODEL=opencode-go/glm-5.3
+ORCHESTRATOR_MODEL=opencode-go/qwen3.8-max   # selects orchestrator tier/agent
+PHASE_MODEL_LIGHT=opencode-go/minimax-m3      # selects which phase-light agent entry
+PHASE_MODEL_STANDARD=opencode-go/glm-5.3      # selects which phase-standard agent entry
+PHASE_MODEL_DEEP=opencode-go/kimi-k3          # selects which phase-deep agent entry
 ```
 
-Use `opencode-go/<model-id>` format for flat-rate models. Unknown model ids halt
-the run immediately with an explicit error — no silent substitution.
+The following env vars are **inert on opencode** — the orchestrator reads them for logging
+and disclosure at Step 2, but they have no effect on which model runs because the named
+agent's `model` field is the binding. To actually change these models, edit the agent block:
+
+```bash
+# Inert on opencode — edit agent block instead:
+VERIFY_MODEL=opencode-go/qwen3.7-plus         # gate-verify agent's model field is authoritative
+REVIEW_MODEL=opencode-go/grok-4.6             # review agent's model field is authoritative
+FIX_MODEL=opencode-go/glm-5.3                 # fix agent's model field is authoritative
+```
+
+Use `opencode-go/<model-id>` format for all flat-rate models. Unknown model ids halt the run
+immediately with an explicit error — no silent substitution.
 
 ### What's weaker on opencode
 

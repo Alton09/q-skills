@@ -110,7 +110,8 @@ OC_LIGHT="${OC_LIGHT:-opencode-go/minimax-m3}"
 OC_STANDARD="${OC_STANDARD:-opencode-go/glm-5.3}"
 OC_DEEP="${OC_DEEP:-opencode-go/kimi-k3}"
 OC_VERIFY="${OC_VERIFY:-opencode-go/qwen3.7-plus}"
-OC_REVIEW="${OC_REVIEW:-opencode-go/grok-4.5}"
+OC_VERIFY_BEHAVIORAL="${OC_VERIFY_BEHAVIORAL:-opencode-go/grok-4.6}"
+OC_REVIEW="${OC_REVIEW:-opencode-go/grok-4.6}"
 OC_FIX="${OC_FIX:-opencode-go/glm-5.3}"
 OC_ESCALATION="${OC_ESCALATION:-opencode-go/qwen3.8-max}"
 
@@ -452,7 +453,8 @@ configure_opencode() {
     "phase-light":    { "mode": "subagent", "model": "$OC_LIGHT",      "description": "Light tier. Implements one mechanical phase." },
     "phase-standard": { "mode": "subagent", "model": "$OC_STANDARD",   "description": "Standard tier. Implements one normal phase." },
     "phase-deep":     { "mode": "subagent", "model": "$OC_DEEP",       "description": "Deep tier. Implements one complex phase." },
-    "gate-verify":    { "mode": "subagent", "model": "$OC_VERIFY",     "description": "Light tier. Runs /verify independently and reports pass or fail only." },
+    "gate-verify":              { "mode": "subagent", "model": "$OC_VERIFY",              "description": "Light tier. Runs /verify (exit-code) independently and reports pass or fail only." },
+    "gate-verify-behavioral":   { "mode": "subagent", "model": "$OC_VERIFY_BEHAVIORAL",   "description": "Standard tier. Behavioral gate-verify — family-diverse from all implementers." },
     "review":         { "mode": "subagent", "model": "$OC_REVIEW",     "description": "Deep tier. Reviews the plan diff and returns findings only." },
     "fix":            { "mode": "subagent", "model": "$OC_FIX",        "description": "Standard tier. Applies review findings." },
     "escalation":     { "mode": "subagent", "model": "$OC_ESCALATION", "description": "Deep tier, family switch. Rung-1 escalation rescue." }

@@ -143,6 +143,38 @@ boundary.
 
 ---
 
+## opencode Agent-Name Registry (Normative)
+
+> **Source of truth for opencode subagent names.** Every named subagent that `implement-plan`
+> invokes on opencode MUST appear in the consuming project's `opencode.jsonc` `agent` block
+> with the exact name listed here. The orchestrator invokes workers by these names via
+> `SPAWN_WORKER` (see `runtimes.md` SPAWN_WORKER cell). Names in the harness
+> (`scripts/validate-runtimes.sh`) are also aligned with this table.
+
+| Role | Required agent name | Default model | Tier | Notes |
+|---|---|---|---|---|
+| Prep parse | `prep` | `opencode-go/qwen3.7-plus` | standard | Step 1 — plan normalization |
+| Phase — mechanical | `phase-light` | `opencode-go/minimax-m3` | light | Boilerplate, wiring, renames |
+| Phase — normal | `phase-standard` | `opencode-go/glm-5.3` | standard | Typical feature work |
+| Phase — complex | `phase-deep` | `opencode-go/kimi-k3` | deep | Novel algorithms, cross-cutting design |
+| Gate-verify (exit-code) | `gate-verify` | `opencode-go/qwen3.7-plus` | light | Runs `/verify`; pass/fail only |
+| Gate-verify (behavioral) | `gate-verify-behavioral` | `opencode-go/grok-4.6` | standard | Behavioral review — family-diverse from all implementers |
+| Review | `review` | `opencode-go/grok-4.6` | deep | Step 8a — plan diff review; family-diverse from all implementers |
+| Fix | `fix` | `opencode-go/glm-5.3` | standard | Step 8c — applies review findings |
+| Escalation (rung 1) | `escalation` | `opencode-go/qwen3.8-max` | deep | Family-switch rescue; see escalation ladder above for family-switch rule |
+
+**Pinning:** on opencode, the `model` field in each agent block is the **only** mechanism
+that pins the model for that role — per-spawn override at call time is not supported by the
+host. Env-var overrides (`REVIEW_MODEL`, `FIX_MODEL`, etc.) read by the orchestrator at
+Step 0.5 select which named agent serves a role where that applies; they do not change the
+model the named agent uses. To change the actual model, update the `agent.<name>.model` field
+in `opencode.jsonc` and restart the session.
+
+**Adding a host:** a new host column in `runtimes.md` must also add a corresponding section
+here if its `SPAWN_WORKER` binding requires static named agents.
+
+---
+
 ## Config Surface
 
 ### Environment Variables / CLAUDE.md Overrides

@@ -35,7 +35,11 @@ set -euo pipefail
 # ENVIRONMENT
 #   REPO_ROOT        repo whose skill is under test  (default: git toplevel)
 #   VALIDATION_ROOT  where run dirs are created      (default: $TMPDIR/implement-plan-validation)
-#   RUN_DIR          explicit run dir (required for `resume`)
+#   RUN_DIR          explicit run dir (required for `resume`). On opencode this
+#                    directory is ALSO the session root passed as `--dir`, and it
+#                    must contain the project and its sibling worktrees — that is
+#                    the normative Session Root Constraint in runtimes.md, not a
+#                    harness convenience. See configure_opencode.
 #   PROJECT_SUBDIR   dir under RUN_DIR to run in (default: project). Set to the
 #                    integration worktree (e.g. project-wordkit) to perform the
 #                    escalation rung-2 manual rescue from where HALTED left off.
@@ -397,19 +401,40 @@ configure_claude_code() {
 EOF
 }
 
+# Session Root Constraint precondition (references/runtimes.md). Mirrors the
+# skill's own Step 0.5 check: the session root must contain the PARENT of the
+# project repo, because the integration worktree and any child worktrees are
+# created as its siblings. Failing here is the fixed spec working; a run that
+# gets past this and still points a worker outside the root is a finding.
+assert_session_root() {
+  local parent root
+  parent="$(cd "$(dirname "$PROJECT_DIR")" && pwd -P)"
+  root="$(cd "$RUN_DIR" && pwd -P)"
+  if [[ "$parent" != "$root" && "$parent" != "$root"/* ]]; then
+    echo "session root '$root' does not contain the project's worktree parent '$parent'" >&2
+    echo "see references/runtimes.md — Session Root Constraint" >&2
+    exit 2
+  fi
+}
+
 configure_opencode() {
+  assert_session_root
   # CRITICAL 1: a project-local skills.paths REPLACES the global one (it does not
   # merge), so both the skill-under-test AND the project's own skills must be
   # listed here.
   #
-  # CRITICAL 2 — session root. opencode scopes tool execution to the session
-  # root passed as `--dir`. A subagent tool call targeting a path OUTSIDE that
-  # root hangs in `status: running` forever: no error, no permission prompt,
-  # no timeout, even under `--auto`. implement-plan always works in a worktree
-  # that /create-worktree creates as a SIBLING of the project dir, so the
-  # session root must be the parent that contains both. Hence the config lives
-  # in RUN_DIR and `--dir` is RUN_DIR, not PROJECT_DIR. Per-role model pinning is static named-subagent config —
-  # opencode has no verified call-time model override (Stage 1a Q1).
+  # CRITICAL 2 — session root. This implements the skill's normative *Session
+  # Root Constraint* (references/runtimes.md, `PATH_SCOPE`); it is spec, not a
+  # workaround. opencode scopes tool execution to the session root passed as
+  # `--dir`, and a subagent tool call targeting a path OUTSIDE that root hangs in
+  # `status: running` forever: no error, no permission prompt, no timeout, even
+  # under `--auto`. implement-plan's worktree placement is host-independent —
+  # /create-worktree creates the integration worktree as a SIBLING of the project
+  # repo — so the SESSION ROOT is what moves: it must be the parent holding both.
+  # Hence the config lives in RUN_DIR and `--dir` is RUN_DIR, not PROJECT_DIR, and
+  # assert_session_root below fails fast the way Step 0.5 does. Per-role model
+  # pinning is static named-subagent config — opencode has no verified call-time
+  # model override (Stage 1a Q1).
   # Every role model is env-overridable so a bad catalog default can be routed
   # around without editing the skill (findings get filed, not patched).
   cat > "$RUN_DIR/opencode.jsonc" <<EOF

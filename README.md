@@ -106,6 +106,33 @@ opencode providers list
 # Expected: ● OpenCode Go [api]  1 credentials
 ```
 
+### Launch opencode from the workspace parent (required)
+
+opencode confines every tool call a subagent makes to the **session root** — the directory
+passed as `--dir`. A call targeting a path outside that root never completes: no error, no
+permission prompt, no timeout. `implement-plan` creates its integration worktree as a
+sibling of your project repo (and parallel-group child worktrees as siblings of that), so
+the session root must be the directory that contains them all:
+
+```
+workspace/               <- run opencode here
+  my-project/            <- your repo, with the plan in it
+  my-project-feature/    <- integration worktree, created by /create-worktree
+  .wt/<phase-slug>/      <- child worktrees, if a phase group runs in parallel
+```
+
+```bash
+cd /path/to/workspace
+opencode --dir /path/to/workspace
+# then, inside the session:
+#   use implement-plan on my-project/docs/plans/<plan>.md
+```
+
+Put your `opencode.jsonc` at that workspace root as well, so it applies to the session.
+
+The skill verifies this at Step 0.5 and halts with an explicit message if the session root
+cannot hold the worktrees — it will not start work it would deadlock on.
+
 ### Register skills in opencode.jsonc
 
 opencode loads skills from `skills.paths`. **Critical: a project-local `opencode.jsonc`
@@ -192,9 +219,12 @@ them at Step 2 before any work starts:
 - **No first-class worker cancellation.** The `STOP_WORKER` primitive is unavailable
   from within a running skill. A runaway subagent burns to completion before the token
   ceiling stops its successor — the runaway guard is post-hoc only.
-- **Parallel phase groups demote to sequential.** The opencode `task` tool has no
-  background-run equivalent; all 14 empirically observed subagent sessions ran
-  sequentially. Phases that would run concurrently on Claude Code run one at a time.
+- **Parallel phase groups demote to sequential.** Sibling subagents *can* execute
+  concurrently on opencode (measured), but the `task` tool has no background-run
+  equivalent, so control never returns to the orchestrator mid-flight: a running group
+  cannot be watched, and — with no `STOP_WORKER` — cannot be stopped. Rather than run
+  unsupervised concurrency, the skill runs phases one at a time. Expect a longer wall
+  clock than Claude Code on plans with independent phases.
 - **Model pinning is static config only.** Per-spawn model override at call time is
   not supported. Named subagent definitions in `opencode.jsonc` (see above) are the
   only pinning mechanism and must be defined before the run begins.

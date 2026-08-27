@@ -66,6 +66,15 @@ everything the phase needs:
   worktree explicitly — workers must never create worktrees of their own. A worker
   spawning its own worktree (e.g. via `isolation: "worktree"` on claude-code) scatters
   each phase's edits and breaks carry-forward. Edits never touch `main`.
+  **Worktree-placement rule (normative, host-independent):** the integration worktree is a
+  **sibling** of the project repository, and each child worktree is a **sibling** of the
+  integration worktree (5a.3) — never nested inside either, so the integration build and
+  gate-verify never traverse in-flight child files and the project's own tooling never
+  walks the worktrees. This shape is the same on every host. Where a host confines worker
+  tool calls to a session root (`PATH_SCOPE` restricted — see *Session Root Constraint* in
+  `references/runtimes.md`), the **session root** is what must contain the whole family;
+  the worktrees do not move. Step 0.5 verifies that and halts if it fails, because a worker
+  pointed outside such a root hangs with no error and no way to cancel it.
 - **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
   key decisions, public interfaces introduced — covering **all completed prerequisite
   phases**, so this phase builds correctly on what came before. (Within a parallel group,
@@ -97,11 +106,16 @@ is post-hoc only: a runaway worker burns to completion before the token ceiling 
 successor. The completion notification carries the agent's total token count and duration,
 which feeds the 5b ceiling check.
 
-**PACE and parallel-group demotion:** Where PACE is unavailable (opencode: empirically
-sequential across all observed sessions — no background parallel subagent mechanism; see
-`docs/research/opencode-host-primitives.md` Q2), the entire parallel group demotes to
-sequential — phases run one at a time in the integration worktree rather than in isolated
-child worktrees. The orchestrator's dependency graph is still computed and its ordering
+**PACE and parallel-group demotion:** `PACE` covers two things — running phases
+*concurrently*, and *backgrounding*: control returning to the orchestrator while a worker
+runs, which is what the 5b wall-clock guard needs in order to observe an in-flight agent.
+Where **either** half is unavailable, the entire parallel group demotes to sequential —
+phases run one at a time in the integration worktree rather than in isolated child
+worktrees. On opencode the missing half is backgrounding: sibling subagents do execute
+concurrently (measured), but the `task` tool blocks until the child returns, so with no
+backgrounding and no `STOP_WORKER` a concurrent group there would run entirely
+unsupervised. See *Parallel-Group Availability* in `references/runtimes.md` for the full
+rationale and what a future flip would require. The orchestrator's dependency graph is still computed and its ordering
 respected; the atomic-advance contract (all phases in the group checked off only when the
 whole group passes the integration gate-verify) is unchanged. Child worktree creation is
 skipped for groups that are sequential-demoted.

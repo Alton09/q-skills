@@ -43,25 +43,101 @@ is told at Step 2 disclosure).
 
 | Capability | Claude Code | opencode |
 |---|---|---|
-| `SPAWN_WORKER` | `Agent` tool — prompt payload, model pinned at call time | Named subagent in `opencode.jsonc` under `agent.<name>` with `"mode": "subagent"`, `"model": "opencode-go/<id>"`; orchestrator invokes by name (`@<name>`); config model wins over parent inheritance (no dynamic call-time override verified) |
+| `SPAWN_WORKER` | `Agent` tool — prompt payload, model pinned at call time | Named subagent in `opencode.jsonc` under `agent.<name>` with `"mode": "subagent"`, `"model": "opencode-go/<id>"`; orchestrator invokes by name (`@<name>`); config model wins over parent inheritance (no dynamic call-time override verified); every tool call a spawned worker makes is confined to the session root — see *Session Root Constraint* below |
 | `STOP_WORKER` | `TaskStop` tool — first-class cancellation primitive | **unavailable as a tool** → REST `POST /session/:id/abort` exists but port and child-session-id are unknowns from within a running skill; degradation: post-hoc token ceiling only — a runaway subagent burns to completion before the ceiling stops its successor |
-| `PACE` | `Agent` tool allows multiple parallel spawns; parallel groups run concurrently | **documented** but **empirically sequential** across all 14 observed sessions — no `run_in_background` / `async_prompt` equivalent on the `task` tool; degradation: demote all parallel groups to sequential; one phase at a time |
+| `PACE` | Both halves available: `Agent` tool spawns workers **in the background**, so parallel groups execute concurrently *and* control returns to the orchestrator mid-flight (timed check-ins on a running worker) | Split verdict. *Parallel execution*: **available** — two sibling subagents were measured running concurrently (5.86 s overlap, both rendered in-flight by the CLI). *Backgrounding / pacing*: **unavailable** — the `task` tool has no `run_in_background` / `async_prompt` equivalent and there is no within-skill timed-wakeup primitive, so control never returns to the orchestrator while a worker runs. `PACE` gates both and the backgrounding half is missing, so the binding stays conservative; degradation: demote all parallel groups to sequential; one phase at a time (rationale under *Parallel-Group Availability*) |
 | `TOKEN_ACCOUNTING` | Per-subagent token and cost data available from sub-agent return payload and tool introspection | Per-session rows in opencode SQLite DB (`~/.local/share/opencode/opencode.db`) — fields: `cost REAL`, `tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`; queryable via `opencode db "SELECT ..."` or `opencode export <sessionID>`; `cost` is equivalent retail value (not actual charge) against flat-rate $60/mo cap |
 | `VERIFY` | `/verify` skill invoked in sub-agent context via `Skill` tool | `/verify` skill invoked via `skill` tool; global `skills.paths` visible to all subagents; **warning**: a project-local `opencode.jsonc` with `skills.paths` OVERRIDES global config (not merged) — consumer must register `/verify` in auto-discovered paths (`.opencode/skills/`, `.claude/skills/`, `.agents/skills/`, or global `~/.config/opencode/skills/`) or include both skill-repo paths AND their own path in a merged `skills.paths` list |
-| `WORKTREE_CREATE` | `/create-worktree` skill delegated by orchestrator; `Skill` tool invocation | `/create-worktree` skill via `skill` tool; requires `bash` + `git` (available on opencode `build` agent by default); same delegation pattern; subject to the same `skills.paths` visibility as `VERIFY` |
+| `WORKTREE_CREATE` | `/create-worktree` skill delegated by orchestrator; `Skill` tool invocation | `/create-worktree` skill via `skill` tool; requires `bash` + `git` (available on opencode `build` agent by default); same delegation pattern; subject to the same `skills.paths` visibility as `VERIFY`; worktree **placement** is unchanged (integration worktree is a sibling of the project repo) — the *session root*, not the worktree, is what must accommodate this host: see *Session Root Constraint* |
 | `NOTIFY` | `/notify-me` skill or `Skill` tool invocation for OS-level notifications | `/notify-me` skill via `skill` tool; skill is registered in global `skills.paths` and visible from all subagents; falls back to `bash`-level notifier if skill unavailable; subject to same `skills.paths` visibility rules |
+| `PATH_SCOPE` | Unrestricted — a worker's tool calls may target any path the session can reach (a headless launch makes an extra root explicit with `--add-dir <path>`); no constraint on worktree placement | **Restricted to the session root** (the directory passed as `--dir`). A subagent tool call targeting a path outside that root never completes: no error, no permission prompt, no timeout, even under `--auto` — the call sits at `status: running` indefinitely. This is not a degradation but a **precondition** — see *Session Root Constraint* |
 | `REVIEW` | Review sub-agent spawned via `Agent` tool, model pinned at call time (deep tier, family-diverse from implementer) | Named `review` subagent in `opencode.jsonc` (`"mode": "subagent"`, deep-tier model, family-diverse from implementer per diversity rule); same `/review` skill via `skill` tool; see `model-routing.md` for family assignments |
+
+---
+
+## Session Root Constraint (`PATH_SCOPE`)
+
+**Normative. Checked at Step 0.5, before any worker is spawned.**
+
+Where a host's `PATH_SCOPE` is **restricted to a session root**, every path this workflow
+touches — the project repository, the integration worktree, and every child worktree —
+MUST lie inside that root. A worker pointed outside it does not fail cleanly: on opencode
+its first tool call hangs at `status: running` forever, with no error, no prompt and no
+timeout, and `STOP_WORKER` is unavailable on that host to cancel it. The orchestrator can
+neither detect nor recover from that state, which is why this is a **precondition rather
+than a degradation**: an unsatisfied root halts the run at Step 0.5 instead of deadlocking
+it at the first phase.
+
+**The rule (opencode).** The session root passed at launch (`--dir`) MUST be a directory
+that contains the **parent of the project repository** — the workspace directory that
+holds the project *and* its sibling worktrees:
+
+```
+<session root>/          ← opencode launched with --dir pointing here
+  project/               ← the git repo the plan lives in
+  project-<feature>/     ← integration worktree (sibling of the repo, from /create-worktree)
+  .wt/<phase-slug>/      ← child worktrees for a parallel group (siblings of integration)
+```
+
+The consumer-facing form of this rule is in the project README's opencode section; a
+project-local `opencode.jsonc` should sit at the session root so it applies to the session.
+
+**Step 0.5 check.** Resolve the project's git toplevel and confirm its **parent directory**
+is at or inside the session root. If it is not, halt with:
+
+```
+Session root does not contain the project's worktree parent — this host confines every
+worker tool call to the session root, and implement-plan's worktrees are siblings of the
+project repo. Relaunch with the session root set to the directory containing both
+(opencode: `--dir <parent-of-project>`). Halt.
+```
+
+Where the project repository is not yet unambiguous at Step 0.5 (the plan path arrives at
+Step 1), carry the check to Step 3 and run it there — it MUST pass before `WORKTREE_CREATE`
+is delegated and before any worker is spawned. Re-confirm after the worktree is created that
+it too lies inside the root.
+
+Hosts whose `PATH_SCOPE` is unrestricted (claude-code) skip this check entirely.
+
+**Why the session root moves and the worktrees do not.** The alternative shape — nesting
+the integration and child worktrees inside the project repo so they fall within a narrower
+session root — was considered and rejected. Worktree placement is load-bearing for reasons
+that have nothing to do with the host: child worktrees are siblings of integration so the
+integration build and gate-verify never traverse in-flight child files
+(`phase-execution.md` 5a.3), and the integration worktree is a sibling of the repo so the
+project's own tooling never walks it. Nesting to satisfy one host would break those
+guarantees on **every** host, and would additionally override the consumer-owned
+`/create-worktree` strategy that Step 3 deliberately delegates. Moving the session root up
+one level satisfies the restricted host with no change to the worktree contract, and costs
+the consumer exactly one launch flag.
 
 ---
 
 ## Parallel-Group Availability
 
-Sourced from Stage 1a Q2 findings.
-
 | Host | Status | Effective behavior |
 |---|---|---|
 | `claude-code` | Full parallel support | Independent phases in the dependency graph run as concurrent sub-agents in isolated child worktrees; merged back in declared order |
-| `opencode` | **Demote to sequential** | All parallel groups are run sequentially — one phase at a time — regardless of declared independence; worktree-per-phase ownership contract is unaffected; the orchestrator's dependency graph is still computed and respected (order within a group becomes arbitrary but stable) |
+| `opencode` | **Demote to sequential** (deliberate, conservative — not a capability floor) | All parallel groups are run sequentially — one phase at a time — regardless of declared independence; worktree-per-phase ownership contract is unaffected; the orchestrator's dependency graph is still computed and respected (order within a group becomes arbitrary but stable) |
+
+**Why opencode demotes even though sibling workers can run concurrently.** Two distinct
+things must not be conflated:
+
+- *Parallel execution* — can two sibling subagents run at the same time? On opencode:
+  **yes**, measured. A purpose-built canary produced two overlapping child sessions
+  (`phase-light` and `phase-alt`, 5.86 s of overlap), and the CLI rendered both in flight.
+- *Backgrounding / pacing* — does control return to the orchestrator **while** a worker
+  runs, so it can check in on one mid-flight? On opencode: **no** evidence of any such
+  primitive; the `task` tool blocks until the child returns.
+
+The 5b runaway guard is built on the second. Without backgrounding the orchestrator cannot
+observe an in-flight group at all, and with `STOP_WORKER` also unavailable it could not
+stop a runaway even if it noticed one — a concurrent group on this host would run entirely
+unsupervised. Unsupervisable concurrency is a worse trade than sequential execution, so the
+binding stays sequential. This is a priced choice, not an unknown: sequential execution
+measured ~52 % more wall clock than the same plan's parallel run on claude-code. Flipping
+the binding requires a backgrounding primitive (or an equivalent way to observe and cancel
+an in-flight worker) — more concurrency evidence alone is not sufficient.
 
 The parallel demotion on opencode is disclosed at Step 2 and noted in the
 Step 10 `Runtime & Models` report section.
@@ -91,6 +167,12 @@ For `opencode`, the following degradations MUST appear in the disclosure:
 
 For `claude-code`, no degradations exist in the current binding table.
 
+`PATH_SCOPE` is **not** listed as a degradation on any host: where it is restricted it is a
+precondition that Step 0.5 has already verified (or halted on), so by the time the
+disclosure is emitted the session root is known to be adequate. State it as a fact instead,
+one line under the model list: `Session root: <path> (contains the project and its
+worktrees)`.
+
 If the consumer has a local `opencode.jsonc` with `skills.paths`, add:
 
 - `VERIFY` / `WORKTREE_CREATE` / `NOTIFY`: Local `skills.paths` in project
@@ -117,8 +199,30 @@ Cost:
   opencode    — equivalent consumed: $<sum of cost column in DB> of $60/mo cap (flat-rate, not billed)
 ```
 
-Only include the cost line for the active host. If token data is unavailable,
-emit `"token accounting unavailable on this host"`.
+Only include the cost line for the active host.
+
+**Models: report what actually ran (never the routing table).** Every model id in this
+section MUST be the model that actually served that role, sourced from the orchestrator's
+own spawn records (the tier + model it recorded per phase at `phase-execution.md` 5a.2)
+and, where the host exposes it, cross-checked against `TOKEN_ACCOUNTING` (on opencode the
+per-session DB rows carry the model that served each child session). Do **not** transcribe
+`model-routing.md`: that file states the *configured* default, and a report echoing it can
+never reveal an override or a substitution — which is the only situation in which the audit
+matters, and the reason this section exists. Where actual and configured differ, report
+both: `Phase 3 (light): <actual-model-id> (configured: <routed-model-id>)`. Where the actual
+model genuinely cannot be recovered, write `unknown (configured: <model-id>)` — never fill
+the gap from the table.
+
+**Cost: measured or absent, never estimated.** The `Cost:` figure MUST come from
+`TOKEN_ACCOUNTING` for this run and from nothing else — on opencode, `SUM(cost)` over this
+run's session rows in the DB; on claude-code, the sum of the per-subagent session costs
+reported on completion. If `TOKEN_ACCOUNTING` is unavailable, emit
+`"token accounting unavailable on this host"` and no figure. If it covers only part of the
+run, report the measured part, name what it covers, and say the rest is unmeasured (e.g.
+`$0.57 measured across 10 sessions; orchestrator turns after this report not included`).
+Do **not** derive a figure from token counts, model prices, elapsed time, or a previous
+run, and never round an estimate into the slot: an unqueried figure has been wrong by 13x
+in practice, and a fabricated number in a spend report is worse than no number.
 
 ---
 
@@ -138,6 +242,9 @@ porting work beyond a binding:
       mechanism or a compatible extension format)
 - [ ] Subagent spawn with a prompt payload (no subagents = no orchestrator pattern)
 - [ ] Shell access (`bash` or equivalent), file editing, and `git`
+- [ ] A worker path scope that can be made to contain the project repository **and** its
+      sibling worktrees — if worker tool calls are confined to a root, the consumer must be
+      able to set that root at launch (see *Session Root Constraint*)
 
 The following are **degradable** — their absence reduces capability but does not
 block a run (the disclosure pattern handles it at Step 2):
@@ -162,7 +269,14 @@ next step begins:
    - Per-spawn model pinning — can the spawning call pin a model at call time, or
      is static named-config the only mechanism?
    - Parallelism — are parallel subagent runs possible and empirically confirmed
-     (not just documented)?
+     (not just documented)? Answer the two halves separately: can siblings *execute*
+     concurrently, and is there a *backgrounding* primitive that returns control to the
+     orchestrator mid-flight (which the 5b guard needs)? One without the other is not
+     `PACE`.
+   - Path scope — are a worker's tool calls confined to a root (session dir, sandbox,
+     allowlist)? What happens to a call outside it: an error, a prompt, or a silent hang?
+     Can the consumer widen the root at launch? A host that hangs silently needs a Step 0.5
+     precondition, not a degradation.
    - Cancellation — is there a first-class cancel/abort primitive reachable from
      within a running agent? If only via REST/external, is the session ID and
      server address knowable?
@@ -185,7 +299,8 @@ next step begins:
 
    For every capability in the table, add a cell with either the native binding
    or `unavailable → consequence`. Source every cell from the Step 1 probe
-   document — no assumptions. Update the *Parallel-Group Availability* table.
+   document — no assumptions. Update the *Parallel-Group Availability* table, and the
+   *Session Root Constraint* section if the host restricts `PATH_SCOPE`.
    Add any host-specific degradations to the *Disclosure Requirement Wiring*
    section.
 

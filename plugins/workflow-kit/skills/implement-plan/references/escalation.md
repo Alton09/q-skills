@@ -32,8 +32,12 @@ below, read it as "the failed phase or group."
    - [ ] Task ...
    ```
 
-   Write the updated plan back to disk before the escalation pass. This way, if the session
-   ends mid-rescue, the plan still reflects reality and a future run can pick up the thread.
+   Write the updated plan back to disk **before** the escalation pass — to the
+   **integration worktree's copy** of the plan (SKILL.md Step 7), the same copy the
+   checkboxes are written in and the same file the rung-2 rescue block below tells the user
+   to open. Never the original checkout's copy. This way, if the session ends mid-rescue, the
+   plan *in the worktree the user is sent to* still reflects reality and a future run can
+   pick up the thread.
 
 3. **Run the escalation pass** (reuse Step 5a.2 handoff + 5a.3 single-phase execution +
    Step 6 gate-verify), with these overrides:
@@ -79,6 +83,11 @@ below, read it as "the failed phase or group."
 
      On Claude Code, the HALTED format above is the complete callout — no rescue block is
      appended (the run is already on Claude Code).
+
+     The HALTED callout and its rescue block go in the **integration worktree's copy** of
+     the plan, on every host — same rule as the BLOCKED marker and the checkboxes. The block
+     instructs the user to open that worktree, so the marker must be findable there; a
+     handoff pointing at a tree with no record of the failure is a broken handoff.
 
 ## User-Wait (escalation exhausted)
 

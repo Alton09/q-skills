@@ -57,9 +57,13 @@ described in the Contract above.
 
 ### opencode
 
-- **`PACE`** → unavailable. There is no `run_in_background` / async-prompt equivalent on
-  the `task` tool, and no within-skill timed wakeup primitive. All groups are already
-  sequential, so the orchestrator tracks timing from spawn to completion notification.
+- **`PACE`** → **backgrounding unavailable** (the half this guard depends on). Sibling
+  subagents do *execute* concurrently on this host — measured — but the `task` tool has no
+  `run_in_background` / async-prompt equivalent and there is no within-skill timed wakeup
+  primitive, so control does not return to the orchestrator while a worker runs and no
+  mid-flight check-in is possible. Parallel groups are demoted to sequential for exactly
+  this reason (`references/runtimes.md`, *Parallel-Group Availability*), so the
+  orchestrator tracks timing from spawn to completion notification, one worker at a time.
 - **`STOP_WORKER`** → no first-class cancellation tool. The REST endpoint
   `POST /session/:id/abort` exists but is unreachable from within a running skill: the
   opencode server's HTTP port is randomly assigned at startup (unless `--port N` is set),

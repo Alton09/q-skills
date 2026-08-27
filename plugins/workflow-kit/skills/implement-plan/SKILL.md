@@ -26,7 +26,7 @@ and owns the pass/fail decision and task tracking.
 
 The workflow is written in **model tiers** (`light` / `standard` / `deep`) and
 **capability names** (`SPAWN_WORKER`, `STOP_WORKER`, `PACE`, `TOKEN_ACCOUNTING`,
-`VERIFY`, `WORKTREE_CREATE`, `NOTIFY`, `REVIEW`). It names no harness, tool, or model
+`VERIFY`, `WORKTREE_CREATE`, `NOTIFY`, `REVIEW`, `PATH_SCOPE`). It names no harness, tool, or model
 id. Step 0.5 binds both vocabularies to the detected host:
 
 - **`references/runtimes.md`** — capability bindings per host, host detection, disclosure wiring.
@@ -72,7 +72,7 @@ Step 0.5 (runtime detection) runs before everything below — see Step 0.
 4. **Plan Structure** — work from the delegated parse extract
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
-7. **Task Tracking** — check off completed phases in plan file
+7. **Task Tracking** — check off completed phases in the integration worktree's copy of the plan file
 8. **Plan Review & Auto-fix** — a deep-tier sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a standard-tier sub-agent under the same two-tier verify
 9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
 10. **Report** — summary, per-phase tiers/models, runtime & degradations, review outcome, PR link, worktree path, status
@@ -112,8 +112,8 @@ source, write code, or spawn any sub-agent before this completes.
    in the binding table is a **hard error** — halt with the exact message that file
    specifies. Never guess: a silent mismatch costs more than a user restart.
 2. **Load the capability bindings** for the detected host — `SPAWN_WORKER`, `STOP_WORKER`,
-   `PACE`, `TOKEN_ACCOUNTING`, `VERIFY`, `WORKTREE_CREATE`, `NOTIFY`, `REVIEW`. Every
-   capability this workflow calls by name is bound in that table.
+   `PACE`, `TOKEN_ACCOUNTING`, `VERIFY`, `WORKTREE_CREATE`, `NOTIFY`, `REVIEW`,
+   `PATH_SCOPE`. Every capability this workflow calls by name is bound in that table.
 3. **Load the per-role model map** for the detected host from
    **`references/model-routing.md`**, applying any config overrides (see Configuration).
    **Unknown model ids halt loudly and are never substituted** — emit the unknown id, the
@@ -121,6 +121,17 @@ source, write code, or spawn any sub-agent before this completes.
 4. **Note every degradation.** Each `unavailable → consequence` cell in the host's column is
    a degradation: record it for the Step 2 disclosure and the final report. Degraded
    capabilities are **disclosed, never simulated**.
+5. **Check the path-scope precondition.** Where the host's `PATH_SCOPE` is restricted to a
+   session root, confirm that root contains the **parent of the project repository** — the
+   directory that will hold the integration worktree and every child worktree as siblings.
+   If it does not, **halt** with the exact message in *Session Root Constraint*
+   (`references/runtimes.md`). This is checked here, before any worker exists, because on
+   such a host a worker pointed outside the root hangs forever with no error, no timeout and
+   no way to cancel it — the failure is undetectable once it has happened. Resolve the
+   project repository from the session's working directory, or from the plan path once
+   Step 1 supplies it; if it cannot be resolved yet, carry the check to Step 3 and run it
+   there. Either way it MUST pass before any worktree is created or any worker is spawned.
+   Hosts with an unrestricted `PATH_SCOPE` skip this check.
 
 ## Step 1: Plan Selection
 
@@ -165,6 +176,7 @@ in `references/runtimes.md`):
 ```
 Runtime: <host>
 Models: <role> → <tier> / <model>, …   (one line per role, from model-routing.md)
+Session root: <path>                   (restricted-`PATH_SCOPE` hosts only; verified at Step 0.5)
 Degraded capabilities on this host:
   - <capability>: <consequence>        (one line per unavailable cell)
   (none)                               ← if all capabilities are available
@@ -191,6 +203,14 @@ degradation list for the final report.
 Ask: "Should I create a new worktree? (y/n, default: y)"
 
 If yes, call `/create-worktree` skill (`WORKTREE_CREATE`). Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
+
+Worktree **placement** is host-independent: the integration worktree is a sibling of the
+project repository, and parallel-group child worktrees are siblings of the integration
+worktree (`references/phase-execution.md` 5a.2). That does not change to suit a host — where
+the host's `PATH_SCOPE` is restricted, the *session root* is what must contain them all.
+Run the Step 0.5 path-scope check now if it was deferred (the project repo is unambiguous by
+this point), and after `/create-worktree` returns, confirm the worktree it created is inside
+that root. If it is not, halt and report it rather than pointing a worker at it.
 
 ## Step 4: Plan Structure
 
@@ -249,8 +269,9 @@ Two rules are load-bearing and easy to get wrong:
   read committed history, so uncommitted work is invisible to both. The commit stays on the
   worktree/child branch; nothing is pushed or merged to `main`.
 
-**Parallelism is capability-gated.** Where the host's `PACE` binding is unavailable, every
-parallel group demotes to sequential — one phase at a time — regardless of declared
+**Parallelism is capability-gated.** `PACE` covers both concurrent execution and
+*backgrounding* (control returning mid-flight so the 5b guard can watch a running worker).
+Where either half is unavailable on the host, every parallel group demotes to sequential — one phase at a time — regardless of declared
 independence. The dependency graph is still computed and respected, and the worktree
 ownership contract is unchanged; the demotion is disclosed at Step 2.
 
@@ -340,11 +361,12 @@ the user-wait steps: **`references/escalation.md`**.
 
 ## Step 7: Task Tracking
 
-When a phase passes verification, update the plan file locally:
+When a phase passes verification, update the plan file:
 
-1. Read the plan file
+1. Read the plan file **in the integration worktree** (Step 3) — not the copy in the
+   original checkout
 2. Change phase checkbox from `- [ ]` to `- [x]`
-3. Write the updated plan back to the file
+3. Write the updated plan back to that same file
 
 Then print updated plan state so user can see progress:
 
@@ -356,7 +378,16 @@ Phases completed:
 - Phase 4: Documentation (pending)
 ```
 
-The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
+**Which copy (normative, every host).** With an integration worktree there are always two
+copies of the plan. Every plan-state update this skill makes — phase checkboxes, the BLOCKED
+callout, and the HALTED callout with its rung-2 rescue block
+(`references/escalation.md`) — lands in the **integration worktree's copy**, and only there.
+Never the original checkout's copy. That worktree copy is the file the rescue block tells the
+user to open and the file a resuming session reads, so a marker written anywhere else leaves
+the resume target with no record of the failure it is being asked to resume from. If the plan
+path you were given points outside the worktree, resolve it to the same relative path inside
+the worktree before writing. The worktree copy is yours to commit or leave dirty — but it is
+the copy that gets written.
 
 ## Step 8: Plan Review & Auto-fix
 
@@ -389,11 +420,26 @@ ends at the local worktree branch, as before.
 
 ## Step 10: Final Report
 
-Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
+Before writing the report, re-read the plan file **in the integration worktree** (the copy Step 7 writes, and the only copy that carries this run's state) and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
 The `Runtime & Models` section below is mandatory — it is the section
-`references/runtimes.md` specifies for the final report (that file calls it the "Step 9"
-report section; this file's report is Step 10 — same section).
+`references/runtimes.md` specifies for the final report. Two rules govern its contents, and
+both have been violated in practice:
+
+- **Models: report what actually ran.** Every model id in that section comes from the
+  orchestrator's own spawn records (the tier + model it recorded per phase at 5a.2) and,
+  where the host exposes it, from `TOKEN_ACCOUNTING`. Never transcribe
+  `references/model-routing.md`: that table is the *configured* default, and a report that
+  echoes it can never reveal an override or a substitution — the only case where the audit
+  matters. Where actual and configured differ, print both:
+  `Phase 3 (light): <actual> (configured: <routed>)`. Where the actual model cannot be
+  recovered, print `unknown (configured: <model-id>)` — never fill the gap from the table.
+- **Cost: measured or absent, never estimated.** The `Cost:` figure comes from
+  `TOKEN_ACCOUNTING` for this run and from nothing else. Unavailable → emit
+  `"token accounting unavailable on this host"` with no number. Partial → report the
+  measured part, say what it covers, and state that the rest is unmeasured. Do not derive a
+  figure from token counts, model prices, elapsed time, or a previous run. An estimated
+  spend figure has been wrong by 13x in practice; no number is better than a wrong one.
 
 Once all phases are checked off:
 
@@ -419,14 +465,15 @@ Once all phases are checked off:
 Host: <host>
 Orchestrator: <model-id>
 Per-phase models:
-  Phase <N> (<tier>): <model-id>
+  Phase <N> (<tier>): <model-id actually used> [ (configured: <routed-model-id>) if different ]
   …
-Gate-verify: <model-id>
-Review: <model-id>
+Gate-verify: <model-id actually used>
+Review: <model-id actually used>
 Degradations active: <list from Step 2, or "none">
-Cost: <metered spend for a metered host, or the flat-rate equivalent-consumed note for a
-flat-rate host — per `references/runtimes.md`; emit "token accounting unavailable on this
-host" when `TOKEN_ACCOUNTING` is unavailable>
+Cost: <read from TOKEN_ACCOUNTING for this run — metered spend on a metered host, or the
+flat-rate equivalent-consumed note on a flat-rate host, per `references/runtimes.md`; emit
+"token accounting unavailable on this host" when `TOKEN_ACCOUNTING` is unavailable. Never
+estimated>
 
 ## Review & Auto-fix
 - Reviewer: <tier> / <model> on `<base>...HEAD` via <REVIEW_SKILL>
@@ -589,7 +636,8 @@ Add ability to mark recipes as favorites and filter by them.
   isolated child worktrees (merged back into integration), dependent phases run after
   their prerequisites via the carry-forward summary. A linear plan degenerates to pure
   sequential. Logical independence never overrides file-overlap: phases sharing a file
-  are demoted to sequential (Step 5a.1). Where `PACE` is unavailable, every group is.
+  are demoted to sequential (Step 5a.1). Where the host lacks either half of `PACE` —
+  concurrent execution, or backgrounding to supervise it — every group is.
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before the group is checked off and advanced.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent

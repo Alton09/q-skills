@@ -267,4 +267,4 @@ its "Adding a host" section (Stage 2a):
 - [x] Stage 3 — Rewrite SKILL.md
 - [x] Stage 4 — Propagate (4a phase-execution, 4b runaway-guard, 4c escalation, 4d consumer docs)
 - [x] Stage 5 — Validate (dual-host end-to-end)
-- [ ] Stage 6 — Release v3.0.0
+- [ ] Stage 6 — Release v3.0.0 (skipped by user decision on 2026-08-27 — PR against v3.0.0 branch instead of cutting a release)

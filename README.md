@@ -181,12 +181,12 @@ same file (values shown are the bake-off-measured defaults):
       "description": "Deep-tier phase worker (complex tasks)"
     },
     "gate-verify": {
-      "model": "opencode-go/grok-4.5",
+      "model": "opencode-go/grok-4.6",
       "mode": "subagent",
       "description": "Behavioral gate-verify — family-diverse from all implementers"
     },
     "review": {
-      "model": "opencode-go/grok-4.5",
+      "model": "opencode-go/grok-4.6",
       "mode": "subagent",
       "description": "Post-plan review — family-diverse from all implementers"
     }
@@ -203,8 +203,8 @@ ORCHESTRATOR_MODEL=opencode-go/qwen3.8-max
 PHASE_MODEL_LIGHT=opencode-go/minimax-m3
 PHASE_MODEL_STANDARD=opencode-go/glm-5.3
 PHASE_MODEL_DEEP=opencode-go/kimi-k3
-VERIFY_MODEL=opencode-go/grok-4.5
-REVIEW_MODEL=opencode-go/grok-4.5
+VERIFY_MODEL=opencode-go/grok-4.6
+REVIEW_MODEL=opencode-go/grok-4.6
 FIX_MODEL=opencode-go/glm-5.3
 ```
 

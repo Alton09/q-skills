@@ -19,8 +19,8 @@
 | Phase — normal | standard | `sonnet` | `glm-5.3` |
 | Phase — complex | deep | `opus` | `kimi-k3` |
 | Gate-verify (exit-code) | light | `haiku` | `qwen3.7-plus` |
-| Gate-verify (behavioral) | standard | `sonnet` | `grok-4.5` |
-| Review | deep | `opus` | `grok-4.5` |
+| Gate-verify (behavioral) | standard | `sonnet` | `grok-4.6` |
+| Review | deep | `opus` | `grok-4.6` |
 | Fix | standard | `sonnet` | `glm-5.3` |
 | Escalation rung 1 | deep | `opus` | `qwen3.8-max` if Kimi implementer failed; `kimi-k3` if Qwen implementer failed |
 
@@ -84,7 +84,7 @@ be treated as a single unit for diversity purposes.
 | **MiniMax** | `minimax-m3` | MiniMax (China) | Independent company; distinct from other Chinese families |
 | **MiMo** | `mimo-v2.5` | Research model (China) | Very low equivalent-cost; distinct lineage from above |
 | **GPT** | `gpt-5.6-luna` | OpenAI lineage (Western) | Anomalous token_in reporting suggests provider-side caching; functional behavior correct in all canaries |
-| **Grok** | `grok-4.5` | xAI (Western) | Fastest fidelity in catalog (14s); distinct Western lineage; maximally family-diverse from all Chinese-family implementers |
+| **Grok** | `grok-4.6` | xAI (Western) | Fastest fidelity in catalog (14s); distinct Western lineage; maximally family-diverse from all Chinese-family implementers; grok-4.5 retired from catalog 2026-08 — replaced per catalog-drift rule; bake-off numbers are grok-4.5's |
 
 ### Diversity Pairing Reference
 
@@ -154,8 +154,8 @@ boundary.
 | `PHASE_MODEL_LIGHT` | `haiku` | `opencode-go/minimax-m3` | Mechanical-tier phase model |
 | `PHASE_MODEL_STANDARD` | `sonnet` | `opencode-go/glm-5.3` | Normal-tier phase model |
 | `PHASE_MODEL_DEEP` | `opus` | `opencode-go/kimi-k3` | Complex-tier phase model |
-| `VERIFY_MODEL` | `haiku` (exit-code) / `sonnet` (behavioral) | `opencode-go/qwen3.7-plus` / `opencode-go/grok-4.5` | Gate-verify models |
-| `REVIEW_MODEL` | `opus` | `opencode-go/grok-4.5` | Review model (Step 8) |
+| `VERIFY_MODEL` | `haiku` (exit-code) / `sonnet` (behavioral) | `opencode-go/qwen3.7-plus` / `opencode-go/grok-4.6` | Gate-verify models |
+| `REVIEW_MODEL` | `opus` | `opencode-go/grok-4.6` | Review model (Step 8) |
 | `FIX_MODEL` | `sonnet` | `opencode-go/glm-5.3` | Fix model (Step 8b) |
 | `ESCALATION_LADDER` | `opus` | Family-switch rule above | Rung-1 escalation model(s) |
 

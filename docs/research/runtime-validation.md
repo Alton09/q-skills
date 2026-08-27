@@ -635,3 +635,287 @@ Smoke status: `bash -n` clean; dry-run scaffold verified for both hosts × both 
 and argument validation rejects unknown hosts, scenarios and commands. Exercised for real
 six times: three completed runs, the rung-2 rescue, and the two opencode attempts that
 surfaced F1.
+
+---
+
+## Re-validation after fix commit 270089f
+
+> Date: 2026-08-27 · Claude Code 2.1.247 · opencode 1.18.18  
+> Skill under test: worktree copy at `plugins/workflow-kit/skills/implement-plan` (commit 270089f)  
+> Fix under test: F1–F5 + F8 (committed 2026-08-27 09:25 CDT)  
+> Harness: `scripts/validate-runtimes.sh` (updated by the same commit — no harness bugs blocked any run)
+
+The four confirmations called for by the fix author were executed in this order:
+
+| Run | Label | Host | Scenario | Wall | Cost |
+|---|---|---|---|---|---|
+| RV3 | rv3-opencode-narrow | opencode | narrow halt (F1 halt path) | 204 s | $0.189 equiv |
+| RV1 | rv1-claude-code-baseline | claude-code | regression | 454 s | **$3.0612 metered** |
+| RV2 | rv2-opencode-baseline | opencode | baseline + OC_LIGHT override | 744 s | $0.7144 equiv |
+| — | (initial RV2 attempt, killed by tool timeout) | opencode | — | ~590 s | $0.5322 equiv |
+
+**All four confirmations pass.** One new finding (F10) was filed: catalog drift in the opencode review model.
+
+---
+
+### Confirmation 1 — F1 (opencode): end-to-end and halt path
+
+**F1 end-to-end (RV2).** The harness launched opencode with `--dir rv2-opencode-baseline`
+(the parent directory containing both `project/` and the sibling worktrees it creates). All
+four phases completed; 19 tests passed; no subagent deadlock.
+
+Evidence from RV2 `collected.txt`:
+
+```
+project-wordkit  18525c3 [feat/wordkit]
+19 passed in 0.03s
+```
+
+Phase-1 gate-verify session in DB:
+```
+ses_fbc46711bffe | gate-verify | qwen3.7-plus | tok_in: 4369, tok_out: 229 | $0.0030
+```
+
+The session root check at Step 0.5 correctly fired a PASS note — not a halt:
+
+```
+Session root /private/tmp/.../rv2-opencode-baseline contains project/ and its worktree
+siblings → PATH_SCOPE precondition is satisfied.
+```
+
+**F1 halt path (RV3 — brand new, first exercise).** A deliberately-narrow run was launched
+with `--dir` pointing at the project directory itself (not its parent). The skill halted at
+Step 0.5, before any plan parse, worktree creation, or worker spawn, in **204 s** (well
+inside the 5-minute wall-clock cap). Timeout = regression-to-hang; no timeout occurred.
+
+Exact halt output from `artifacts/report.txt`:
+
+```
+Step 0.5 PATH_SCOPE precondition **failed** — the run halts here, before plan parse,
+worktree creation, or any worker spawn.
+
+Session root does not contain the project's worktree parent — this host confines every
+worker tool call to the session root, and implement-plan's worktrees are siblings of the
+project repo. Relaunch with the session root set to the directory containing both
+(opencode: `--dir <parent-of-project>`). Halt.
+```
+
+Evidence detail:
+- Session root checked: `.../rv3-opencode-narrow/project`
+- Project git toplevel resolved to same path; its parent `.../rv3-opencode-narrow` is
+  outside the root
+- No child sessions spawned (DB: one `build` session, $0.189 equiv, 0 child rows)
+- Recovery instructions in report correctly name the parent path
+
+**Verdict: PASS (both sub-tests).**
+
+---
+
+### Confirmation 2 — F5 (both hosts): worktree copy is the one that gets updated
+
+Checked on RV1 (claude-code) and RV2 (opencode) via harness `collect` grep output.
+
+**Claude Code (RV1):**
+```
+--- project/docs/plans/wordkit.md        ← original checkout
+- [ ] Create wordkit/constants.py …     ← all unchecked
+- [ ] Implement slugify …
+…
+--- project-wordkit/docs/plans/wordkit.md ← integration worktree
+- [x] Create wordkit/constants.py …     ← all checked
+- [x] Implement slugify …
+…
+```
+
+Commit `89f3f94` ("plan: check off Phases 3 and 4") is on `feat/wordkit` — the worktree
+branch — not on `main`. The original checkout's plan file is entirely unchecked.
+
+**opencode (RV2):**
+```
+--- project/docs/plans/wordkit.md        ← original checkout
+- [ ] Create wordkit/constants.py …     ← all unchecked
+…
+--- project-wordkit/docs/plans/wordkit.md ← integration worktree
+- [x] Create wordkit/constants.py …     ← all checked
+…
+```
+
+Commit `18525c3` ("Mark all phases complete") is on `feat/wordkit`. The orchestrator's
+mid-run transcript confirms: "Checking off Phase 1 (Step 7) in the worktree's plan copy."
+Original checkout unchanged.
+
+This is the direct reversal of the Stage 5 F5 finding, where opencode wrote to the original
+checkout and the worktree had no HALTED marker.
+
+**Verdict: PASS on both hosts.**
+
+---
+
+### Confirmation 3 — F3/F4 (opencode with OC_LIGHT override): actual model reported; cost from DB
+
+RV2 was launched with `OC_LIGHT=opencode-go/kimi-k2.7-code`. The routing table default for
+the light tier is `minimax-m3`. The Step 10 `Runtime & Models` section of the RV2 report:
+
+```
+Per-phase models (actual, cross-checked against opencode DB session rows):
+  Phase 1 (light): opencode-go/kimi-k2.7-code (configured routing default: minimax-m3 — local opencode.jsonc override)
+  Phase 2 (standard): opencode-go/glm-5.3
+  Phase 3 (light): opencode-go/kimi-k2.7-code (configured routing default: minimax-m3 — local override)
+  Phase 4 (light): opencode-go/kimi-k2.7-code (configured routing default: minimax-m3 — local override)
+Gate-verify: opencode-go/qwen3.7-plus (all 5 gate runs)
+```
+
+DB cross-check — every `phase-light` row:
+```
+ses_fbc4728f7ffe | phase-light | kimi-k2.7-code | $0.0212
+ses_fbc43d47dffe | phase-light | kimi-k2.7-code | $0.0230
+ses_fbc429c39ffe | phase-light | kimi-k2.7-code | $0.0293
+```
+
+All three phase-light sessions ran on `kimi-k2.7-code` (not `minimax-m3`). The report
+correctly identifies the override with the exact format `(configured routing default: minimax-m3)`.
+
+Cost line from report:
+```
+Cost: $0.6180 measured across this run's 11 DB sessions (equivalent consumed of $60/mo
+flat-rate cap, not billed): $0.4689 orchestrator (mid-run figure — turns after the query
+not included) + $0.1491 sub-agents.
+```
+
+DB total post-run: `SUM(cost) = $0.7144` across 11 sessions. The $0.0964 difference is the
+orchestrator's final turns writing the report — not an estimation error, but the honest
+mid-run read the spec describes. The report explicitly labels this: "mid-run figure — turns
+after the query not included."
+
+**Verdict: PASS.** The F3 fix (report actual model, not routing table) and the F4 fix
+(cost from DB, not estimated) both hold under an override.
+
+---
+
+### Confirmation 4 — Claude Code regression (RV1)
+
+RV1 ran the full 4-phase baseline on claude-code (model: opus).
+
+**Step 0.5 path-scope check:** No "Session root" line appeared in the disclosure; no halt
+triggered. Report disclosure block:
+
+```
+Degradations active: none
+```
+
+The spec requires claude-code to skip the `PATH_SCOPE` check entirely (unrestricted host).
+That is what happened — no check, no halt, no disclosure line for the session root. ✓
+
+**Actual models reported (F3):** Every model in the Step 10 section was an actual model name,
+not a tier alias transcribed from the routing table:
+
+```
+Orchestrator: opus
+Prep parse: sonnet
+Phase 1 (light):    haiku
+Phase 2 (standard): sonnet
+Phase 3 (light):    haiku
+Phase 4 (light):    haiku
+Gate-verify: haiku
+Review: opus
+```
+
+Note: "All models that actually ran match the configured routing for this host — no overrides
+or substitutions occurred." So there is no `(configured: …)` suffix here — correctly absent
+when actual == configured.
+
+**Measured cost (F4):**
+```
+Cost: $2.93 measured session spend (harness budget meter) … Per-sub-agent token totals
+(measured, from completion notifications): 154,009 tokens across 9 sub-agents …
+```
+
+Final harness-measured total: `total_cost_usd: $3.0612` (includes orchestrator turns written
+after the in-skill report read). The report's $2.93 is a partial, correctly labeled. ✓
+
+**F5 (worktree copy):** See Confirmation 2 above — claude-code now writes to the worktree
+copy. Confirmed.
+
+**Everything else behaviorally unchanged:** 4 phases, 9 sub-agents, parallel Phases 3+4 in
+sibling child worktrees (`.wt/phase-3-wordcount`, `.wt/phase-4-titlecase`), merged `--no-ff`,
+`branch -d` confirmed on both after merge, single integration gate-verify, 16 tests pass,
+review ran (0 auto-fixes, 6 below-threshold findings), Step 9 skipped (no `/create-pr`).
+
+**Verdict: PASS.** Regression holds; no behavioral regressions introduced.
+
+---
+
+### F10 — [low] opencode: `grok-4.5` model catalog drift; `grok-4.6` required
+
+**Observed in:** RV2 (rv2-opencode-baseline), Step 8.
+
+The harness default for `OC_REVIEW` is `opencode-go/grok-4.5`. When the review subagent was
+spawned, opencode returned: *"Model not found: opencode-go/grok-4.5. Did you mean: grok-4.6?"*
+
+The skill **correctly applied the loud-failure rule** ("unknown model ids error loudly and are
+never substituted") — Step 8 was halted entirely rather than falling back to an undocumented
+substitute. Report excerpt:
+
+```
+Review: FAILED TO SPAWN — configured REVIEW_MODEL opencode-go/grok-4.5 is unknown to the
+host catalog (host suggests grok-4.6). Halted per the loud-failure rule: unknown model ids
+error loudly and are never substituted. Step 8 was not run; no silent fallback occurred.
+```
+
+DB confirmation: `review | grok-4.5 | tokens_in: 0, tokens_out: 0, cost: $0.000` — the
+session row was created but zero tokens consumed, consistent with an immediate spawn error.
+
+**Impact:** Implementation phases completed correctly; only the post-implementation review was
+skipped. The loud-failure mechanism is validated as working. The underlying issue is catalog
+drift: `grok-4.5` has been superseded by `grok-4.6` in the opencode catalog.
+
+**Harness workaround** (per harness design — routed around without touching the skill):
+`OC_REVIEW=opencode-go/grok-4.6`. The fix for future validation runs is to update the
+`OC_REVIEW` default in `scripts/validate-runtimes.sh` and the `model-routing.md` opencode
+review default. Filed here; not patched.
+
+---
+
+### Parallel groups on opencode — out of scope (noted, not tested)
+
+The `PACE` binding for opencode deliberately stays sequential (binding rationale recorded in
+`references/runtimes.md` *Parallel-Group Availability*). The parallel-group path on opencode
+(child worktrees, `--no-ff` merge, atomic advance) remains unvalidated on that host. No test
+was run for this; the out-of-scope decision was the fix author's. Noted here for completeness.
+
+---
+
+### Updated cost table
+
+Full per-run cost history including this revalidation pass.
+
+| Run | Host | Scenario | Sessions | Tokens in | Tokens out | Cost | Wall |
+|---|---|---|---|---|---|---|---|
+| 1 — baseline | claude-code | regression | 9 sub-agents | 149,769 cache-read + 3,518 cache-write + 4 | 3,816 orch | **$2.4117 metered** | 427 s |
+| 2 — baseline | opencode | new path (attempt 3) | 10 sessions | 131,883 | 15,400 | **$0.5707 equiv** | 650 s |
+| 3 — forced failure | opencode | escalation | 10 sessions | 161,614 | 21,435 | **$0.8520 equiv** | 1335 s |
+| 3-rescue — rung 2 | claude-code | manual rescue | 6 sub-agents | 169,969 cache-read + 2,623 cache-write + 4 | 3,448 orch | **$2.4204 metered** | 649 s |
+| RV1 — baseline | claude-code | regression (post-fix) | 9 sub-agents | 176,862 cache-read + 3,959 cache-write + 4 | 4,226 orch | **$3.0612 metered** | 454 s |
+| RV2 — baseline | opencode | new path + OC_LIGHT override | 11 sessions | 118,419 | 17,251 | **$0.7144 equiv** | 744 s |
+| RV3 — narrow halt | opencode | F1 halt path (1 orch session) | 1 session | 40,210 | 1,778 | **$0.189 equiv** | 204 s |
+| (initial RV2, killed) | opencode | — | 11 sessions | 112,900 | 14,413 | **$0.5322 equiv** | ~590 s |
+
+**This revalidation pass total:** $3.0612 metered Claude + $1.4356 opencode equivalent (billed $0), ~1,990 s wall clock.
+
+**Cumulative total (all passes):** $7.8933 metered Claude + $3.6605 opencode equivalent (billed $0), ~5,051 s wall clock.
+
+---
+
+### Self-check
+
+| Check | Result | Evidence |
+|---|---|---|
+| Confirmation 1a — F1 end-to-end | **PASS** | RV2: 4 phases, 19 tests, no deadlock; session root precondition logged as satisfied |
+| Confirmation 1b — F1 narrow halt | **PASS** | RV3: halted at Step 0.5 in 204 s with exact spec message; no workers spawned |
+| Confirmation 2 — F5 worktree copy | **PASS** | RV1 + RV2: original checkout all `[ ]`, worktree copy all `[x]`, checkbox commit on worktree branch |
+| Confirmation 3 — F3/F4 model+cost | **PASS** | RV2: light-tier phases show `kimi-k2.7-code (configured: minimax-m3)`; cost $0.618 from DB |
+| Confirmation 4 — Claude Code regression | **PASS** | RV1: no path-scope halt; actual models in report; $2.93 measured (final $3.06) |
+| New finding filed | **DONE** | F10: grok-4.5 catalog drift; loud-failure rule applied correctly |
+| No SKILL.md or references/ edits | **DONE** | Only this addendum committed |
+
+All four confirmations have explicit pass/fail + evidence. No gaps remaining.

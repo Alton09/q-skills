@@ -170,17 +170,8 @@ structure error, fix the parse or fall back to reading the plan directly before 
 Disclose what this run is about to do — host, per-role models, and anything degraded on this
 host — **before any work starts**, then confirm the orchestrator model in the same beat.
 
-Emit the disclosure block (content from Step 0.5; format per *Disclosure Requirement Wiring*
-in `references/runtimes.md`):
-
-```
-Runtime: <host>
-Models: <role> → <tier> / <model>, …   (one line per role, from model-routing.md)
-Session root: <path>                   (restricted-`PATH_SCOPE` hosts only; verified at Step 0.5)
-Degraded capabilities on this host:
-  - <capability>: <consequence>        (one line per unavailable cell)
-  (none)                               ← if all capabilities are available
-```
+Emit the disclosure block (content from Step 0.5); format and host-specific required lines
+per *Disclosure Requirement Wiring* in `references/runtimes.md`.
 
 The orchestrator runs on **whatever model this session was launched with** — it cannot
 switch its own model mid-run. `ORCHESTRATOR_MODEL` (the host's **deep** tier) is the
@@ -441,185 +432,21 @@ both have been violated in practice:
   figure from token counts, model prices, elapsed time, or a previous run. An estimated
   spend figure has been wrong by 13x in practice; no number is better than a wrong one.
 
-Once all phases are checked off:
-
-```markdown
-# Implementation Summary
-
-**Plan:** <plan-name>
-**Orchestrator:** <tier> / <model>
-**Worktree:** <path>
-**Branch:** <branch-name>
-**PR:** <url, or `skipped — <reason>`>
-
-## Phases Completed
-- Phase 1: <description> — sub-agent: <tier> / <model>
-- Phase 2: <description> — sub-agent: <tier> / <model>
-- Phase 3: <description> — sub-agent: <tier> / <model>
-
-## Verification Status
-✓ All phases passed verification
-
-## Runtime & Models
-
-Host: <host>
-Orchestrator: <model-id>
-Per-phase models:
-  Phase <N> (<tier>): <model-id actually used> [ (configured: <routed-model-id>) if different ]
-  …
-Gate-verify: <model-id actually used>
-Review: <model-id actually used>
-Degradations active: <list from Step 2, or "none">
-Cost: <read from TOKEN_ACCOUNTING for this run — metered spend on a metered host, or the
-flat-rate equivalent-consumed note on a flat-rate host, per `references/runtimes.md`; emit
-"token accounting unavailable on this host" when `TOKEN_ACCOUNTING` is unavailable. Never
-estimated>
-
-## Review & Auto-fix
-- Reviewer: <tier> / <model> on `<base>...HEAD` via <REVIEW_SKILL>
-- Findings: <N total> — <M auto-fixed & verified> / <K left for you>
-- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <tier> / <model>
-- Left for you (below threshold): <one line each, severity + file:line + problem>
-- Rounds: <R> of <REVIEW_MAX_ROUNDS>
-
-## What's Next
-- Worktree is ready at <path>
-- Review code and decide: merge, iterate, or cleanup
-- Skill does NOT auto-merge or cleanup — that's your call
-```
-
-If hard-stopped due to failure:
-
-```markdown
-# Implementation Stopped
-
-**Plan:** <plan-name>
-**Failed Phase:** <phase-name>
-**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + escalation halted
-
-## Error Summary
-<error output from last /verify call>
-
-## Recovery
-- Review the error above
-- Fix the issue manually in the worktree
-- Signal ready to retry
-- Skill will rerun verification on the failed phase
-```
+→ Full report formats (summary and hard-stop variants): `references/report-formats.md`. Read it
+  at this step and emit the applicable block.
 
 ## Configuration
 
 Projects can override via environment or the project's agent config file (`CLAUDE.md`,
 `AGENTS.md`, or the host's equivalent):
 
-**Runtime**
-
-- `HOST_RUNTIME` — explicit host override for Step 0.5 detection. When unset, the host is
-  detected from the toolset. An unknown value, an ambiguous toolset, or a host with no
-  column in `references/runtimes.md` halts the run.
-
-**Models** — every default below resolves through the detected host's column in
-`references/model-routing.md`. **Unknown model ids halt loudly and are never substituted.**
-
-- `ORCHESTRATOR_MODEL` — orchestrator model (default: the host's **deep** tier)
-- `PREP_MODEL` — model for the delegated plan parse (Step 1). Default: the host's
-  **standard** tier — keeps the raw plan out of the orchestrator's persistent window while
-  preserving the load-bearing extract verbatim. (Avoid the `light` tier: the extract is
-  load-bearing and needs light judgment.)
-- `PHASE_MODEL_LIGHT` / `PHASE_MODEL_STANDARD` / `PHASE_MODEL_DEEP` — per-tier phase
-  sub-agent models (Step 5a.2), one per complexity class.
-- `VERIFY_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default: the
-  host's **standard** tier; drop to the **light** tier when the project's verify is a
-  deterministic exit-code gate.
-- `REVIEW_MODEL` — review sub-agent model (Step 8). Default: the host's **deep** tier.
-- `FIX_MODEL` — auto-fix sub-agent model (Step 8b). Default: the host's **standard** tier.
-- `ESCALATION_LADDER` — rung-1 escalation model(s) (Step 6). Default: the **deep** tier with
-  a family switch away from the implementer that failed.
-- *Deprecated aliases* — `PREP_AGENT_MODEL` → `PREP_MODEL`, `VERIFY_AGENT_MODEL` →
-  `VERIFY_MODEL`. Still accepted; they emit a deprecation warning on load and are removed in
-  a future major version.
-
-**Skills**
-
-- `VERIFY_SKILL` — project's verification skill (default: `/verify`)
-- `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
-- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
-  **non-interactive**: it runs as a background sub-agent with no user present, so a skill that
-  prompts mid-run (e.g. `/pr-review`, which asks which findings to keep and whether to post)
-  will stall. If absent, Step 8 is skipped.
-
-**Budgets and gates**
-
-- `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
-  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5a);
-  and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
-  escalation pass (Step 6). One knob, both retry budgets.
-- `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
-  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
-  `light` 80k / `standard` 150k / `deep` 250k. Single source for these numbers — Step 5b
-  references it.
-- `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
-  sub-agent (Step 5b). Default 15 min; scale up for `deep`-tier phases.
-- `ESCALATION_ATTEMPTS` — max rung-1 rescue attempts in the Step 6 escalation pass
-  before HALTED / user-wait. Default 2.
-- `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
-  the per-phase ceiling for the rescue. Default 400k (above the `deep`-tier phase 250k —
-  these are the hardest cases).
-- `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
-  30 min.
-- `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
-  (Step 5a.1/5a.3). Default 3; larger groups run in batches of this size. Has no effect on a
-  host whose `PACE` capability is unavailable — those runs are sequential.
-- `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
-  Default `true`; set `false` to stop after implementation.
-- `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
-  Default: high / correctness and above; lower-severity findings are reported, not touched.
-- `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
-  open (Step 8d). Default 2.
-- `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
-  set `false` to end the run at the local worktree branch. Has no effect when the project has
-  no `/create-pr` — the step is skipped either way.
+→ Full variable reference (Runtime, Models, Skills, Budgets/gates): `references/configuration.md`.
+  Read when answering a config question or applying an override.
 
 ## Plan Format Example
 
-```markdown
-# Feature: Recipe Favorites
-
-## Overview
-Add ability to mark recipes as favorites and filter by them.
-
-## Phases
-
-### Phase 1: Domain Layer
-- [ ] Create Favorite use case in domain/favorites/
-- [ ] Create FavoritesRepository interface
-- [ ] Add unit tests for use case
-
-### Phase 2: Data Layer
-- [ ] Implement FavoritesRepositoryImpl
-- [ ] Add Room entity and DAO
-- [ ] Add data layer tests
-
-### Phase 3: UI Layer
-- [ ] Create FavoritesViewModel with UDF state
-- [ ] Build Favorites Compose screens
-- [ ] Add UI tests
-
-### Phase 4: Integration
-- [ ] Wire up navigation
-- [ ] Integration tests across layers
-- [ ] Manual testing (happy path + edge cases)
-
-## Tests
-- FavoritesUseCaseTest: ≥80% coverage
-- FavoritesRepositoryImplTest: ≥80% coverage
-- FavoritesViewModelTest: ≥80% coverage
-
-## Edge Cases
-- Favorite a recipe, then delete it from system
-- Toggle favorite state rapidly
-- Sync favorites across multiple devices (if applicable)
-```
+→ Full annotated example: `references/plan-format.md`. Read when helping a user write or
+  debug a plan file, or when the prep agent returns a structure error.
 
 ## Notes
 

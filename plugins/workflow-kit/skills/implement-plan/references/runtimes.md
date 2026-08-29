@@ -4,7 +4,7 @@
 > running session — it is a static binding document authored once per host and
 > updated only when a new host probe runs (see *Adding a host* below).
 >
-> Sources: Stage 1a probe (`docs/research/opencode-host-primitives.md`, 2026-08-25);
+> Sources: Stage 1a probe (`opencode-host-primitives` note in the q-skills-vault Obsidian vault, 2026-08-25);
 > Claude Code defaults from current toolset.
 
 ---
@@ -153,10 +153,11 @@ content depends on the detected host:
 
 ```
 Runtime: <host>
-Models: <role> → <model or tier alias>, …  (one line per role, from model-routing.md)
+Models: <role> → <tier> / <model>, …   (one line per role, from model-routing.md)
+Session root: <path>                   (restricted-`PATH_SCOPE` hosts only; verified at Step 0.5)
 Degraded capabilities on this host:
-  - <capability>: <consequence>  (one line per unavailable cell in the table above)
-  (none)  ← if all capabilities are available
+  - <capability>: <consequence>        (one line per unavailable cell)
+  (none)                               ← if all capabilities are available
 ```
 
 For `opencode`, the following degradations MUST appear in the disclosure:
@@ -260,7 +261,7 @@ block a run (the disclosure pattern handles it at Step 2):
 Run these in order. Each step produces a recorded-findings document before the
 next step begins:
 
-1. **Probe its primitives** (Stage 1a shape) → `docs/research/<host>-host-primitives.md`
+1. **Probe its primitives** (Stage 1a shape) → a `<host>-host-primitives` research note (q-skills-vault `Notes/`)
 
    Answer each of these questions with yes/no + evidence and a degradation path
    for any "no":
@@ -288,7 +289,7 @@ next step begins:
      `--auto` + `question:deny`?
    - Billing model — metered, flat-rate, or free? What are the rate limits?
 
-2. **Bake off its model catalog** (Stage 1b shape) → `docs/research/<host>-model-bakeoff.md`
+2. **Bake off its model catalog** (Stage 1b shape) → a `<host>-model-bakeoff` research note (q-skills-vault `Notes/`)
 
    Three canaries (coding, tool-discipline, fidelity) on the models available on
    this host. Record per-role defaults + family groupings for the diversity rule.

@@ -4,7 +4,8 @@ Referenced from `SKILL.md` Step 6. Runs after a phase (or parallel group) has fa
 gate-verify on all `SELF_VERIFY_LIMIT` attempts.
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation
-loop, but with a stronger model and an extended budget. This is not a separate skill: it
+loop, run at the **deep tier with a family switch** (rung 1 of the ladder in
+`references/model-routing.md`), with an extended budget. This is not a separate skill: it
 reuses the orchestrator + sub-agent + two-tier-verify + 5b-guard machinery already defined,
 so the rescue attempt inherits the runaway guard automatically.
 
@@ -31,12 +32,20 @@ below, read it as "the failed phase or group."
    - [ ] Task ...
    ```
 
-   Write the updated plan back to disk before the escalation pass. This way, if the session
-   ends mid-rescue, the plan still reflects reality and a future run can pick up the thread.
+   Write the updated plan back to disk **before** the escalation pass — to the
+   **integration worktree's copy** of the plan (SKILL.md Step 7), the same copy the
+   checkboxes are written in and the same file the rung-2 rescue block below tells the user
+   to open. Never the original checkout's copy. This way, if the session ends mid-rescue, the
+   plan *in the worktree the user is sent to* still reflects reality and a future run can
+   pick up the thread.
 
 3. **Run the escalation pass** (reuse Step 5a.2 handoff + 5a.3 single-phase execution +
    Step 6 gate-verify), with these overrides:
-   - **Model forced to `opus`** regardless of the phase's complexity classification.
+   - **Rung 1 of the ladder** (`references/model-routing.md`): re-run at the **deep tier
+     with a family switch** away from the implementer that failed. On a single-family host
+     (Claude Code), the family switch is a no-op — the rescue is a deep-tier re-run with the
+     richer payload and extended budget. Consult `references/model-routing.md` for the
+     host-specific model selection.
    - **Extended 5b budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET` instead
      of the per-phase defaults (these are the hardest cases; don't strangle the rescue).
    - **Richer payload** — beyond the normal phase handoff, include the full failure history
@@ -53,10 +62,32 @@ below, read it as "the failed phase or group."
      a HALTED callout, then fall through to user-wait below:
 
      ```markdown
-     > 🛑 **HALTED**: escalation exhausted `ESCALATION_ATTEMPTS` opus rescue attempts.
+     > 🛑 **HALTED**: escalation exhausted `ESCALATION_ATTEMPTS` rung-1 rescue attempts.
      > **Last error:** <one-line summary>
      > **Worktree:** <worktree path>
+     > **Rungs run:**
+     >   - Rung 1, attempt 1: <model-id> (<family>)
+     >   - Rung 1, attempt 2: <model-id> (<family>)
      ```
+
+     On a host other than Claude Code, append the following block to the callout:
+
+     ```markdown
+     > **Resume in Claude Code:**
+     >   Worktree: <worktree path>
+     >   Failed phase: <phase-name and description>
+     >   Models already run (rung 1): <model-id> (<family>), …
+     >   Relaunch: Open this worktree in Claude Code and run `/implement-plan` to continue
+     >   from this phase with full Claude Code capabilities.
+     ```
+
+     On Claude Code, the HALTED format above is the complete callout — no rescue block is
+     appended (the run is already on Claude Code).
+
+     The HALTED callout and its rescue block go in the **integration worktree's copy** of
+     the plan, on every host — same rule as the BLOCKED marker and the checkboxes. The block
+     instructs the user to open that worktree, so the marker must be findable there; a
+     handoff pointing at a tree with no record of the failure is a broken handoff.
 
 ## User-Wait (escalation exhausted)
 

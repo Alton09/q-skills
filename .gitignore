@@ -14,3 +14,6 @@ __MACOSX
 
 # Tooling scratch
 .lavish/
+
+# Bake-off scratch dirs
+scratch/

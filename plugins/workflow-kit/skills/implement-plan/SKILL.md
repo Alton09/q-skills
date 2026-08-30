@@ -165,6 +165,12 @@ causes bad scheduling or worktree collisions.
 right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
 structure error, fix the parse or fall back to reading the plan directly before proceeding.
 
+When resuming a partially-complete plan, also diff the working-tree plan against committed
+state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
+are unreliable evidence of completed work — they may be someone's uncommitted edit, and are
+destroyable. Trust committed history for the resume point, and confirm the work exists in the
+diff rather than in the checkbox.
+
 ## Step 2: Runtime & Model Disclosure
 
 Disclose what this run is about to do — host, per-role models, and anything degraded on this
@@ -358,6 +364,12 @@ When a phase passes verification, update the plan file:
    original checkout
 2. Change phase checkbox from `- [ ]` to `- [x]`
 3. Write the updated plan back to that same file
+4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
+   Do not leave plan state uncommitted between phases. The same reasoning that makes 5a.2
+   require phase commits applies here: sub-agents run `git add -A` and other destructive git
+   commands in this worktree, and an uncommitted checkbox is silently destroyable. A
+   plan-only commit also keeps progress legible in history and survives a worker that resets
+   the tree.
 
 Then print updated plan state so user can see progress:
 

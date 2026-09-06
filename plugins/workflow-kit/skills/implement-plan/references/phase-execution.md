@@ -76,6 +76,11 @@ everything the phase needs:
   **committed** history — uncommitted work is invisible to the merge and to the reviewer. The
   commit lands on the worktree/child branch only; nothing is pushed or merged to `main` (see
   SKILL.md Notes).
+- **Destructive-git prohibition**: "Do NOT run `git reset --hard`, `git checkout -- <path>`,
+  `git restore`, `git clean`, or `git stash` in this worktree. The orchestrator keeps
+  uncommitted state here (plan progress, and in-flight work from other phases) and these
+  commands destroy it with no warning and no recovery. To discard your own changes, revert the
+  specific edit you made."
 - Explicit boundaries: "implement ONLY this phase's tasks; do NOT edit the plan file,
   do NOT start other phases. Return a structured summary."
 - Required return format: files touched, what each does, decisions made, anything the

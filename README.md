@@ -13,7 +13,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix, then a draft PR opened via the project's `/create-pr` |
 
 #### Composable Skills
 
@@ -26,6 +26,7 @@ your project's `.claude/skills/` before running implement-plan or feature-plan:
 | `/create-worktree` | Required | Create an isolated git worktree and branch; return its path |
 | `/clean-architecture` | Required | Load layer rules and naming conventions into context |
 | `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
+| `/create-pr` | **Optional** | Open a **draft** PR for the finished worktree branch, non-interactively, and return its URL. implement-plan's final step delegates here; skipped gracefully if absent. |
 
 See [`examples/android/`](examples/android/) for a working reference implementation targeting
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those

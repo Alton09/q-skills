@@ -8,7 +8,8 @@ description: |
   with phases and checkboxes) and want to implement it in an isolated worktree with
   full verification and automatic task tracking. An Opus orchestrator delegates each
   phase to a model-matched sub-agent, runs two-tier verification, escalates stuck
-  phases, and reviews the finished diff — see the body for the mechanics.
+  phases, reviews the finished diff, and opens a draft PR via the project's
+  `/create-pr` (when one exists) — see the body for the mechanics.
 
   Perfect for feature implementations, refactors, and bug fixes where you need
   quality gates, per-phase delegation, and progress visibility.
@@ -56,7 +57,8 @@ and owns the pass/fail decision and task tracking.
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
-9. **Report** — summary, per-phase models, review outcome, worktree path, status
+9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
+10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -111,6 +113,12 @@ causes bad scheduling or worktree collisions.
 **Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
 right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
 structure error, fix the parse or fall back to reading the plan directly before proceeding.
+
+When resuming a partially-complete plan, also diff the working-tree plan against committed
+state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
+are unreliable evidence of completed work — they may be someone's uncommitted edit, and are
+destroyable. Trust committed history for the resume point, and confirm the work exists in the
+diff rather than in the checkbox.
 
 ## Step 2: Orchestrator Model
 
@@ -268,7 +276,13 @@ When a phase passes verification, update the plan file locally:
 
 1. Read the plan file
 2. Change phase checkbox from `- [ ]` to `- [x]`
-3. Write the updated plan back to the file
+3. Write the updated plan back to that same file
+4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
+   Do not leave plan state uncommitted between phases. The same reasoning that makes 5a.2
+   require phase commits applies here: sub-agents run `git add -A` and other destructive git
+   commands in this worktree, and an uncommitted checkbox is silently destroyable. A
+   plan-only commit also keeps progress legible in history and survives a worker that resets
+   the tree.
 
 Then print updated plan state so user can see progress:
 
@@ -296,7 +310,20 @@ below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_R
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
-## Step 9: Final Report
+## Step 9: Pull Request
+
+Runs only after Step 8 has fully settled — every review round finished, every auto-fix
+committed and gate-verified. If the project provides a `/create-pr` skill and `CREATE_PR`
+is not `false`, invoke it from the integration worktree, passing the branch, and let it own
+everything else — push, title, body, templates, host tooling. PR conventions vary too much
+between projects for this skill to bundle an implementation.
+
+Expectations on the project's `/create-pr`: open a **draft** PR, never merge anything, run
+without prompting (Step 9 is unattended), and return the PR URL for the report. If no
+`/create-pr` skill exists in the session, skip this step and say so in the report — the run
+ends at the local worktree branch, as before.
+
+## Step 10: Final Report
 
 Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
 
@@ -309,6 +336,7 @@ Once all phases are checked off:
 **Orchestrator:** <orchestrator model, e.g. Opus 4.8>
 **Worktree:** <path>
 **Branch:** <branch-name>
+**PR:** <url, or `skipped — <reason>`>
 
 ## Phases Completed
 - Phase 1: <description> — sub-agent: <model>
@@ -391,6 +419,9 @@ Projects can override via environment or project CLAUDE.md:
   Default: high / correctness and above; lower-severity findings are reported, not touched.
 - `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
   open (Step 8d). Default 2.
+- `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
+  set `false` to end the run at the local worktree branch. Has no effect when the project has
+  no `/create-pr` — the step is skipped either way.
 
 ## Plan Format Example
 
@@ -459,7 +490,8 @@ Add ability to mark recipes as favorites and filter by them.
   integration worktree stays on disk until you decide (merge, delete, etc.).
 - **Phases commit, but only to the worktree branch** — each phase commits its own work
   (required so the parallel merge and the Step 8 review diff can see it; see 5a.2). Those
-  commits stay on the integration/child branch in the worktree — nothing is pushed or merged
-  to `main`. The branch is yours to review, squash, merge, or discard.
+  commits stay on the integration/child branch in the worktree — nothing is merged for you.
+  Only Step 9's delegated `/create-pr` pushes the branch, and only to open a draft PR. The
+  branch is yours to review, squash, merge, or discard.
 - **User review is required** — don't merge automatically, inspect first
 - **Skill failures are explicit** — hard stops make it clear when user input is needed

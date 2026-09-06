@@ -5,21 +5,13 @@ off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, SKIP this
 there is nothing coherent to review. Disable entirely with `RUN_REVIEW=false`. If
 `REVIEW_SKILL` is not available in the project, skip Step 8 and note it in the report.
 
-This step mirrors Step 5's delegation discipline: the deep-tier reviewer (via the `REVIEW`
-capability / `REVIEW_MODEL`) exercises judgment, a standard/light-tier fix agent
-(via `FIX_MODEL`) handles mechanical application, and the orchestrator holds only the
-findings list — it never ingests the raw diff.
+This step mirrors Step 5's delegation discipline: Opus reviews (judgment), a cheaper agent
+fixes (mechanical), and the orchestrator holds only the findings list — it never ingests
+the raw diff.
 
-On **claude-code** the deep-tier is `opus` and the standard/light-tier is `sonnet` / `haiku`
-respectively; on **opencode** these are the named subagents registered in `model-routing.md`
-(`review` and `fix`). Consult `references/model-routing.md` for per-host model ids.
+## 8a. Delegate the review (Opus)
 
-## 8a. Delegate the review (deep tier — REVIEW capability)
-
-Spawn ONE review sub-agent via the `REVIEW` capability (`REVIEW_MODEL`, deep tier; default:
-`opus` on claude-code, `opencode-go/grok-4.6` on opencode — see `model-routing.md` and the
-opencode agent-name registry there). Invoke as background; the 5b runaway guard applies.
-Payload:
+Spawn ONE review sub-agent with `model: opus` (background; 5b guard applies). Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -45,35 +37,22 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
 
 If the auto-fix queue is empty, skip to 8d.
 
-## 8c. Delegate the fixes (standard/light tier — FIX_MODEL, sequential in integration)
+## 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
 
 Review findings cluster on shared files, so fixes run **in the integration worktree, not in
 parallel** — parallel fix agents would collide (the Step 5a file-overlap problem). Bundle
 the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
 
-1. Classify complexity across its findings → light tier (mechanical edits, no inference
-   required) or standard tier (needs reasoning / cross-file inference); use the max tier
-   across the bundle. Same tier table as Step 5a.2.
-
-   | Finding character | Tier |
-   |---|---|
-   | Mechanical edits — rename, reformat, trivial substitution | light |
-   | Reasoning required — logic correction, cross-file consistency | standard |
-   | Genuinely tricky — ambiguous root cause, cross-cutting design | deep |
-
-   On **claude-code** these map to `haiku` (light), `sonnet` (standard), `opus` (deep);
-   on **opencode** use the corresponding named subagents (`fix` defaults to standard tier —
-   see `model-routing.md`). Escalate to deep tier only for genuinely tricky fixes.
-
-2. Spawn ONE fix sub-agent via `FIX_MODEL` at the classified tier (background; 5b guard) in
-   the integration worktree. Payload: the verbatim findings to fix and the **same two-tier
-   verify contract as Step 5** — "after fixing, run /verify and iterate while warm (bounded
-   by `SELF_VERIFY_LIMIT`); report your self-verify result."
+1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
+   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to `opus`
+   only for genuinely tricky fixes.)
+2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
+   verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
+   fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your
+   self-verify result."
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — independent confirmation, exactly as for a phase.
-4. Gate fail → the Step 6 retry / escalation path, unchanged. Escalation (rung 1 of
-   `model-routing.md`) switches to the deep tier with a family-diverse model — same ladder
-   as a failed phase.
+4. Gate fail → the Step 6 retry / escalation path, unchanged.
 
 ## 8d. Bounded re-review
 

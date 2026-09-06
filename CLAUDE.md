@@ -10,7 +10,7 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Current Plugins
 
-- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan; implement-plan runs natively on Claude Code or opencode with per-role model routing, and delegates PR creation to the consuming project's `/create-pr`)
+- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan; implement-plan has a built-in opus escalation rescue and delegates PR creation to the consuming project's `/create-pr`)
 - `dev-toolkit` — Standalone dev utilities (notify-me, pr-review, skill-sharpener)
 
 ## Dependencies

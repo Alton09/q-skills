@@ -40,19 +40,17 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
-**1. Classify complexity → pick the sub-agent tier** (auto, no user prompt). Judge
-the phase's tasks and assign a tier:
+**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
+the phase's tasks and map to the Agent tool's `model` parameter:
 
-| Phase character | Tier |
+| Phase character | Agent `model` |
 |---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `light` |
-| Normal feature work (typical layer impl, standard tests) | `standard` |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `deep` |
+| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
+| Normal feature work (typical layer impl, standard tests) | `sonnet` |
+| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
 
-The tier resolves to a host-specific model via `references/model-routing.md`
-(`PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, `PHASE_MODEL_DEEP`). The orchestrator
-resolves the model at spawn time using the active host binding. Record the chosen tier
-and model per phase for the final report.
+The values are the literal `model` enum tokens — pass them straight to the Agent tool.
+Record the chosen model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
 everything the phase needs:
@@ -62,19 +60,9 @@ everything the phase needs:
   - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
   - *Parallel phase* → its own **child worktree** that the orchestrator created off
     integration HEAD; the agent works ONLY inside that child worktree.
-  **Worktree-ownership rule (normative):** the orchestrator creates and owns every
-  worktree explicitly — workers must never create worktrees of their own. A worker
-  spawning its own worktree (e.g. via `isolation: "worktree"` on claude-code) scatters
-  each phase's edits and breaks carry-forward. Edits never touch `main`.
-  **Worktree-placement rule (normative, host-independent):** the integration worktree is a
-  **sibling** of the project repository, and each child worktree is a **sibling** of the
-  integration worktree (5a.3) — never nested inside either, so the integration build and
-  gate-verify never traverse in-flight child files and the project's own tooling never
-  walks the worktrees. This shape is the same on every host. Where a host confines worker
-  tool calls to a session root (`PATH_SCOPE` restricted — see *Session Root Constraint* in
-  `references/runtimes.md`), the **session root** is what must contain the whole family;
-  the worktrees do not move. Step 0.5 verifies that and halts if it fails, because a worker
-  pointed outside such a root hangs with no error and no way to cancel it.
+  In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
+  every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
+  edits and breaks carry-forward. Edits never touch `main`.
 - **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
   key decisions, public interfaces introduced — covering **all completed prerequisite
   phases**, so this phase builds correctly on what came before. (Within a parallel group,
@@ -101,29 +89,12 @@ everything the phase needs:
 
 ## 5a.3 Execute each layer
 
-Walk layers in topological order (5a.1). Every phase agent is spawned via **SPAWN_WORKER**
-(on claude-code: the `Agent` tool with `run_in_background: true`). This gives no live
-token/tool feed, but it buys two things the orchestrator needs: it stays responsive instead
-of blocking (so it can run the 5b wall-clock guard, and watch several agents at once), and
-each spawned worker is stoppable via **STOP_WORKER**. On hosts without STOP_WORKER
-(opencode: no first-class cancellation tool — see `references/runtimes.md`), the guard
-is post-hoc only: a runaway worker burns to completion before the token ceiling stops its
-successor. The completion notification carries the agent's total token count and duration,
-which feeds the 5b ceiling check.
-
-**PACE and parallel-group demotion:** `PACE` covers two things — running phases
-*concurrently*, and *backgrounding*: control returning to the orchestrator while a worker
-runs, which is what the 5b wall-clock guard needs in order to observe an in-flight agent.
-Where **either** half is unavailable, the entire parallel group demotes to sequential —
-phases run one at a time in the integration worktree rather than in isolated child
-worktrees. On opencode the missing half is backgrounding: sibling subagents do execute
-concurrently (measured), but the `task` tool blocks until the child returns, so with no
-backgrounding and no `STOP_WORKER` a concurrent group there would run entirely
-unsupervised. See *Parallel-Group Availability* in `references/runtimes.md` for the full
-rationale and what a future flip would require. The orchestrator's dependency graph is still computed and its ordering
-respected; the atomic-advance contract (all phases in the group checked off only when the
-whole group passes the integration gate-verify) is unchanged. Child worktree creation is
-skipped for groups that are sequential-demoted.
+Walk layers in topological order (5a.1). Every phase agent is spawned with the Agent tool
+and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
+the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
+wall-clock guard, and watch several agents at once), and each agent is cancellable via
+`TaskStop`. The completion notification carries the agent's total token count and
+duration, which feeds the 5b ceiling check.
 
 **Single-phase layer (the common case — unchanged from sequential):**
 1. Spawn the phase agent in the integration worktree (background; 5b guard applies).

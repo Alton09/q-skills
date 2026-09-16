@@ -21,15 +21,19 @@ set -euo pipefail
 #                               parallel pair            (default)
 #               forced-failure  2 phases: mechanical, then a phase whose
 #                               committed contract test is UNSATISFIABLE —
-#                               forces gate failure -> escalation rung 1
-#                               -> HALTED + "Resume in Claude Code" block
+#                               forces gate failure -> escalation rung 1.
+#                               Acceptance criterion on claude-code: a bare
+#                               HALTED callout is emitted and the run stops.
+#                               No rescue block is appended on claude-code.
 #               resume          no scaffold; re-enters an existing run
 #                               directory (RUN_DIR=... required) on this host.
-#                               This is how escalation rung 2 ("Resume in
-#                               Claude Code") is exercised end-to-end: point
-#                               RUN_DIR at the halted run, PROJECT_SUBDIR at
-#                               its integration worktree, and pass the human's
-#                               decision via PROMPT_OVERRIDE.
+#                               On claude-code, HALTED is the complete terminal
+#                               state — point RUN_DIR at the halted run,
+#                               PROJECT_SUBDIR at its integration worktree,
+#                               and pass the human's decision via
+#                               PROMPT_OVERRIDE to confirm the skill accepts
+#                               the decision and stops cleanly (bare HALTED
+#                               callout, no rescue block).
 #     command   all (default) | setup | run | collect
 #
 # ENVIRONMENT
@@ -79,6 +83,10 @@ SKILL_SRC="$REPO_ROOT/plugins/workflow-kit/skills"
 VALIDATION_ROOT="${VALIDATION_ROOT:-${TMPDIR:-/tmp}/implement-plan-validation}"
 RUN_LABEL="${RUN_LABEL:-${HOST}-${SCENARIO}}"
 RUN_DIR="${RUN_DIR:-$VALIDATION_ROOT/$RUN_LABEL}"
+# Absolute path for notifications so every worktree (including phase worktrees
+# nested under $RUN_DIR/.wt/) appends to the same file that collect() reads.
+NOTIFICATIONS_LOG="$RUN_DIR/notifications.log"
+export NOTIFICATIONS_LOG
 PROJECT_SUBDIR="${PROJECT_SUBDIR:-project}"
 PROJECT_DIR="$RUN_DIR/$PROJECT_SUBDIR"
 # A resume run must not overwrite the artifacts of the run it is rescuing —
@@ -99,9 +107,19 @@ log() { printf '[validate-runtimes] %s\n' "$*" >&2; }
 # Portable wall-clock cap: macOS ships no coreutils `timeout`.
 with_timeout() {
   local secs="$1"; shift
+  # Enable monitor mode so the background job runs in its own process group
+  # (pgid == pid).  The watchdog then uses kill -- -$pid to signal every
+  # descendant, including the real claude child that would otherwise be
+  # orphaned when only the wrapper subshell is killed.
+  set -m
   "$@" &
   local pid=$!
-  ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null; sleep 5; kill -KILL "$pid" 2>/dev/null ) &
+  set +m
+  ( sleep "$secs"
+    kill -TERM -- -"$pid" 2>/dev/null
+    sleep 5
+    kill -KILL -- -"$pid" 2>/dev/null
+  ) &
   local watchdog=$!
   local rc=0
   wait "$pid" || rc=$?
@@ -114,7 +132,34 @@ with_timeout() {
 # ===========================================================================
 
 scaffold_project() {
+  # On a re-run, the previous run may have left registered git worktrees,
+  # sibling directories, and a notifications.log under $RUN_DIR.  Clean all of
+  # these before re-scaffolding so /create-worktree never sees "already exists"
+  # and collect() never presents stale notification pages.
+  if git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    # De-register sibling worktrees via git so .git/worktrees stays consistent.
+    git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+      | awk '/^worktree /{print $2}' \
+      | while IFS= read -r wt; do
+          [[ "$wt" == "$PROJECT_DIR" ]] && continue
+          [[ "$wt" == "$RUN_DIR/"* ]] || continue
+          git -C "$PROJECT_DIR" worktree remove --force "$wt" 2>/dev/null \
+            || rm -rf "$wt"
+        done
+    git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
+  fi
   rm -rf "$PROJECT_DIR"
+  # Remove any remaining sibling directories under RUN_DIR (e.g. .wt/ left after
+  # phase worktrees were de-registered, or integration worktrees missed above).
+  # Only touch direct children of $RUN_DIR; never touch the artifacts directory.
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    case "$(basename "$d")" in
+      artifacts|"artifacts-resume-"*) continue ;;
+      *) rm -rf "$d" ;;
+    esac
+  done < <(find "$RUN_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+  rm -f "$RUN_DIR/notifications.log"
   mkdir -p "$PROJECT_DIR"/{wordkit,tests,docs/plans,.claude/skills}
 
   cat > "$PROJECT_DIR/verify.sh" <<'EOF'
@@ -215,7 +260,7 @@ description: Send the user a notification. Use to page the user on completion, a
 Append the message to the run's notification log and echo it:
 
 ```bash
-echo "[notify] $(date -u +%FT%TZ) <message>" | tee -a "$(git rev-parse --show-toplevel)/../notifications.log"
+echo "[notify] $(date -u +%FT%TZ) <message>" | tee -a "${NOTIFICATIONS_LOG}"
 ```
 
 This is a headless validation environment — there is no interactive user. After
@@ -253,10 +298,22 @@ plant_failure() {
   # point. It forces gate failure -> rung 1 family switch -> HALTED, which is
   # the escalation path under test. The fix requires a judgement call the
   # phase contract forbids (editing a test the phase did not create), which is
-  # exactly what the manual "Resume in Claude Code" rung exists for.
+  # exactly what the manual rung exists for.
+  #
+  # pytest.importorskip keeps the test inert (entire module skipped, rc=0 for
+  # the skip) when wordkit.slugify does not yet exist (Phase 1), and fails as
+  # a single assertion failure (rc=1) once the module is created (Phase 2).
+  # Without this, pytest aborts collection (rc=2) and the scenario halts in
+  # Phase 1 instead of reaching the intended phase.
   cat > "$PROJECT_DIR/tests/test_slugify_contract.py" <<'EOF'
 """Frozen contract tests for slugify. Phase agents must NOT edit this file."""
-from wordkit.slugify import slugify
+import pytest
+
+slugify_mod = pytest.importorskip(
+    "wordkit.slugify",
+    reason="wordkit.slugify not yet implemented — skipping until Phase 2",
+)
+slugify = slugify_mod.slugify
 
 
 def test_contract_hyphen_form():

@@ -1,44 +1,24 @@
 # Model Routing Reference
 
-> Per-role model map, family groupings, diversity rule, escalation ladder, and config surface
-> for `implement-plan`. Applies to both Claude Code and opencode hosts.
->
-> opencode column: **bake-off-governed** — sourced from Stage 1b measured results
-> (docs/research/model-bakeoff.md, 2026-08-25, opencode 1.18.18). Hypothesis column from the
-> plan is superseded; this file is the authoritative record.
+> Per-role model map, diversity rule, escalation ladder, and config surface
+> for `implement-plan`.
 
 ---
 
 ## Routing Table
 
-| Role | Tier | Claude Code | opencode |
-|---|---|---|---|
-| Orchestrator | deep | `opus` | `qwen3.8-max` |
-| Prep parse | standard | `sonnet` | `qwen3.7-plus` |
-| Phase — mechanical | light | `haiku` | `minimax-m3` |
-| Phase — normal | standard | `sonnet` | `glm-5.3` |
-| Phase — complex | deep | `opus` | `kimi-k3` |
-| Gate-verify (exit-code) | light | `haiku` | `qwen3.7-plus` |
-| Gate-verify (behavioral) | standard | `sonnet` | `grok-4.6` |
-| Review | deep | `opus` | `grok-4.6` |
-| Fix | standard | `sonnet` | `glm-5.3` |
-| Escalation rung 1 | deep | `opus` | `qwen3.8-max` if Kimi implementer failed; `kimi-k3` if Qwen implementer failed |
-
-### Plan Hypothesis Overturned by Measurement
-
-The plan hypothesized `kimi-k3` as orchestrator for the opencode host. Stage 1b bake-off
-overturns this: kimi-k3 failed the tool-discipline canary (C2) with a premature stop after
-4 of 10 sequential tool calls, with no retries — a disqualifying behavior for orchestrator
-and gate roles where completing all required sequential steps is non-negotiable.
-
-**qwen3.8-max** replaces kimi-k3 as orchestrator. **kimi-k3** is retained as the complex-phase
-implementer, where batching tool calls in implementation context is acceptable and the gate
-catches errors.
-
-`deepseek-v4-flash` and `deepseek-v4-pro` were excluded from the bake-off and from this table:
-both are unreachable on the opencode-go catalog without China-region opt-in (`deepseek-v4-flash`
-returns an explicit error; `deepseek-v4-pro` silently produces 0 tokens). All 10 remaining
-catalog models were successfully canary-tested.
+| Role | Tier | Claude Code |
+|---|---|---|
+| Orchestrator | deep | `opus` |
+| Prep parse | standard | `sonnet` |
+| Phase — mechanical | light | `haiku` |
+| Phase — normal | standard | `sonnet` |
+| Phase — complex | deep | `opus` |
+| Gate-verify (exit-code) | light | `haiku` |
+| Gate-verify (behavioral) | standard | `sonnet` |
+| Review | deep | `opus` |
+| Fix | standard | `sonnet` |
+| Escalation rung 1 | deep | `opus` |
 
 ---
 
@@ -50,53 +30,23 @@ must be treated as misconfiguration.
 1. **Tool-call discipline outranks raw capability** for orchestrator and gate roles. A model
    that fumbles sequential tool calls stalls the pipeline; a disciplined mediocre model writes
    mediocre code the gate catches. The bake-off C2 canary (10 sequential tool calls, 0 retries
-   = pass) is the measurement basis for these roles. kimi-k3's 4/10 failure is the direct
-   evidence for this principle.
+   = pass) is the measurement basis for these roles.
 
 2. **Diversity rule** (where the host's catalog has more than one model family): gate-verify
    and review must use a **different model family** than the implementer they check.
    Escalation rung 1 switches family from the failed implementer.
-   Minimum: different company/training lineage (within-cluster diversity). Preferred: cross-cluster
-   (Chinese-family implementer + Western-family gate/review). This rule exists because
-   same-family models share blind spots; cross-family checking is free on a flat-rate plan.
+   Minimum: different company/training lineage (within-cluster diversity). This rule exists
+   because same-family models share blind spots.
 
-3. **Flat-rate changes tier economics:** inside opencode, tiers exist for latency management
-   and the $60/month equivalent cap, not per-token cost. **Never pick a weaker model to "save"
-   un-metered tokens.** On Claude Code, tiers save real money — the usual frugality applies.
+3. **Tier choice follows the host's billing model.** On metered hosts, tiers save real money
+   — the usual frugality applies. On flat-rate hosts, tiers exist for latency management only
+   and the token-frugality calculus is reversed — **never pick a weaker model to save
+   unmetered tokens.** Claude Code is metered.
 
 4. **Unknown model ids error loudly, never substitute.** The catalog drifts. When a configured
    model id is not recognized by the host, the skill must halt with an explicit error naming
    the unknown id. Silent fallback to any other model is forbidden — it masks misconfiguration
    and produces unaccountable routing.
-
----
-
-## Model Family Groupings
-
-Required for the diversity rule. All models within one family share training lineage and must
-be treated as a single unit for diversity purposes.
-
-| Family | Models | Origin | Notes |
-|---|---|---|---|
-| **Kimi** | `kimi-k3`, `kimi-k2.7-code` | Moonshot AI (China) | Same company, same training lineage; treat as one family regardless of size |
-| **GLM** | `glm-5.3` | Zhipu AI (China) | ChatGLM series; different company from Kimi/Qwen |
-| **Qwen** | `qwen3.7-plus`, `qwen3.8-max`, `qwen3.7-max` | Alibaba (China) | Same Qwen3 series; treat all as one family regardless of size suffix |
-| **MiniMax** | `minimax-m3` | MiniMax (China) | Independent company; distinct from other Chinese families |
-| **MiMo** | `mimo-v2.5` | Research model (China) | Very low equivalent-cost; distinct lineage from above |
-| **GPT** | `gpt-5.6-luna` | OpenAI lineage (Western) | Anomalous token_in reporting suggests provider-side caching; functional behavior correct in all canaries |
-| **Grok** | `grok-4.6` | xAI (Western) | Fastest fidelity in catalog (14s); distinct Western lineage; maximally family-diverse from all Chinese-family implementers; grok-4.5 retired from catalog 2026-08 — replaced per catalog-drift rule; bake-off numbers are grok-4.5's |
-
-### Diversity Pairing Reference
-
-Default per-role map satisfies the diversity rule as follows:
-
-| Implementer | Family | Gate-verify | Gate family | Gate-diverse? |
-|---|---|---|---|---|
-| Phase mechanical | MiniMax | Qwen (exit-code), Grok (behavioral) | Qwen, Grok | Yes |
-| Phase normal | GLM | Qwen (exit-code), Grok (behavioral) | Qwen, Grok | Yes |
-| Phase complex | Kimi | Qwen (exit-code), Grok (behavioral) | Qwen, Grok | Yes |
-
-Review (Grok) is family-diverse from all three implementer families (Kimi, GLM, MiniMax).
 
 ---
 
@@ -111,11 +61,6 @@ implementer that failed. Payload includes full failure history with verbatim err
 and a "diagnose root cause before fixing" instruction. Budget: `ESCALATION_TOKEN_CEILING`
 (default 400k) and `ESCALATION_TIME_BUDGET` (default 30 min). Capped at
 `ESCALATION_ATTEMPTS` (default 2 rung-1 attempts before rung 2).
-
-**opencode-specific family-switch rule:**
-- If the failed implementer was **Kimi family** (kimi-k3): escalation model is `qwen3.8-max`
-- If the failed implementer was **Qwen family** (qwen3.8-max): escalation model is `kimi-k3`
-- If the failed implementer was any other family: escalation model is `qwen3.8-max`
 
 **Claude Code:** escalation always uses `opus` (there is only one deep-tier model family on
 Claude Code; no family-switch is possible, but `opus` re-run with richer payload and extended
@@ -143,64 +88,32 @@ boundary.
 
 ---
 
-## opencode Agent-Name Registry (Normative)
-
-> **Source of truth for opencode subagent names.** Every named subagent that `implement-plan`
-> invokes on opencode MUST appear in the consuming project's `opencode.jsonc` `agent` block
-> with the exact name listed here. The orchestrator invokes workers by these names via
-> `SPAWN_WORKER` (see `runtimes.md` SPAWN_WORKER cell). Names in the harness
-> (`scripts/validate-runtimes.sh`) are also aligned with this table.
-
-| Role | Required agent name | Default model | Tier | Notes |
-|---|---|---|---|---|
-| Prep parse | `prep` | `opencode-go/qwen3.7-plus` | standard | Step 1 — plan normalization |
-| Phase — mechanical | `phase-light` | `opencode-go/minimax-m3` | light | Boilerplate, wiring, renames |
-| Phase — normal | `phase-standard` | `opencode-go/glm-5.3` | standard | Typical feature work |
-| Phase — complex | `phase-deep` | `opencode-go/kimi-k3` | deep | Novel algorithms, cross-cutting design |
-| Gate-verify (exit-code) | `gate-verify` | `opencode-go/qwen3.7-plus` | light | Runs `/verify`; pass/fail only |
-| Gate-verify (behavioral) | `gate-verify-behavioral` | `opencode-go/grok-4.6` | standard | Behavioral review — family-diverse from all implementers |
-| Review | `review` | `opencode-go/grok-4.6` | deep | Step 8a — plan diff review; family-diverse from all implementers |
-| Fix | `fix` | `opencode-go/glm-5.3` | standard | Step 8c — applies review findings |
-| Escalation (rung 1) | `escalation` | `opencode-go/qwen3.8-max` | deep | Family-switch rescue; see escalation ladder above for family-switch rule |
-
-**Pinning:** on opencode, the `model` field in each agent block is the **only** mechanism
-that pins the model for that role — per-spawn override at call time is not supported by the
-host. Env-var overrides (`REVIEW_MODEL`, `FIX_MODEL`, etc.) read by the orchestrator at
-Step 0.5 select which named agent serves a role where that applies; they do not change the
-model the named agent uses. To change the actual model, update the `agent.<name>.model` field
-in `opencode.jsonc` and restart the session.
-
-**Adding a host:** a new host column in `runtimes.md` must also add a corresponding section
-here if its `SPAWN_WORKER` binding requires static named agents.
-
----
-
 ## Config Surface
 
 ### Environment Variables / CLAUDE.md Overrides
 
-| Variable | Default (Claude Code) | Default (opencode) | Description |
-|---|---|---|---|
-| `ORCHESTRATOR_MODEL` | `opus` | `opencode-go/qwen3.8-max` | Orchestrator model |
-| `PREP_MODEL` | `sonnet` | `opencode-go/qwen3.7-plus` | Prep-parse model (Step 1) |
-| `PHASE_MODEL_LIGHT` | `haiku` | `opencode-go/minimax-m3` | Mechanical-tier phase model |
-| `PHASE_MODEL_STANDARD` | `sonnet` | `opencode-go/glm-5.3` | Normal-tier phase model |
-| `PHASE_MODEL_DEEP` | `opus` | `opencode-go/kimi-k3` | Complex-tier phase model |
-| `VERIFY_MODEL` | `haiku` (exit-code) / `sonnet` (behavioral) | `opencode-go/qwen3.7-plus` / `opencode-go/grok-4.6` | Gate-verify models |
-| `REVIEW_MODEL` | `opus` | `opencode-go/grok-4.6` | Review model (Step 8) |
-| `FIX_MODEL` | `sonnet` | `opencode-go/glm-5.3` | Fix model (Step 8b) |
-| `ESCALATION_LADDER` | `opus` | Family-switch rule above | Rung-1 escalation model(s) |
+| Variable | Default (Claude Code) | Description |
+|---|---|---|
+| `ORCHESTRATOR_MODEL` | `opus` | Orchestrator model |
+| `PREP_MODEL` | `sonnet` | Prep-parse model (Step 1) |
+| `PHASE_MODEL_LIGHT` | `haiku` | Mechanical-tier phase model |
+| `PHASE_MODEL_STANDARD` | `sonnet` | Normal-tier phase model |
+| `PHASE_MODEL_DEEP` | `opus` | Complex-tier phase model |
+| `VERIFY_MODEL` | `haiku` (exit-code) / `sonnet` (behavioral) | Gate-verify models |
+| `REVIEW_MODEL` | `opus` | Review model (Step 8) |
+| `FIX_MODEL` | `sonnet` | Fix model (Step 8b) |
+| `ESCALATION_LADDER` | `opus` | Rung-1 escalation model(s) |
 
 ### Tier Token Ceilings (unchanged)
 
 `PHASE_TOKEN_CEILING` is keyed by tier. Values are the existing SKILL.md defaults and must
 not be altered by this file.
 
-| Tier | Claude Code model | opencode model | Token ceiling |
-|---|---|---|---|
-| light | `haiku` | `minimax-m3` | 80k |
-| standard | `sonnet` | `glm-5.3` | 150k |
-| deep | `opus` | `kimi-k3` / `qwen3.8-max` | 250k |
+| Tier | Claude Code model | Token ceiling |
+|---|---|---|
+| light | `haiku` | 80k |
+| standard | `sonnet` | 150k |
+| deep | `opus` | 250k |
 
 Escalation ceiling (`ESCALATION_TOKEN_CEILING`): 400k (default, unchanged).
 
@@ -227,9 +140,9 @@ If any configured model id (default or override) is not recognized by the host a
 2. Emit an explicit error naming the unknown id, the role it was assigned to, and the host.
 3. Do not fall back silently to any other model.
 
-The catalog drifts between opencode releases. When a bake-off-governed default is removed
-from the catalog, the skill surfaces it immediately so the operator can re-run the bake-off
-and update the routing table, rather than discovering silent degradation mid-run.
+The catalog drifts. When a bake-off-governed default is removed from the catalog, the skill
+surfaces it immediately so the operator can re-run the bake-off and update the routing
+table, rather than discovering silent degradation mid-run.
 
 ---
 
@@ -244,4 +157,5 @@ When a new harness is added to `runtimes.md`, this file gains a new column. Requ
 5. Verify the diversity rule is satisfied for the new host's default pairing.
 
 The SKILL.md tier vocabulary and capability names remain unchanged — only this file and
-`runtimes.md` gain new columns.
+`runtimes.md` gain new columns. If the new host's `SPAWN_WORKER` binding requires static
+named agents, add a corresponding normative agent-name registry section here.

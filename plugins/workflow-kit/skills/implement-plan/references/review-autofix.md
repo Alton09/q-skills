@@ -10,15 +10,13 @@ capability / `REVIEW_MODEL`) exercises judgment, a standard/light-tier fix agent
 (via `FIX_MODEL`) handles mechanical application, and the orchestrator holds only the
 findings list — it never ingests the raw diff.
 
-On **claude-code** the deep-tier is `opus` and the standard/light-tier is `sonnet` / `haiku`
-respectively; on **opencode** these are the named subagents registered in `model-routing.md`
-(`review` and `fix`). Consult `references/model-routing.md` for per-host model ids.
+Consult `references/model-routing.md` for per-host model ids.
 
 ## 8a. Delegate the review (deep tier — REVIEW capability)
 
-Spawn ONE review sub-agent via the `REVIEW` capability (`REVIEW_MODEL`, deep tier; default:
-`opus` on claude-code, `opencode-go/grok-4.6` on opencode — see `model-routing.md` and the
-opencode agent-name registry there). Invoke as background; the 5b runaway guard applies.
+Spawn ONE review sub-agent via the `REVIEW` capability (`REVIEW_MODEL`, deep tier —
+resolve the model from `model-routing.md` for the active host). Invoke as background; the
+5b runaway guard applies.
 Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
@@ -61,9 +59,8 @@ the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
    | Reasoning required — logic correction, cross-file consistency | standard |
    | Genuinely tricky — ambiguous root cause, cross-cutting design | deep |
 
-   On **claude-code** these map to `haiku` (light), `sonnet` (standard), `opus` (deep);
-   on **opencode** use the corresponding named subagents (`fix` defaults to standard tier —
-   see `model-routing.md`). Escalate to deep tier only for genuinely tricky fixes.
+   Resolve the model from `model-routing.md` for the active host. Escalate to deep tier
+   only for genuinely tricky fixes.
 
 2. Spawn ONE fix sub-agent via `FIX_MODEL` at the classified tier (background; 5b guard) in
    the integration worktree. Payload: the verbatim findings to fix and the **same two-tier

@@ -105,10 +105,9 @@ Walk layers in topological order (5a.1). Every phase agent is spawned via **SPAW
 (on claude-code: the `Agent` tool with `run_in_background: true`). This gives no live
 token/tool feed, but it buys two things the orchestrator needs: it stays responsive instead
 of blocking (so it can run the 5b wall-clock guard, and watch several agents at once), and
-each spawned worker is stoppable via **STOP_WORKER**. On hosts without STOP_WORKER
-(opencode: no first-class cancellation tool — see `references/runtimes.md`), the guard
-is post-hoc only: a runaway worker burns to completion before the token ceiling stops its
-successor. The completion notification carries the agent's total token count and duration,
+each spawned worker is stoppable via **STOP_WORKER**. Where **STOP_WORKER** is unavailable
+on the host (see `references/runtimes.md`), the guard is post-hoc only: a runaway worker
+burns to completion before the token ceiling stops its successor. The completion notification carries the agent's total token count and duration,
 which feeds the 5b ceiling check.
 
 **PACE and parallel-group demotion:** `PACE` covers two things — running phases
@@ -116,11 +115,10 @@ which feeds the 5b ceiling check.
 runs, which is what the 5b wall-clock guard needs in order to observe an in-flight agent.
 Where **either** half is unavailable, the entire parallel group demotes to sequential —
 phases run one at a time in the integration worktree rather than in isolated child
-worktrees. On opencode the missing half is backgrounding: sibling subagents do execute
-concurrently (measured), but the `task` tool blocks until the child returns, so with no
-backgrounding and no `STOP_WORKER` a concurrent group there would run entirely
-unsupervised. See *Parallel-Group Availability* in `references/runtimes.md` for the full
-rationale and what a future flip would require. The orchestrator's dependency graph is still computed and its ordering
+worktrees. Where backgrounding is unavailable on the host, there is no way to observe an
+in-flight group and — with no `STOP_WORKER` — no way to stop it; a concurrent group would
+run entirely unsupervised. See *Parallel-Group Availability* in `references/runtimes.md`
+for the full rationale and what a future flip would require. The orchestrator's dependency graph is still computed and its ordering
 respected; the atomic-advance contract (all phases in the group checked off only when the
 whole group passes the integration gate-verify) is unchanged. Child worktree creation is
 skipped for groups that are sequential-demoted.

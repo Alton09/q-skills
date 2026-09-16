@@ -13,7 +13,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
-| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix, then a draft PR opened via the project's `/create-pr` |
+| implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, a deep-tier escalation ladder, and a post-plan review + auto-fix, then a draft PR opened via the project's `/create-pr` |
 
 #### Composable Skills
 
@@ -121,7 +121,7 @@ q-skills/
         plugin.json           # Plugin manifest (v1.1.0)
       skills/
         feature-plan/         # Feature planning skill
-        implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
+        implement-plan/       # Plan execution skill (with built-in deep-tier escalation ladder)
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)

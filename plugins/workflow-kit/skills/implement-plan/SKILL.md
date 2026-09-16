@@ -475,8 +475,7 @@ Projects can override via environment or the project's agent config file (`CLAUD
   isolated child worktrees (merged back into integration), dependent phases run after
   their prerequisites via the carry-forward summary. A linear plan degenerates to pure
   sequential. Logical independence never overrides file-overlap: phases sharing a file
-  are demoted to sequential (Step 5a.1). Where the host lacks either half of `PACE` —
-  concurrent execution, or backgrounding to supervise it — every group is.
+  are demoted to sequential (Step 5a.1).
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before the group is checked off and advanced.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent

@@ -42,8 +42,9 @@ and owns the pass/fail decision and task tracking.
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
   real quality gate; it writes no code and makes no decisions.
-- **Review sub-agent** (Step 8, `opus`): reviews the full plan diff via the project's
-  review skill and returns a structured findings list only — no code, no decisions.
+- **Review sub-agent** (Step 8, `REVIEW_EXECUTOR` deep tier): reviews the full plan diff
+  via the project's review skill and returns a structured findings list only — no code, no
+  decisions.
 - **Fix sub-agent** (Step 8, Sonnet/Haiku by complexity): applies the severity-gated
   findings in the integration worktree under the same two-tier verify contract as a phase.
 
@@ -56,7 +57,7 @@ and owns the pass/fail decision and task tracking.
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
-8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
+8. **Plan Review & Auto-fix** — review sub-agent (deep tier of `REVIEW_EXECUTOR`) reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
 9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
 10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
 
@@ -309,8 +310,9 @@ worktree, resolve it to the same relative path inside the worktree before writin
 Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
 hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
 
-Mirrors Step 5's delegation discipline: an **Opus** sub-agent reviews the cumulative plan
-diff (`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
+Mirrors Step 5's delegation discipline: a review sub-agent at the deep tier of
+`REVIEW_EXECUTOR` (see Configuration) reviews the cumulative plan diff
+(`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
 list only — the orchestrator never ingests the raw diff. Findings are triaged at
 `REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **Sonnet/Haiku** fix pass run
 sequentially in the integration worktree under the same two-tier verify as a phase;
@@ -373,7 +375,7 @@ Once all phases are checked off:
 ✓ All phases passed verification
 
 ## Review & Auto-fix
-- Reviewer: Opus 4.8 on `<base>...HEAD` via <REVIEW_SKILL>
+- Reviewer: <REVIEW_MODEL> on `<base>...HEAD` via <REVIEW_SKILL>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
 - Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
 - Left for you (below threshold): <one line each, severity + file:line + problem>
@@ -451,6 +453,25 @@ Projects can override via environment or project CLAUDE.md:
 - `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
   set `false` to end the run at the local worktree branch. Has no effect when the project has
   no `/create-pr` — the step is skipped either way.
+- `PHASE_EXECUTOR` — which executor runs phase and fix workers. Default `claude` (Agent tool,
+  today's behavior). Set `pi` to route workers through the Bash shell-out contract in
+  `references/phase-execution.md` § 5a.3. The orchestrator, prep agent, and gate-verify
+  agents always stay on `claude` regardless of this setting.
+- `REVIEW_EXECUTOR` — which executor runs the Step 8 capstone review sub-agent (not the
+  per-phase gate-verify, which always stays on `claude`). Default: follows `PHASE_EXECUTOR`.
+  With `PHASE_EXECUTOR=pi`, the review runs at the pi deep tier (`opencode-go/kimi-k3`); set
+  `REVIEW_EXECUTOR=claude` explicitly to keep the reviewer on Opus while workers run on pi.
+  **Family-diversity rule (mandatory, not a suggestion):** the reviewer and implementer must
+  come from different model families. When both resolve to the same deep-tier family (e.g.
+  both default to `kimi-k3`), switch the reviewer to `opencode-go/qwen3.8-max`. **Caveat:**
+  no bake-off canary measured review *judgement* quality — C1 (coding), C2 (tool discipline),
+  and C3 (fidelity) cover implementation; review quality on a real diff is unmeasured and
+  Task 7 establishes it. Use `REVIEW_EXECUTOR=claude` if review reliability is a concern.
+- `REVIEW_MODEL` — the specific model for the Step 8 review sub-agent. Default: deep tier of
+  `REVIEW_EXECUTOR` (`opencode-go/kimi-k3` when pi, `opus` when claude; subject to the
+  family-diversity override above). Set explicitly to override the tier default without
+  changing the executor. This variable did not exist on `main`; previously the reviewer model
+  was hardcoded.
 
 ## Plan Format Example
 
@@ -511,9 +532,10 @@ Add ability to mark recipes as favorites and filter by them.
   raw source, so it doesn't get re-processed every turn.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
-- **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent
-  reviews the whole plan diff; only severity-gated findings are auto-fixed (Sonnet/Haiku),
-  the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`; disable with `RUN_REVIEW`.
+- **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent
+  (deep tier of `REVIEW_EXECUTOR`) reviews the whole plan diff; only severity-gated
+  findings are auto-fixed, the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`;
+  disable with `RUN_REVIEW`.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).

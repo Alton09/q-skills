@@ -5,13 +5,14 @@ off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, SKIP this
 there is nothing coherent to review. Disable entirely with `RUN_REVIEW=false`. If
 `REVIEW_SKILL` is not available in the project, skip Step 8 and note it in the report.
 
-This step mirrors Step 5's delegation discipline: Opus reviews (judgment), a cheaper agent
-fixes (mechanical), and the orchestrator holds only the findings list — it never ingests
-the raw diff.
+This step mirrors Step 5's delegation discipline: the review sub-agent (deep tier,
+executor-resolved) reviews for judgment, a cheaper fix agent handles mechanical changes,
+and the orchestrator holds only the findings list — it never ingests the raw diff.
 
-## 8a. Delegate the review (Opus)
+## 8a. Delegate the review
 
-Spawn ONE review sub-agent with `model: opus` (background; 5b guard applies). Payload:
+Spawn ONE review sub-agent at the deep tier of `REVIEW_EXECUTOR` (resolved as `REVIEW_MODEL`;
+see SKILL.md Configuration; background; 5b guard applies). Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -44,8 +45,8 @@ parallel** — parallel fix agents would collide (the Step 5a file-overlap probl
 the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
 
 1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
-   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to `opus`
-   only for genuinely tricky fixes.)
+   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to the
+   deep tier of `PHASE_EXECUTOR` only for genuinely tricky fixes.)
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
    fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your

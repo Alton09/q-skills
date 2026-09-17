@@ -41,7 +41,10 @@ batches of that size.
 For each phase (sequential or parallel), build its handoff:
 
 **1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
-the phase's tasks and map to the Agent tool's `model` parameter:
+the phase's tasks and map to a model for the active executor (`PHASE_EXECUTOR`, default
+`claude`).
+
+**`claude` executor** — map to the Agent tool's `model` parameter:
 
 | Phase character | Agent `model` |
 |---|---|
@@ -50,6 +53,17 @@ the phase's tasks and map to the Agent tool's `model` parameter:
 | Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
 
 The values are the literal `model` enum tokens — pass them straight to the Agent tool.
+
+**`pi` executor** — map to an `opencode-go` model string:
+
+| Phase character (tier) | `--model` value |
+|---|---|
+| Mechanical/boilerplate (light) | `opencode-go/minimax-m3` |
+| Normal feature work (standard) | `opencode-go/glm-5.3` |
+| Complex/novel (deep) | `opencode-go/kimi-k3` |
+
+These defaults come from the 2026-09-16 bake-off results.
+
 Record the chosen model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
@@ -89,12 +103,40 @@ everything the phase needs:
 
 ## 5a.3 Execute each layer
 
-Walk layers in topological order (5a.1). Every phase agent is spawned with the Agent tool
+Walk layers in topological order (5a.1). `PHASE_EXECUTOR` (default `claude`) determines how
+each phase agent is spawned.
+
+**`claude` executor (default):** Every phase agent is spawned with the Agent tool
 and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
 the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
 wall-clock guard, and watch several agents at once), and each agent is cancellable via
 `TaskStop`. The completion notification carries the agent's total token count and
 duration, which feeds the 5b ceiling check.
+
+**`pi` executor:** Spawn with `Bash(run_in_background: true)`:
+
+```
+cd <worktree> && pi -p --mode json --no-session \
+  --model <provider/id> \
+  --skill <consumer .claude/skills> \
+  "$(cat <handoff-file>)" </dev/null
+```
+
+Every clause is load-bearing:
+
+- `</dev/null` is **mandatory**. Without it pi never returns and emits nothing at all —
+  measured on 2026-09-16: a backgrounded invocation produced 0 bytes on stdout and stderr
+  and was killed at 180 s (rc=124). A worker that hangs silently is the one failure the
+  orchestrator cannot diagnose from output.
+- Pass the handoff via a file read into argv, never as a long inline argument — the 5a.2
+  payload is large and argv quoting is fragile.
+- `--skill` points at the consumer project's skill directory so the worker can run
+  `/verify`. No symlink into `.agents/`, no edits to `~/.pi/agent/settings.json`.
+- The worker's worktree is simply the process `cwd`. There is no session-root constraint,
+  because the orchestrator is not the confined process.
+
+The worktree-ownership rule and the destructive-git prohibition in the handoff (5a.2) apply
+identically to both executors — they are properties of the handoff, not the harness.
 
 **Single-phase layer (the common case — unchanged from sequential):**
 1. Spawn the phase agent in the integration worktree (background; 5b guard applies).

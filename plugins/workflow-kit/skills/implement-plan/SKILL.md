@@ -272,9 +272,10 @@ the user-wait steps: **`references/escalation.md`**.
 
 ## Step 7: Task Tracking
 
-When a phase passes verification, update the plan file locally:
+When a phase passes verification, update the plan file:
 
-1. Read the plan file
+1. Read the plan file **in the integration worktree** (Step 3) — not the copy in the
+   original checkout
 2. Change phase checkbox from `- [ ]` to `- [x]`
 3. Write the updated plan back to that same file
 4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
@@ -294,7 +295,14 @@ Phases completed:
 - Phase 4: Documentation (pending)
 ```
 
-The plan file is updated in your working directory — you decide what to do with it (commit, discard, etc.).
+**Which copy (normative).** With an integration worktree there are always two copies of the
+plan. Every plan-state update this skill makes — phase checkboxes, the BLOCKED callout, and
+the HALTED callout (`references/escalation.md`) — lands in the **integration worktree's
+copy**, and only there. Never the original checkout's copy. That worktree copy is the file a
+resuming session reads and the file the rung-2 rescue block tells the user to open, so a
+marker written anywhere else leaves the resume target with no record of the failure it is
+being asked to resume from. If the plan path you were given points outside the integration
+worktree, resolve it to the same relative path inside the worktree before writing.
 
 ## Step 8: Plan Review & Auto-fix
 
@@ -325,7 +333,25 @@ ends at the local worktree branch, as before.
 
 ## Step 10: Final Report
 
-Before writing the report, re-read the plan file and confirm every implemented phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
+Before writing the report, re-read the plan file **in the integration worktree** (the copy
+Step 7 writes, and the only copy that carries this run's state) and confirm every implemented
+phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
+
+Two rules govern the report's contents and have been violated in practice:
+
+**F3 — Models: report what actually ran.** Every model id in the report comes from the
+orchestrator's own spawn records (the model it recorded per phase at Step 5a.2), never
+transcribed from configuration defaults or a routing table. A report that echoes configured
+defaults can never reveal an override or substitution — the only case where the audit
+matters. Where actual and configured differ, print both:
+`Phase 3 (light): <actual> (configured: <configured>)`. Where the actual model cannot be
+recovered, print `unknown (configured: <id>)` — never fill the gap from a table.
+
+**F4 — Cost: measured or absent, never estimated.** Any cost figure comes from token
+accounting for this run and nothing else. Unavailable → emit `token accounting unavailable`
+with no number. Partial → report the measured part and name what it covers. Never derive a
+figure from token counts, model prices, elapsed time, or a previous run. An estimated cost
+figure was wrong by 13× in a real run; no number is better than a wrong one.
 
 Once all phases are checked off:
 
@@ -352,6 +378,9 @@ Once all phases are checked off:
 - Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
+
+## Cost
+<measured from token accounting for this run, or "token accounting unavailable">
 
 ## What's Next
 - Worktree is ready at <path>

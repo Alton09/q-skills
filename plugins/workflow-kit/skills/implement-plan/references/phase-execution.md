@@ -105,6 +105,23 @@ everything the phase needs:
   next phase needs, your final self-verify result (pass/fail + remaining errors), and
   any tasks you could not complete.
 
+**3. Foreign executors: name the required skills by path.** For any executor other than
+`claude`, add a block to the handoff that lists, by file path, the project skills the worker
+must read **before editing** (e.g. the project's architecture skill before touching source)
+and the skill it must follow **to finish** (the project's verify skill). Resolve each path
+the way that executor sees skills — for `pi`, inside the `--skill` directory (e.g.
+`<consumer .claude/skills>/verify/SKILL.md`). Foreign workers have no `Skill` tool, and
+description-triggered loading proved unreliable: on a 2026-09-18 run, pi workers never
+opened the architecture skill in five phases that moved code between layers, and only two of
+six opened `verify`.
+
+Do **not** paste the commands a skill contains into the handoff — name the skill and let the
+worker read it. Inlined commands make the worker follow the handoff instead of the skill, and
+hide whether it can follow a skill at all.
+
+The `claude` handoff is unchanged: Claude Code workers have the `Skill` tool, and "run
+/verify" above is sufficient.
+
 ## 5a.3 Execute each layer
 
 Walk layers in topological order (5a.1). `PHASE_EXECUTOR` (default `claude`) determines how

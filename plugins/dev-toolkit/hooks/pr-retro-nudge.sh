@@ -10,21 +10,24 @@
 #   last-check  — epoch seconds; throttles gh queries to once per hour
 #   done        — one PR number per line; written by the skill after a retro or --skip
 
-# ---- 1. Early exits: opt-out, not in git, gh missing or not authed, non-GitHub remote
+# ---- 1. Early exits: opt-out, not in git, gh missing, non-GitHub remote
 
 [[ "${PR_RETRO_NUDGE:-1}" == "0" ]] && exit 0
 
 git rev-parse --is-inside-work-tree > /dev/null 2>&1 || exit 0
 command -v gh > /dev/null 2>&1 || exit 0
-gh auth status > /dev/null 2>&1 || exit 0
 
 _origin_url=$(git remote get-url origin 2>/dev/null) || exit 0
 [[ "$_origin_url" == *github.com* ]] || exit 0
 
-# ---- 2. Resolve owner/repo and state dir
+# ---- 2. Resolve owner/repo from origin URL and set up state dir
+#
+# Handles both SSH (git@github.com:owner/repo.git) and
+# HTTPS (https://github.com/owner/repo.git) remote URLs.
 
-_nwo=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || exit 0
-[[ -n "$_nwo" ]] || exit 0
+_nwo="${_origin_url##*github.com[:/]}"
+_nwo="${_nwo%.git}"
+[[ -n "$_nwo" && "$_nwo" == */* ]] || exit 0
 
 _slug="${_nwo/\//__}"
 _state_dir="${HOME}/.claude/pr-retro/${_slug}"
@@ -59,68 +62,50 @@ fi
 # Write updated last-check before querying
 printf '%s\n' "$_now" > "$_last_check_file" 2>/dev/null
 
-# ---- 5. Query merged PRs since baseline
+# ---- 5. Build jq filter for done PRs (read numbers from done file)
 
 _baseline=$(< "$_baseline_file") || exit 0
 _baseline_date="${_baseline%%T*}"
 [[ -n "$_baseline_date" ]] || exit 0
 
-_pr_json=$(gh pr list \
+_done_filter="true"
+if [[ -f "$_done_file" ]]; then
+    while IFS= read -r _n || [[ -n "$_n" ]]; do
+        _n="${_n//[^0-9]/}"
+        [[ -n "$_n" ]] || continue
+        _done_filter="${_done_filter} and .number != ${_n}"
+    done < "$_done_file"
+fi
+
+# ---- 6. Query merged PRs since baseline, filter done, build JSON output via gh --jq
+
+_output=$(gh pr list \
     --state merged \
     --author @me \
     --search "merged:>=${_baseline_date}" \
     --json number,title \
     --limit 20 \
+    --jq "
+        [ .[] | select(${_done_filter}) ] as \$pending |
+        if (\$pending | length) == 0 then empty
+        else
+          (\$pending[:3]) as \$shown |
+          ((\$pending | length) - (\$shown | length)) as \$extra |
+          ([ \$shown[] | \"PR #\\(.number) \\(.title | tojson) merged with no retro. Run /dev-toolkit:pr-retro \\(.number), or /dev-toolkit:pr-retro --skip \\(.number).\" ] | join(\" \")) as \$base |
+          (if \$extra > 0 then \" +\" + (\$extra | tostring) + \" more.\" else \"\" end) as \$sfx |
+          ([ \$pending[] | \"#\" + (.number | tostring) ] | join(\", \")) as \$nums |
+          {
+            systemMessage: (\$base + \$sfx),
+            hookSpecificOutput: {
+              hookEventName: \"SessionStart\",
+              additionalContext: (\"Pending retro: \" + \$nums + \". Offer once if relevant; do not start without explicit user request.\")
+            }
+          }
+        end
+    " \
     2>/dev/null) || exit 0
-[[ -n "$_pr_json" ]] || exit 0
 
-# ---- 6. Filter out already-done PRs and build JSON output via python3
-
-_done_str=""
-[[ -f "$_done_file" ]] && _done_str=$(< "$_done_file")
-
-_output=$(PR_JSON="$_pr_json" DONE_NUMBERS="$_done_str" python3 - <<'EOF'
-import json, os, sys
-
-try:
-    prs = json.loads(os.environ.get('PR_JSON', '[]'))
-    done_raw = os.environ.get('DONE_NUMBERS', '')
-    done = {ln.strip() for ln in done_raw.splitlines() if ln.strip()}
-    pending = [p for p in prs if str(p['number']) not in done]
-    if not pending:
-        sys.exit(0)
-    shown = pending[:3]
-    extra = len(pending) - len(shown)
-    parts = []
-    for p in shown:
-        n = p['number']
-        t = json.dumps(p['title'])
-        parts.append(
-            'PR #' + str(n) + ' ' + t + ' merged with no retro. '
-            'Run /dev-toolkit:pr-retro ' + str(n) + ', or '
-            '/dev-toolkit:pr-retro --skip ' + str(n) + '.'
-        )
-    msg = ' '.join(parts)
-    if extra:
-        msg += ' +' + str(extra) + ' more.'
-    nums = ', '.join('#' + str(p['number']) for p in pending)
-    ctx = (
-        'Pending retro: ' + nums + '. '
-        'Offer once if relevant; do not start without explicit user request.'
-    )
-    print(json.dumps({
-        'systemMessage': msg,
-        'hookSpecificOutput': {
-            'hookEventName': 'SessionStart',
-            'additionalContext': ctx,
-        },
-    }))
-except Exception:
-    sys.exit(0)
-EOF
-)
-
-# ---- 7. Emit output (empty means nothing pending or python exited non-zero)
+# ---- 7. Emit output (empty means nothing pending or gh produced no output)
 
 [[ -n "$_output" ]] && printf '%s\n' "$_output"
 exit 0

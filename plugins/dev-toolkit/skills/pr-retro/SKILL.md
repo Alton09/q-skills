@@ -175,6 +175,10 @@ layer 1 over layer 4, layer 4 over layer 6.
 State file path: `~/.claude/pr-retro/<owner>__<repo>/done` (one PR number per
 line). The nudge hook writes `baseline` and `last-check` in the same directory.
 
+Derive `<owner>__<repo>`: strip the `git@github.com:` or `https://github.com/`
+prefix and the `.git` suffix from the `origin` remote URL, then replace `/` with
+`__`. When the user supplied a PR URL as input, use its owner and repo instead.
+
 ### Step 6: Lint rule proposals
 
 Detect the stack from build files: Konsist, detekt, ktlint, ArchUnit, Android
@@ -234,9 +238,10 @@ After the user approves:
 
 ### Step 9: Mark done
 
-Append `<n>` to `~/.claude/pr-retro/<owner>__<repo>/done`, creating the
-directory if missing, when the user approved at least one edit, answered
-"none", or used `--skip`.
+Append `<n>` to `~/.claude/pr-retro/<owner>__<repo>/done` (derive
+`<owner>__<repo>` as described above under Step 5), creating the directory if
+missing, when the user approved at least one edit, answered "none", or used
+`--skip`.
 
 ## Edge Cases
 

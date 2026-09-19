@@ -80,6 +80,7 @@ fi
 # ---- 6. Query merged PRs since baseline, filter done, build JSON output via gh --jq
 
 _output=$(gh pr list \
+    --repo "$_nwo" \
     --state merged \
     --author @me \
     --search "merged:>=${_baseline_date}" \

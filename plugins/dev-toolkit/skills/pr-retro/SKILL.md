@@ -175,9 +175,15 @@ layer 1 over layer 4, layer 4 over layer 6.
 State file path: `~/.claude/pr-retro/<owner>__<repo>/done` (one PR number per
 line). The nudge hook writes `baseline` and `last-check` in the same directory.
 
-Derive `<owner>__<repo>`: strip the `git@github.com:` or `https://github.com/`
-prefix and the `.git` suffix from the `origin` remote URL, then replace `/` with
-`__`. When the user supplied a PR URL as input, use its owner and repo instead.
+`<owner>__<repo>` always comes from the `origin` remote URL (same parse as the
+nudge hook): strip `git@github.com:` or `https://github.com/`, drop `.git`, then
+replace `/` with `__`. Pass `--repo <owner>/<repo>` to every `gh` call the skill
+makes for this PR.
+
+If the user supplies a PR URL whose owner/repo differs from `origin`, use that
+URL's repo for all `gh` PR data calls (passing `--repo <url-owner>/<url-repo>`).
+Write `done` under `<url-owner>__<url-repo>`; tell the user that the nudge hook
+tracks `origin`'s repo and will not see it there.
 
 ### Step 6: Lint rule proposals
 

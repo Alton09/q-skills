@@ -17,6 +17,9 @@ set -euo pipefail
 #
 #     executor  claude          Agent tool — today's default executor
 #               pi              pi CLI shell-out (opencode-go provider)
+#               codex           Codex CLI shell-out (ChatGPT-plan login). The
+#                               orchestrator is still `claude -p`; only its
+#                               phase workers shell out to codex.
 #     scenario  baseline        4 phases: mechanical, normal, file-disjoint
 #                               parallel pair            (default)
 #               forced-failure  2 phases: mechanical, then a phase whose
@@ -67,7 +70,7 @@ set -euo pipefail
 #   Nothing else in this script is executor-specific.
 # ---------------------------------------------------------------------------
 
-KNOWN_EXECUTORS="claude pi"
+KNOWN_EXECUTORS="claude pi codex"
 
 PHASE_EXECUTOR="${1:-}"
 SCENARIO="${2:-baseline}"
@@ -463,6 +466,26 @@ configure_pi() {
   ln -snf "$SKILL_SRC/implement-plan" "$PROJECT_DIR/.claude/skills/implement-plan"
 }
 
+configure_codex() {
+  # The orchestrator stays on Claude Code, so start from the claude setup.
+  configure_claude
+  if [[ -z "${DRY_RUN:-}" ]]; then
+    if ! codex login status 2>&1 | grep -q 'Logged in'; then
+      echo "configure_codex: codex login status does not report a login — run 'codex login'" >&2
+      exit 2
+    fi
+  fi
+  # Codex discovers skills only under .agents/skills. The skill's orchestrator
+  # creates this link per worktree itself; creating it in the scratch project
+  # too means worktrees branched from it see the same layout. Excluded from
+  # commits via info/exclude, never .gitignore.
+  mkdir -p "$PROJECT_DIR/.agents"
+  ln -snf ../.claude/skills "$PROJECT_DIR/.agents/skills"
+  local exclude; exclude="$(git -C "$PROJECT_DIR" rev-parse --git-path info/exclude)"
+  [[ "$exclude" = /* ]] || exclude="$PROJECT_DIR/$exclude"
+  grep -qxF '.agents/' "$exclude" 2>/dev/null || echo '.agents/' >> "$exclude"
+}
+
 # ===========================================================================
 # Driver prompt — pre-answers every interactive Step 0 question, because
 # headless executors have no user. Coverage note: this means AskUserQuestion-
@@ -547,6 +570,18 @@ run_pi() {
 }
 
 # ===========================================================================
+# Run — codex executor
+# Unlike run_pi, this does NOT hand the whole run to the foreign harness: a
+# claude -p orchestrator runs with PHASE_EXECUTOR=codex exported (set at the
+# top of this script), and shells out to codex for phase workers only.
+# ===========================================================================
+
+run_codex() {
+  log "claude -p orchestrator with PHASE_EXECUTOR=$PHASE_EXECUTOR"
+  run_claude
+}
+
+# ===========================================================================
 # Cost — claude executor
 # ===========================================================================
 
@@ -591,6 +626,43 @@ print("executor: pi (flat-rate opencode-go; cost is retail-equivalent value, not
 print("new_tokens (input + output):", totals["new"])
 print("cache_read_tokens (excluded from budget):", totals["cacheRead"])
 print("cost_equivalent_usd:", round(totals["cost"], 6))
+PY
+}
+
+# ===========================================================================
+# Cost — codex executor
+# Orchestrator cost comes from claude -p (metered). Codex workers run on a
+# ChatGPT plan: report tokens only, never dollars. Each codex exec emits one
+# turn.completed whose usage covers the whole run; cached_input_tokens is a
+# subset of input_tokens, so new = input - cached + output.
+# ===========================================================================
+
+cost_codex() {
+  cost_claude
+  echo
+  python3 - "$RUN_DIR" <<'PY' || true
+import json, os, sys
+root = sys.argv[1]
+runs, new, cached = 0, 0, 0
+for dp, _, fs in os.walk(root):
+    for f in fs:
+        if not f.endswith(".jsonl"): continue
+        for line in open(os.path.join(dp, f), errors="replace"):
+            try: ev = json.loads(line)
+            except Exception: continue
+            if ev.get("type") == "turn.completed":
+                u = ev.get("usage") or {}
+                runs += 1
+                new += (u.get("input_tokens") or 0) - (u.get("cached_input_tokens") or 0) + (u.get("output_tokens") or 0)
+                cached += u.get("cached_input_tokens") or 0
+print("executor: codex workers (ChatGPT plan; no dollar figure by design)")
+if runs == 0:
+    print("codex worker usage: no turn.completed events found under", root)
+else:
+    print("codex_runs:", runs)
+    print("new_tokens (input - cached + output):", new)
+    print("cached_input_tokens (excluded from budget):", cached)
+print("plan windows: read `quota-axi --provider codex` before and after the run")
 PY
 }
 

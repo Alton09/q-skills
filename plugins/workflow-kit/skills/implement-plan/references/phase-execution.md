@@ -68,6 +68,19 @@ phases are the longest multi-step work and end with `/verify`, so a premature st
 false completion claim costs most there. `qwen3.8-max` passed all three canaries and was
 faster and cheaper than Kimi K3 on each.
 
+**`codex` executor** — map to a Codex model id (OpenAI, ChatGPT-plan login):
+
+| Phase character (tier) | `-m` value |
+|---|---|
+| Mechanical/boilerplate (light) | `gpt-5.6-luna` |
+| Normal feature work (standard) | `gpt-5.6-terra` |
+| Complex/novel (deep) | `gpt-5.6-sol` |
+
+These are provisional defaults taken from the model descriptions, not from a bake-off. Every
+Codex model is GPT family. On a Plus plan a single large worker can take a double-digit share
+of the 5-hour window (one full-diff review on `gpt-6-astra` took 22 %), so `gpt-6-astra` is
+deliberately not a phase tier.
+
 Record the chosen model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
@@ -110,7 +123,8 @@ everything the phase needs:
 must read **before editing** (e.g. the project's architecture skill before touching source)
 and the skill it must follow **to finish** (the project's verify skill). Resolve each path
 the way that executor sees skills — for `pi`, inside the `--skill` directory (e.g.
-`<consumer .claude/skills>/verify/SKILL.md`). Foreign workers have no `Skill` tool, and
+`<consumer .claude/skills>/verify/SKILL.md`); for `codex`, under `<worktree>/.agents/skills/`
+(e.g. `.agents/skills/verify/SKILL.md`). Foreign workers have no `Skill` tool, and
 description-triggered loading proved unreliable: on a 2026-09-18 run, pi workers never
 opened the architecture skill in five phases that moved code between layers, and only two of
 six opened `verify`.
@@ -161,8 +175,54 @@ Every clause is load-bearing:
 - The worker's worktree is simply the process `cwd`. There is no session-root constraint,
   because the orchestrator is not the confined process.
 
+**`codex` executor:** first run the one-time setup below, then spawn with
+`Bash(run_in_background: true)`:
+
+```
+cd <worktree> && setsid timeout <secs> codex exec --json -m <model> \
+  -s workspace-write --add-dir "$HOME" --add-dir "$(git rev-parse --git-common-dir)" \
+  -c sandbox_workspace_write.network_access=true \
+  -o <scratch>/<phase>.last.md \
+  "$(cat <handoff-file>)" </dev/null \
+  > <scratch>/<phase>.jsonl 2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
+```
+
+Every clause is load-bearing (measured 2026-09-18, vault note `pi-runtime/codex-probe.md`):
+
+- `</dev/null` is **mandatory**, exactly as for pi. With stdin left open, `codex exec` waits
+  for more input and emits nothing on stdout until killed (180 s probe, rc=124). It prints
+  `Reading additional input from stdin...` to stderr in *both* cases, so that line is not a
+  hang signal.
+- The sandbox flags are the narrowest setting that lets a MenuLens worker run Gradle, `adb`,
+  Maestro, and `git commit`. `workspace-write` alone blocks `~/.gradle`, `~/.maestro` and the
+  `adb` socket. Robolectric writes a lock file directly in `$HOME`, and `--add-dir` takes only
+  directories, so `$HOME` is the narrowest writable root. Codex keeps `.git` read-only inside
+  writable roots, so the git common dir is added explicitly, or the 5a.2 commit fails with
+  `index.lock: Read-only file system`.
+- **No `--ephemeral`.** The `--json` stream never names the model. The session file
+  `~/.codex/sessions/**/rollout-*-<thread_id>.jsonl` does, in `turn_context.payload.model`;
+  `thread_id` comes from the `thread.started` event. Record that model for the report (F3).
+- `setsid` alone does **not** make a group kill sufficient — see `references/runaway-guard.md`
+  § Stop.
+- The final answer is in `<scratch>/<phase>.last.md` (`-o`), or the last `item.completed`
+  whose `item.type` is `agent_message`.
+
+**Codex one-time setup (per worktree, before its first codex spawn).** Codex has no per-call
+skill flag; it discovers skills only under `.agents/skills` (repo, parents) and
+`~/.agents/skills`. So the orchestrator:
+
+1. Ensures `<worktree>/.agents/skills` is a symlink to `../.claude/skills`, creating it if
+   missing.
+2. Appends `.agents/` to `$(git -C <worktree> rev-parse --git-path info/exclude)` if not
+   already there, so the link never reaches a commit.
+3. When a project skill depends on a user-level skill (for example MenuLens `verify` on
+   `android-cli`), ensures `~/.agents/skills/<name>` links to `~/.claude/skills/<name>`.
+
+This deliberately differs from pi: the "no `.agents` symlink" rule above applies to pi only.
+The user never creates these links; the orchestrator does.
+
 The worktree-ownership rule and the destructive-git prohibition in the handoff (5a.2) apply
-identically to both executors — they are properties of the handoff, not the harness.
+identically to every executor — they are properties of the handoff, not the harness.
 
 **Single-phase layer (the common case — unchanged from sequential):**
 1. Spawn the phase agent in the integration worktree (background; 5b guard applies).

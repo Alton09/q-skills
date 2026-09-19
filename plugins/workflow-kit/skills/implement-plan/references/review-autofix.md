@@ -11,8 +11,8 @@ and the orchestrator holds only the findings list — it never ingests the raw d
 
 ## 8a. Delegate the review
 
-Spawn ONE review sub-agent at the deep tier of `REVIEW_EXECUTOR` (resolved as `REVIEW_MODEL`;
-see SKILL.md Configuration; background; 5b guard applies). Payload:
+Spawn ONE review sub-agent on `REVIEW_EXECUTOR` with model `REVIEW_MODEL` (see SKILL.md
+Configuration; background; 5b guard applies). Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -26,6 +26,27 @@ see SKILL.md Configuration; background; 5b guard applies). Payload:
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
 
 The orchestrator keeps the findings list (small); it does not read the diff itself.
+
+**Foreign review executors (`pi`, `codex`).** A foreign reviewer cannot invoke `REVIEW_SKILL`
+(no `Skill` tool). Give it a written review handoff instead: the diff command above, the
+project's architecture skill named by path (5a.2 § 3), the review scope (correctness,
+behavior changes, build/packaging, architecture-rule violations; no style), and the findings
+format above. Tell it not to modify files. Record in the report that the review ran from a
+handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
+
+- **`pi`** → the 5a.3 pi spawn contract with the review handoff.
+- **`codex`** → `codex exec`, **not** `codex exec review`. The native command cannot take
+  instructions together with `--base` (`error: the argument '--base <BRANCH>' cannot be used
+  with '[PROMPT]'`) and reports zero token usage. Spawn:
+  ```
+  cd <integration> && setsid timeout <secs> codex exec --json -m <REVIEW_MODEL> -s read-only \
+    --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
+    "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl 2> <scratch>/review.err
+  ```
+  The schema forces a severity per finding, which 8b needs: an object with `summary` and a
+  `findings` array whose items require `severity` (`critical|high|medium|low`), `category`,
+  `file`, `line`, `title` and `detail`. Stop and token accounting follow
+  `references/runaway-guard.md` for codex.
 
 ## 8b. Triage by severity
 

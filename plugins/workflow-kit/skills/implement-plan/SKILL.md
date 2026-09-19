@@ -42,7 +42,7 @@ and owns the pass/fail decision and task tracking.
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
   real quality gate; it writes no code and makes no decisions.
-- **Review sub-agent** (Step 8, `REVIEW_EXECUTOR` deep tier): reviews the full plan diff
+- **Review sub-agent** (Step 8, `REVIEW_MODEL` on `REVIEW_EXECUTOR`): reviews the full plan diff
   via the project's review skill and returns a structured findings list only — no code, no
   decisions.
 - **Fix sub-agent** (Step 8, Sonnet/Haiku by complexity): applies the severity-gated
@@ -57,7 +57,7 @@ and owns the pass/fail decision and task tracking.
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
-8. **Plan Review & Auto-fix** — review sub-agent (deep tier of `REVIEW_EXECUTOR`) reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
+8. **Plan Review & Auto-fix** — review sub-agent (`REVIEW_MODEL` on `REVIEW_EXECUTOR`) reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
 9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
 10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
 
@@ -310,8 +310,8 @@ worktree, resolve it to the same relative path inside the worktree before writin
 Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
 hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
 
-Mirrors Step 5's delegation discipline: a review sub-agent at the deep tier of
-`REVIEW_EXECUTOR` (see Configuration) reviews the cumulative plan diff
+Mirrors Step 5's delegation discipline: a review sub-agent (`REVIEW_MODEL` on
+`REVIEW_EXECUTOR`, see Configuration) reviews the cumulative plan diff
 (`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
 list only — the orchestrator never ingests the raw diff. Findings are triaged at
 `REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **Sonnet/Haiku** fix pass run
@@ -454,11 +454,13 @@ Projects can override via environment or project CLAUDE.md:
   set `false` to end the run at the local worktree branch. Has no effect when the project has
   no `/create-pr` — the step is skipped either way.
 - `PHASE_EXECUTOR` — which executor runs phase and fix workers. Default `claude` (Agent tool,
-  today's behavior). Set `pi` to route workers through the Bash shell-out contract in
-  `references/phase-execution.md` § 5a.3. The orchestrator, prep agent, and gate-verify
-  agents always stay on `claude` regardless of this setting.
+  today's behavior). Set `pi` or `codex` to route workers through that executor's Bash
+  shell-out contract in `references/phase-execution.md` § 5a.3. The orchestrator, prep
+  agent, and gate-verify agents always stay on `claude` regardless of this setting.
 - `REVIEW_EXECUTOR` — which executor runs the Step 8 capstone review sub-agent (not the
-  per-phase gate-verify, which always stays on `claude`). Default: follows `PHASE_EXECUTOR`.
+  per-phase gate-verify, which always stays on `claude`): `claude`, `pi` or `codex`.
+  Default: follows `PHASE_EXECUTOR`, **except** that `PHASE_EXECUTOR=codex` defaults the
+  review to `claude` (see the codex rules below).
   With `PHASE_EXECUTOR=pi`, the review runs on `opencode-go/grok-4.6` (xAI, family-diverse
   from every default pi implementer: MiniMax, GLM, Qwen); set `REVIEW_EXECUTOR=claude`
   explicitly to keep the reviewer on Opus while workers run on pi. `grok-4.6` was not in the
@@ -470,8 +472,20 @@ Projects can override via environment or project CLAUDE.md:
   no bake-off canary measured review *judgement* quality — C1 (coding), C2 (tool discipline),
   and C3 (fidelity) cover implementation; review quality on a real diff is unmeasured and
   Task 7 establishes it. Use `REVIEW_EXECUTOR=claude` if review reliability is a concern.
+  **Codex rules (mandatory).** Every Codex model is GPT family, so a codex reviewer is never
+  family-diverse from a codex implementer:
+  - `PHASE_EXECUTOR=codex` with `REVIEW_EXECUTOR` unset → the review defaults to `claude`
+    (Opus); it does **not** follow the phase executor.
+  - `REVIEW_EXECUTOR=codex` is valid with `PHASE_EXECUTOR=pi` or `claude`. `pi` + `codex` is
+    the pairing to evaluate as a cheap, family-diverse default: GPT reviewing open-weight
+    implementers.
+  - An explicit `PHASE_EXECUTOR=codex` + `REVIEW_EXECUTOR=codex` is refused at startup with an
+    error naming this rule; do not start the run.
+  On a ChatGPT Plus plan one full-diff review is expensive: a `gpt-6-astra` review of a
+  106-file diff took 22 % of the 5-hour window (measured 2026-09-18).
 - `REVIEW_MODEL` — the specific model for the Step 8 review sub-agent. Default depends on
-  `REVIEW_EXECUTOR`: `opencode-go/grok-4.6` when pi, `opus` when claude (subject to the
+  `REVIEW_EXECUTOR`: `opencode-go/grok-4.6` when pi, `gpt-5.6-sol` when codex (not
+  `gpt-6-astra`, for the Plus-window cost above), `opus` when claude (subject to the
   family-diversity override above). Set explicitly to override the tier default without
   changing the executor. This variable did not exist on `main`; previously the reviewer model
   was hardcoded.

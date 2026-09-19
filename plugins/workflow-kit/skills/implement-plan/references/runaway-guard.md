@@ -50,10 +50,18 @@ cost signal is worth a glance, and it lets you tune the ceiling).
 
 - **`claude`** → `TaskStop`. Returns only status, no partial work.
 - **`pi`** → kill the worker's **process group**. Killing only the wrapper PID orphans the real `pi` subprocess, which continues running and spending. Launch the worker under `setsid` (see `phase-execution.md` § 5a.3) so its PID is also its process-group ID, and record that PID in a pidfile. Stop it with `kill -TERM -- -<pid>`. Do not enable shell job control for this instead: the Claude Code Bash tool runs commands through zsh `eval`, where it fails with `(eval):set:1: can't change option: -m` and the worker never starts (measured 2026-09-18).
+- **`codex`** → kill the worker's **process tree**, not only its group. `codex exec` runs each tool command inside `codex-linux-sandbox`, which calls `setsid` itself; a group kill of the `setsid` launcher left the sandboxed command (and its children, e.g. a Gradle build) running, reparented to init (measured 2026-09-18). Walk the tree from the pidfile PID **before** killing anything — once the parent dies the sandbox helper is no longer reachable — then TERM every process group in it:
+  ```bash
+  descendants() { local c; for c in $(ps -o pid= --ppid "$1"); do echo "$c"; descendants "$c"; done; }
+  for g in $(for p in "$PID" $(descendants "$PID"); do ps -o pgid= -p "$p"; done | tr -d ' ' | sort -u); do
+    kill -TERM -- -"$g" 2>/dev/null
+  done
+  ```
+  This left 0 processes in the same test. `ps --ppid` is GNU procps; on macOS use `pgrep -P`. pi's group kill has not been tested against the same failure; if pi tool children start their own sessions, use the tree kill for pi too.
 
 ### Pace
 
-The orchestrator is always Claude Code regardless of which executor the workers use. `PACE` (background spawning and the parallel-group structure) is therefore available for **both** executors. Pi workers do **not** force a parallel-group demotion — that is the direct consequence of moving the harness choice to the worker level rather than the orchestrator. This is the opposite of the opencode outcome, where the foreign orchestrator lost group control because the entire run ran inside opencode.
+The orchestrator is always Claude Code regardless of which executor the workers use. `PACE` (background spawning and the parallel-group structure) is therefore available for **every** executor. Pi and codex workers do **not** force a parallel-group demotion — that is the direct consequence of moving the harness choice to the worker level rather than the orchestrator. This is the opposite of the opencode outcome, where the foreign orchestrator lost group control because the entire run ran inside opencode.
 
 ### Token accounting
 
@@ -65,3 +73,10 @@ The orchestrator is always Claude Code regardless of which executor the workers 
             cost: (map(.cost.total)|add)}'
   ```
   `new` (`input + output`) is the budget figure checked against the 5b token ceiling. `cacheRead` is reported on its own line and **excluded** from the budget: pi re-reports the cached context on every turn, so it grows with turns × context size and means nothing as a budget. Do not use `totalTokens`, which includes `cacheRead` — on a real run it reported 3.65M tokens for a worker that used 63k new. On flat-rate `opencode-go`, `cost.total` is retail-equivalent value, not metered cash — report it as equivalent value and never as metered spend. The cap that matters is the provider's rate limit, not a dollar ceiling.
+- **`codex`** → `--json` emits exactly one `turn.completed` per `codex exec`, and its `usage` already covers the whole run (every tool call and model request). No summing is needed:
+  ```
+  jq -s '[.[] | select(.type=="turn.completed") | .usage][0]
+         | {new: (.input_tokens - .cached_input_tokens + .output_tokens),
+            cached: .cached_input_tokens}'
+  ```
+  `cached_input_tokens` is a **subset** of `input_tokens` (the session file's `total_tokens` equals `input + output`), so the budget figure subtracts it; this is not the same arithmetic as pi. There is no cost field: codex runs on a ChatGPT subscription, so report tokens and the plan-window share (the Plus 5-hour and weekly windows, e.g. from `quota-axi --provider codex`), **never a dollar figure**.

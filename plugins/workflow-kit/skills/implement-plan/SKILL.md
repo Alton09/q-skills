@@ -459,16 +459,19 @@ Projects can override via environment or project CLAUDE.md:
   agents always stay on `claude` regardless of this setting.
 - `REVIEW_EXECUTOR` — which executor runs the Step 8 capstone review sub-agent (not the
   per-phase gate-verify, which always stays on `claude`). Default: follows `PHASE_EXECUTOR`.
-  With `PHASE_EXECUTOR=pi`, the review runs at the pi deep tier (`opencode-go/kimi-k3`); set
-  `REVIEW_EXECUTOR=claude` explicitly to keep the reviewer on Opus while workers run on pi.
+  With `PHASE_EXECUTOR=pi`, the review runs on `opencode-go/grok-4.6` (xAI, family-diverse
+  from every default pi implementer: MiniMax, GLM, Qwen); set `REVIEW_EXECUTOR=claude`
+  explicitly to keep the reviewer on Opus while workers run on pi. `grok-4.6` was not in the
+  bake-off (`grok-4.5`, which passed all three canaries, is not exposed by pi).
   **Family-diversity rule (mandatory, not a suggestion):** the reviewer and implementer must
-  come from different model families. When both resolve to the same deep-tier family (e.g.
-  both default to `kimi-k3`), switch the reviewer to `opencode-go/qwen3.8-max`. **Caveat:**
+  come from different model families. When they match (e.g. a phase model overridden to a
+  Grok model), switch the reviewer to `opencode-go/qwen3.8-max` — or to `opencode-go/glm-5.3`
+  when the implementer is Qwen. **Caveat:**
   no bake-off canary measured review *judgement* quality — C1 (coding), C2 (tool discipline),
   and C3 (fidelity) cover implementation; review quality on a real diff is unmeasured and
   Task 7 establishes it. Use `REVIEW_EXECUTOR=claude` if review reliability is a concern.
-- `REVIEW_MODEL` — the specific model for the Step 8 review sub-agent. Default: deep tier of
-  `REVIEW_EXECUTOR` (`opencode-go/kimi-k3` when pi, `opus` when claude; subject to the
+- `REVIEW_MODEL` — the specific model for the Step 8 review sub-agent. Default depends on
+  `REVIEW_EXECUTOR`: `opencode-go/grok-4.6` when pi, `opus` when claude (subject to the
   family-diversity override above). Set explicitly to override the tier default without
   changing the executor. This variable did not exist on `main`; previously the reviewer model
   was hardcoded.

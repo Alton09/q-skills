@@ -47,9 +47,11 @@ set -euo pipefail
 #   CLAUDE_MODEL     orchestrator model, claude executor (default: opus)
 #   MAX_BUDGET_USD   claude executor spend cap        (default: 15)
 #   PI_MODEL         pi executor model string         (default: opencode-go/glm-5.3)
-#   PI_MAX_TOKENS    pi token ceiling per run          (default: 400000)
-#                    tokens, not dollars — flat-rate opencode-go cost is
-#                    retail-equivalent value, not metered cash.
+#   PI_MAX_TOKENS    pi token ceiling per run          (default: 250000)
+#                    new tokens (input + output), not dollars — flat-rate
+#                    opencode-go cost is retail-equivalent value, not metered
+#                    cash. cacheRead is excluded: pi re-reports cached context
+#                    every turn. Real MenuLens workers used 43k-137k new each.
 #   RUN_TIMEOUT      per-run wall-clock cap in seconds (default: 3600). An executor
 #                    that stalls with no STOP_WORKER primitive will otherwise
 #                    hang forever — that is a finding, not a reason to wait.
@@ -106,7 +108,7 @@ PLAN_REL="docs/plans/wordkit.md"
 CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
 MAX_BUDGET_USD="${MAX_BUDGET_USD:-15}"
 PI_MODEL="${PI_MODEL:-opencode-go/glm-5.3}"
-PI_MAX_TOKENS="${PI_MAX_TOKENS:-400000}"
+PI_MAX_TOKENS="${PI_MAX_TOKENS:-250000}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-3600}"
 
 log() { printf '[validate-executors] %s\n' "$*" >&2; }
@@ -566,6 +568,7 @@ PY
 # ===========================================================================
 # Cost — pi executor
 # Sum .message.usage across message_end events where .message.role==assistant.
+# Budget figure is input + output; cacheRead is reported separately.
 # There is no run-level aggregate event; the orchestrator must sum.
 # cost.total is retail-equivalent value on flat-rate opencode-go, not cash.
 # ===========================================================================
@@ -577,21 +580,24 @@ try:
     events = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 except Exception as e:
     print("cost: unavailable —", e); raise SystemExit(0)
-totals = {"tokens": 0, "cost": 0.0}
+totals = {"new": 0, "cacheRead": 0, "cost": 0.0}
 for ev in events:
     if ev.get("type") == "message_end" and (ev.get("message") or {}).get("role") == "assistant":
         u = ev["message"].get("usage") or {}
-        totals["tokens"] += u.get("totalTokens") or 0
+        totals["new"] += (u.get("input") or 0) + (u.get("output") or 0)
+        totals["cacheRead"] += u.get("cacheRead") or 0
         totals["cost"] += (u.get("cost") or {}).get("total") or 0.0
 print("executor: pi (flat-rate opencode-go; cost is retail-equivalent value, not metered cash)")
-print("total_tokens:", totals["tokens"])
+print("new_tokens (input + output):", totals["new"])
+print("cache_read_tokens (excluded from budget):", totals["cacheRead"])
 print("cost_equivalent_usd:", round(totals["cost"], 6))
 PY
 }
 
 # ===========================================================================
 # Token ceiling check — pi executor only
-# Fails the run if total tokens exceed PI_MAX_TOKENS.
+# Fails the run if new tokens (input + output) exceed PI_MAX_TOKENS.
+# cacheRead is excluded: pi re-reports cached context on every turn.
 # Uses tokens, not dollars: flat-rate cost is equivalent-value, not metered.
 # ===========================================================================
 
@@ -609,7 +615,8 @@ except Exception as e:
 total = 0
 for ev in events:
     if ev.get("type") == "message_end" and (ev.get("message") or {}).get("role") == "assistant":
-        total += (ev["message"].get("usage") or {}).get("totalTokens") or 0
+        u = ev["message"].get("usage") or {}
+        total += (u.get("input") or 0) + (u.get("output") or 0)
 if total > cap:
     print(f"FATAL: PI_MAX_TOKENS exceeded: {total} > {cap}")
     raise SystemExit(1)

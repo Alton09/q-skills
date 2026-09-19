@@ -49,7 +49,7 @@ cost signal is worth a glance, and it lets you tune the ceiling).
 ### Stop
 
 - **`claude`** → `TaskStop`. Returns only status, no partial work.
-- **`pi`** → kill the backgrounded shell's **process group**. Killing only the wrapper PID orphans the real `pi` subprocess, which continues running and spending. Use job control (`set -m` in the spawning shell) and signal the group: `kill -TERM -- -<PGID>`. If `set -m` was not in scope at spawn time, retrieve the PGID with `ps -o pgid= -p <PID>` and send the signal explicitly.
+- **`pi`** → kill the worker's **process group**. Killing only the wrapper PID orphans the real `pi` subprocess, which continues running and spending. Launch the worker under `setsid` (see `phase-execution.md` § 5a.3) so its PID is also its process-group ID, and record that PID in a pidfile. Stop it with `kill -TERM -- -<pid>`. Do not enable shell job control for this instead: the Claude Code Bash tool runs commands through zsh `eval`, where it fails with `(eval):set:1: can't change option: -m` and the worker never starts (measured 2026-09-18).
 
 ### Pace
 
@@ -61,6 +61,7 @@ The orchestrator is always Claude Code regardless of which executor the workers 
 - **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. Sum across all qualifying events:
   ```
   jq -s '[.[] | select(.type=="message_end" and .message.role=="assistant") | .message.usage]
-         | {tokens: (map(.totalTokens)|add), cost: (map(.cost.total)|add)}'
+         | {new: (map(.input + .output)|add), cacheRead: (map(.cacheRead)|add),
+            cost: (map(.cost.total)|add)}'
   ```
-  On flat-rate `opencode-go`, `cost.total` is retail-equivalent value, not metered cash — report it as equivalent value and never as metered spend. The cap that matters is the provider's rate limit, not a dollar ceiling.
+  `new` (`input + output`) is the budget figure checked against the 5b token ceiling. `cacheRead` is reported on its own line and **excluded** from the budget: pi re-reports the cached context on every turn, so it grows with turns × context size and means nothing as a budget. Do not use `totalTokens`, which includes `cacheRead` — on a real run it reported 3.65M tokens for a worker that used 63k new. On flat-rate `opencode-go`, `cost.total` is retail-equivalent value, not metered cash — report it as equivalent value and never as metered spend. The cap that matters is the provider's rate limit, not a dollar ceiling.

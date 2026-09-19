@@ -60,9 +60,13 @@ The values are the literal `model` enum tokens — pass them straight to the Age
 |---|---|
 | Mechanical/boilerplate (light) | `opencode-go/minimax-m3` |
 | Normal feature work (standard) | `opencode-go/glm-5.3` |
-| Complex/novel (deep) | `opencode-go/kimi-k3` |
+| Complex/novel (deep) | `opencode-go/qwen3.8-max` |
 
-These defaults come from the 2026-09-16 bake-off results.
+The deep tier is `qwen3.8-max`, not Kimi K3. In the 2026-09-16 bake-off, Kimi K3 failed
+C2 tool discipline: it stopped after 4 of 10 steps and reported the task done. Complex
+phases are the longest multi-step work and end with `/verify`, so a premature stop with a
+false completion claim costs most there. `qwen3.8-max` passed all three canaries and was
+faster and cheaper than Kimi K3 on each.
 
 Record the chosen model per phase for the final report.
 
@@ -116,14 +120,19 @@ duration, which feeds the 5b ceiling check.
 **`pi` executor:** Spawn with `Bash(run_in_background: true)`:
 
 ```
-cd <worktree> && pi -p --mode json --no-session \
+cd <worktree> && setsid timeout <secs> pi -p --mode json --no-session \
   --model <provider/id> \
   --skill <consumer .claude/skills> \
-  "$(cat <handoff-file>)" </dev/null
+  "$(cat <handoff-file>)" </dev/null \
+  > <scratch>/<phase>.jsonl 2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
 ```
 
 Every clause is load-bearing:
 
+- `setsid` puts the worker in its own process group, so its PID is the group ID and
+  `kill -TERM -- -<pid>` stops the real `pi` process, not only the wrapper
+  (`references/runaway-guard.md` § Stop). Do not enable shell job control instead: it
+  fails under the Bash tool's zsh `eval` and the worker never starts.
 - `</dev/null` is **mandatory**. Without it pi never returns and emits nothing at all —
   measured on 2026-09-16: a backgrounded invocation produced 0 bytes on stdout and stderr
   and was killed at 180 s (rc=124). A worker that hangs silently is the one failure the

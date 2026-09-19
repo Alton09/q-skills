@@ -41,8 +41,20 @@ Standalone dev utilities that work independently of any planning pipeline.
 | Skill | Command | Description |
 |-------|---------|-------------|
 | pr-review | `/dev-toolkit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
-| skill-sharpener | `/dev-toolkit:skill-sharpener` | Analyze session transcripts to find and fix skill friction |
+| pr-retro | `/dev-toolkit:pr-retro` | Post-merge retro: mine PR comments, CI and linked sessions for skill, harness and lint-rule improvements. |
 | notify-me | `/dev-toolkit:notify-me` | Send macOS system notifications during long-running tasks (macOS only) |
+
+#### SessionStart Nudge Hook
+
+`dev-toolkit` includes a SessionStart hook that nudges you when a merged PR has not yet been retrospectively analyzed. When you start a session in a GitHub repository where you have authored merged PRs, the hook checks for any that have not yet been analyzed with `/dev-toolkit:pr-retro` or skipped, and displays:
+
+```
+PR #432 "Feature name" merged with no retro. Run /dev-toolkit:pr-retro 432, or /dev-toolkit:pr-retro --skip 432.
+```
+
+The hook queries GitHub at most once per hour per repository, and fails silently if offline or if `gh` is not installed. To opt out of nudges, set the environment variable `PR_RETRO_NUDGE=0`.
+
+Per-repository state is stored in `~/.claude/pr-retro/<owner>__<repo>/`, including a baseline timestamp and the list of PRs already retro'd or skipped.
 
 ## Installation
 
@@ -105,7 +117,7 @@ After installation, skills are available as slash commands:
 /workflow-kit:feature-plan      # Plan a feature
 /workflow-kit:implement-plan    # Execute a plan
 /dev-toolkit:pr-review          # Review a GitHub PR
-/dev-toolkit:skill-sharpener    # Improve skills from session data
+/dev-toolkit:pr-retro           # Post-merge retrospective on PR comments, CI, and linked sessions
 /dev-toolkit:notify-me          # Send macOS notification
 ```
 
@@ -127,8 +139,11 @@ q-skills/
         plugin.json           # Plugin manifest (v1.0.0)
       skills/
         pr-review/            # GitHub PR review skill
-        skill-sharpener/      # Skill improvement skill
+        pr-retro/             # Post-merge retrospective skill
         notify-me/            # macOS notification skill
+      hooks/
+        hooks.json            # SessionStart hook for nudging unretro'd PRs
+        pr-retro-nudge.sh     # Nudge script
 ```
 
 ## License

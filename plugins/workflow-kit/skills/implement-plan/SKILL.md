@@ -514,7 +514,9 @@ Projects can override via environment or project CLAUDE.md:
     the pairing to evaluate as a cheap, family-diverse default: GPT reviewing open-weight
     implementers.
   - Refuse any resolved codex reviewer that would check a `codex:*` implementer: neither
-    executor nor family differs. Fail at startup with both resolved addresses in the error.
+    executor nor family differs. Fail at startup with an error that names the family-diversity
+    rule (every Codex model is GPT family, so a codex reviewer never differs in family from a
+    codex implementer), includes both resolved addresses, and says **do not start the run**.
   On a ChatGPT Plus plan one full-diff review is expensive: a `gpt-6-astra` review of a
   106-file diff took 22 % of the 5-hour window (measured 2026-09-18).
 - `REVIEW_MODEL` — the `executor:model` target for the Step 8 review sub-agent. Its shipped

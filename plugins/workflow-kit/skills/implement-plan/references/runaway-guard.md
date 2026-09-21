@@ -15,21 +15,25 @@ timeout while running, and the token total on completion.
 > arrive (the metric the ceiling check uses).
 
 **Wall-clock budget (while running).** Set a per-phase time budget (`PHASE_TIME_BUDGET`,
-default 30 min; scale up for `opus` phases, and use `ESCALATION_TIME_BUDGET` for escalation
-attempts). The orchestrator checks elapsed time on each natural re-invocation — the
-background-completion notification is the heartbeat, not a scheduled wakeup primitive. If
-any worker is still outstanding past its budget when the orchestrator next runs, treat it as
-runaway: stop it (see Per-executor bindings below), then page the user (below). Stop returns
-only status, not partial work — report what the orchestrator last knew, not a recovered
-transcript.
+default 30 min; scale up for deep phases, and use `ESCALATION_TIME_BUDGET` for escalation
+attempts). Pi and codex enforce it with the `timeout` in their spawn commands. Claude has no
+executor timeout, so alongside each Claude Agent spawn start a timer with
+`Bash(run_in_background: true)` running `sleep <budget seconds>`. Its completion notification
+re-invokes the orchestrator even if the worker hangs silently. On that wakeup, if the Claude
+worker is still outstanding, it is runaway: stop it with `TaskStop`, then page the user
+(below). The extra timer is needed only for executors without their own `timeout` (currently
+Claude); do not use `ScheduleWakeup`, which is available only in `/loop` dynamic mode. Stop
+returns only status, not partial work — report what the orchestrator last knew, not a
+recovered transcript.
 
-**Token ceiling (on completion).** When the sub-agent returns, compare its reported total
-tokens against the per-model ceiling in Configuration (`PHASE_TOKEN_CEILING`, or
-`ESCALATION_TOKEN_CEILING` for escalation attempts). The phase agent's total now includes
-its warm self-verify loop, so the ceilings already budget for impl + verify — don't
-double-count. If it overran, do NOT silently accept the result — page the user before the
-gate-verify so an overrun phase gets a human look (the output may still be fine, but the
-cost signal is worth a glance, and it lets you tune the ceiling).
+**Token ceiling (on completion).** When the sub-agent returns, compare its budget figure
+against the resolved light/standard/deep tier ceiling in Configuration
+(`PHASE_TOKEN_CEILING`, or `ESCALATION_TOKEN_CEILING` for escalation attempts): Claude uses
+the completion-notification total, while pi and codex use `new` tokens below. The phase
+agent's total now includes its warm self-verify loop, so the ceilings already budget for
+impl + verify — don't double-count. If it overran, do NOT silently accept the result — page
+the user before the gate-verify so an overrun phase gets a human look (the output may still
+be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
 
 **On either trip:**
 
@@ -100,7 +104,7 @@ quota.
                        + .message.usage.cache_creation_input_tokens
                        + .message.usage.cache_read_input_tokens)}]
          | unique_by(.id)
-         | {api_call_count: length, peak_context: (map(.context) | max // 0)}' \\
+         | {api_call_count: length, peak_context: (map(.context) | max // 0)}' \
      ~/.claude/projects/<project-slug>/<session-id>.jsonl
   ```
   The transcript contains no dollar figure. Leave orchestrator cost as `token accounting
@@ -127,18 +131,29 @@ quota.
   the run-cumulative totals *and* the live plan windows, so one read gives both figures
   (measured 2026-09-19, MenuLens session `21163bb7`):
   ```
-  jq -s '[.[] | select(.payload.type=="token_count") | .payload] | last
-         | {new: (.info.total_token_usage.input_tokens
-                  - .info.total_token_usage.cached_input_tokens
-                  + .info.total_token_usage.output_tokens),
-            cached: .info.total_token_usage.cached_input_tokens,
-            window_5h: .rate_limits.primary.used_percent,
-            window_weekly: .rate_limits.secondary.used_percent}' \
+  jq -s 'def delta($a; $b):
+           if ($a.resets_at != $b.resets_at or $b.used_percent < $a.used_percent)
+           then "unavailable" else ($b.used_percent - $a.used_percent) end;
+         [.[] | select(.payload.type=="token_count") | .payload] as $events
+         | ($events | first) as $first | ($events | last) as $last
+         | {new: ($last.info.total_token_usage.input_tokens
+                  - $last.info.total_token_usage.cached_input_tokens
+                  + $last.info.total_token_usage.output_tokens),
+            cached: $last.info.total_token_usage.cached_input_tokens,
+            window_5h_first: $first.rate_limits.primary.used_percent,
+            window_5h_last: $last.rate_limits.primary.used_percent,
+            window_5h_delta: delta($first.rate_limits.primary; $last.rate_limits.primary),
+            window_weekly_first: $first.rate_limits.secondary.used_percent,
+            window_weekly_last: $last.rate_limits.secondary.used_percent,
+            window_weekly_delta: delta($first.rate_limits.secondary; $last.rate_limits.secondary)}' \
      ~/.codex/sessions/<Y>/<M>/<D>/rollout-*-<thread_id>.jsonl
   ```
   Use `total_token_usage`, never `last_token_usage`, which covers one turn only. The
-  `used_percent` figures are cumulative within the window, so a worker's share is the
-  difference between its first and last `token_count` event, not the last value.
+  `used_percent` figures are cumulative within the window, so report the explicitly extracted
+  first/last delta. If the later value is lower or `resets_at` changed, report `unavailable`
+  rather than deriving a number across the reset. When codex workers overlap in time (or
+  other account activity makes attribution ambiguous), report the window delta once for the
+  whole run's codex usage, not as a per-worker share.
 
   The same first/last delta is the only plan-window share Step 10 may report for a codex
   review or fix record. Codex is subscription-backed: report its new tokens and window

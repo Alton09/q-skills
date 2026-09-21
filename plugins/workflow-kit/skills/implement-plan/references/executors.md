@@ -25,10 +25,10 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
 
 - **Spawn command template:** Run with `Bash(run_in_background: true)`:
   ```bash
-  cd <worktree> && setsid timeout <secs> pi -p --mode json --no-session \
+  cd <worktree> && { setsid timeout <secs> pi -p --mode json --no-session \
     --model <provider/id> --skill <consumer .claude/skills> \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
-    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
+    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
   ```
   `setsid` makes the PID its process-group ID, so a group TERM reaches pi rather than only
   its wrapper; do not use shell job control (zsh `eval` rejects `set -m`). `</dev/null` is
@@ -51,11 +51,11 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
 
 - **Spawn command template:** Run setup once, then use `Bash(run_in_background: true)`:
   ```bash
-  cd <worktree> && setsid timeout <secs> codex exec --json -m <model> \
+  cd <worktree> && { setsid timeout <secs> codex exec --json -m <model> \
     -s workspace-write --add-dir "$HOME" --add-dir "$(git rev-parse --git-common-dir)" \
     -c sandbox_workspace_write.network_access=true -o <scratch>/<phase>.last.md \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
-    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
+    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
   ```
   `</dev/null` is mandatory: the 180 s probe otherwise waited for input with no stdout
   (`rc=124`); `Reading additional input from stdin...` appears on stderr in both cases and

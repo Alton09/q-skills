@@ -205,11 +205,12 @@ Two rules are load-bearing and easy to get wrong:
 
 ### 5b. Runaway guard
 
-Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`, paced with
-`ScheduleWakeup` + `TaskStop`) and a **token ceiling** checked on completion
-(`PHASE_TOKEN_CEILING`). On either trip, do NOT advance — page the user via `NOTIFY_SKILL`
-and wait. The two primitives are all that work: a background Agent gives no live per-call
-feed, only its totals in the completion notification.
+Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`) and a **token
+ceiling** checked on completion (`PHASE_TOKEN_CEILING`). Claude workers, which have no
+executor timeout, get a parallel background Bash `sleep` timer whose notification wakes
+the orchestrator; pi/codex use their command `timeout`. On a trip, stop the worker with its
+executor binding (`TaskStop`, process-group kill, or process-tree kill), page the user via
+`NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 
@@ -428,9 +429,11 @@ Once all phases are checked off:
   - `pi`: <new tokens, plus cache-read tokens separately>; equivalent value: <sum of
     `cost.total`, labelled flat-rate equivalent value — not metered spend>. If an exit-time
     record is missing, print `token accounting unavailable`.
-  - `codex`: <new tokens>; plan-window share: <5-hour and weekly deltas from the first and
-    last token-count records>; no dollars. If either required record is absent, print
-    `token accounting unavailable` for the unavailable measure; never derive it.
+  - `codex`: <new tokens>; plan-window usage: <5-hour and weekly first/last values and
+    deltas from the token-count records>; no dollars. If either required record is absent,
+    the later value is lower, or `resets_at` changed, print `token accounting unavailable`
+    for that window; never derive it. When codex workers overlap, report one whole-run codex
+    window delta rather than attributing the account-level change to individual workers.
 - **Review + fix (by executor):** <one row for every executor that ran Step 8 review or
   fix work, using the same executor-specific form and source rules as Workers. If review was
   skipped, say `absent — review skipped: <reason>`; if it ran but has no accounting, say
@@ -488,10 +491,11 @@ Projects can override via environment or project CLAUDE.md:
   escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
-- `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
-  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by model:
-  `haiku` 80k / `sonnet` 150k / `opus` 250k. Single source for these numbers — Step 5b
-  references it.
+- `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
+  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
+  light 80k / standard 150k / deep 250k (therefore Claude's haiku/sonnet/opus values stay
+  80k/150k/250k). Measure Claude's notification total and pi/codex `new` tokens as defined
+  in `references/runaway-guard.md`. Single source for these numbers — Step 5b references it.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
   sub-agent (Step 5b). Default 30 min; scale up for `opus` phases.
 - `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
@@ -622,7 +626,7 @@ Add ability to mark recipes as favorites and filter by them.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent
-  (deep tier of `REVIEW_EXECUTOR`) reviews the whole plan diff; only severity-gated
+  (resolved `REVIEW_MODEL`) reviews the whole plan diff; only severity-gated
   findings are auto-fixed, the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`;
   disable with `RUN_REVIEW`.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees

@@ -5,8 +5,8 @@ off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, SKIP this
 there is nothing coherent to review. Disable entirely with `RUN_REVIEW=false`. If
 `REVIEW_SKILL` is not available in the project, skip Step 8 and note it in the report.
 
-This step mirrors Step 5's delegation discipline: the review sub-agent (deep tier,
-executor-resolved) reviews for judgment, a cheaper fix agent handles mechanical changes,
+This step mirrors Step 5's delegation discipline: the review sub-agent (resolved
+`REVIEW_MODEL`) reviews for judgment, a cheaper fix agent handles mechanical changes,
 and the orchestrator holds only the findings list — it never ingests the raw diff.
 
 ## 8a. Delegate the review
@@ -48,15 +48,19 @@ handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
 - **`codex`** → `codex exec`, **not** `codex exec review`. The native command cannot take
   instructions together with `--base` (`error: the argument '--base <BRANCH>' cannot be used
   with '[PROMPT]'`) and reports zero token usage. Spawn:
-  ```
-  cd <integration> && setsid timeout <secs> codex exec --json -m <REVIEW_MODEL> -s read-only \
+  ```bash
+  cd <integration> && { setsid timeout <secs> codex exec --json \
+    -m <model part of REVIEW_MODEL> -s read-only \
     --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
-    "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl 2> <scratch>/review.err
+    "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl \
+    2> <scratch>/review.err & echo $! > <scratch>/review.pid; wait $!; }
   ```
-  The schema forces a severity per finding, which 8b needs: an object with `summary` and a
-  `findings` array whose items require `severity` (`critical|high|medium|low`), `category`,
-  `file`, `line`, `title` and `detail`. Stop and token accounting follow
-  `references/runaway-guard.md` for codex.
+  Run this with `Bash(run_in_background: true)`. The schema requires top-level `repo_path`
+  (absolute path), `range` (`<base>...<head>`), and `summary`, plus a `findings` array whose
+  items require `severity` (`critical|high|medium|low`), `category`, `file`, `line`, `title`
+  and `detail`. For schema output, the scope check above reads `repo_path` and `range`;
+  absent or mismatched fields make the findings untrusted and require a re-run. Stop and
+  token accounting follow `references/runaway-guard.md` for codex.
 
 ## 8b. Triage by severity
 

@@ -65,6 +65,14 @@ The orchestrator is always Claude Code regardless of which executor the workers 
 
 ### Token accounting
 
+**Extract at worker exit, not at report time.** As soon as a foreign worker's process ends,
+run its extraction below and write the numbers into that phase's spawn record (5a.2), beside
+the model that actually ran. The JSONL logs live in the session scratchpad, which does not
+survive the session: measured 2026-09-19 (MenuLens session `21163bb7`), the orchestrator
+deferred accounting to Step 10, found the scratchpad emptied, and reported `token accounting
+unavailable` for a run whose numbers were fully recoverable. Step 10's F4 rule forbids
+estimating the gap away, so a deferred extraction turns into a permanently unmeasured run.
+
 - **`claude`** → totals arrive in the completion notification; nothing extra required.
 - **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. Sum across all qualifying events:
   ```
@@ -79,4 +87,22 @@ The orchestrator is always Claude Code regardless of which executor the workers 
          | {new: (.input_tokens - .cached_input_tokens + .output_tokens),
             cached: .cached_input_tokens}'
   ```
-  `cached_input_tokens` is a **subset** of `input_tokens` (the session file's `total_tokens` equals `input + output`), so the budget figure subtracts it; this is not the same arithmetic as pi. There is no cost field: codex runs on a ChatGPT subscription, so report tokens and the plan-window share (the Plus 5-hour and weekly windows, e.g. from `quota-axi --provider codex`), **never a dollar figure**.
+  `cached_input_tokens` is a **subset** of `input_tokens` (the session file's `total_tokens` equals `input + output`), so the budget figure subtracts it; this is not the same arithmetic as pi. There is no cost field: codex runs on a ChatGPT subscription, so report tokens and the plan-window share, **never a dollar figure**.
+
+  If the scratchpad JSONL is gone, the session file is the durable fallback — this is the
+  second reason the codex contract forbids `--ephemeral`. Every `token_count` event carries
+  the run-cumulative totals *and* the live plan windows, so one read gives both figures
+  (measured 2026-09-19, MenuLens session `21163bb7`):
+  ```
+  jq -s '[.[] | select(.payload.type=="token_count") | .payload] | last
+         | {new: (.info.total_token_usage.input_tokens
+                  - .info.total_token_usage.cached_input_tokens
+                  + .info.total_token_usage.output_tokens),
+            cached: .info.total_token_usage.cached_input_tokens,
+            window_5h: .rate_limits.primary.used_percent,
+            window_weekly: .rate_limits.secondary.used_percent}' \
+     ~/.codex/sessions/<Y>/<M>/<D>/rollout-*-<thread_id>.jsonl
+  ```
+  Use `total_token_usage`, never `last_token_usage`, which covers one turn only. The
+  `used_percent` figures are cumulative within the window, so a worker's share is the
+  difference between its first and last `token_count` event, not the last value.

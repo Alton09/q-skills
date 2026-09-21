@@ -24,6 +24,16 @@ Configuration; background; 5b guard applies). Payload:
   like `/pr-review` (which prompts for finding selection / posting) would stall.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
+- **Confirm the resolved target before the findings.** A review skill may resolve its own
+  scope from the ambient git state instead of the assigned one, silently. Measured
+  2026-09-19 (MenuLens session `21163bb7`): `/code-review high`, spawned from a review agent
+  whose prompt named the integration worktree and `main...HEAD`, ran in the *main checkout*
+  and reviewed the previous commit there; all four findings were about an unrelated change.
+  Require the reviewer to open its return with the absolute repo path and the
+  `<base>...<head>` range it actually reviewed, and to check both against the assigned
+  worktree. On a mismatch it discards those findings, re-runs the review scoped explicitly
+  to the assigned diff, and says so. A findings list that arrives without that line is not
+  trusted: re-run the review before triage.
 
 The orchestrator keeps the findings list (small); it does not read the diff itself.
 

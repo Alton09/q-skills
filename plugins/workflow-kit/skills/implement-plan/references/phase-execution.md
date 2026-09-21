@@ -133,8 +133,30 @@ Do **not** paste the commands a skill contains into the handoff — name the ski
 worker read it. Inlined commands make the worker follow the handoff instead of the skill, and
 hide whether it can follow a skill at all.
 
+Naming the path is what makes the skill reachable, for both foreign executors. Neither
+harness puts a skill's body in the model's context: `--skill` registers only the skill's
+name and description, exactly as `.agents/skills` discovery does for codex (measured
+2026-09-19 — a pi worker given `--skill` listed both probe skills by name and answered
+`UNKNOWN` for a passphrase written in their bodies, then read both files and answered
+correctly the moment the handoff named their paths). So a worker that is not told to open
+the file has seen a one-line description and nothing else.
+
+Require **proof of reading** in the return format: the worker quotes one verbatim line from
+each required skill file — its first heading, plus the heading of the section it acted on.
+A worker that cannot produce the quotes did not read the skill, which turns a silent
+skip into a visible one the report can state.
+
 The `claude` handoff is unchanged: Claude Code workers have the `Skill` tool, and "run
 /verify" above is sufficient.
+
+Expect foreign workers to follow the **static half** of a verify skill and skip the part that
+needs a device or an emulator. Measured 2026-09-19 (MenuLens session `21163bb7`): both codex
+workers opened the architecture and verify skills as their first action and ran every Gradle
+check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose
+acceptance criterion was "sample recipes still render with a cleared database". So when a
+phase carries an acceptance criterion that only a running app can settle, name it explicitly
+in that phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do not
+rely on the foreign worker's self-verify to have covered it.
 
 ## 5a.3 Execute each layer
 
@@ -202,6 +224,8 @@ Every clause is load-bearing (measured 2026-09-18, vault note `pi-runtime/codex-
 - **No `--ephemeral`.** The `--json` stream never names the model. The session file
   `~/.codex/sessions/**/rollout-*-<thread_id>.jsonl` does, in `turn_context.payload.model`;
   `thread_id` comes from the `thread.started` event. Record that model for the report (F3).
+  The session file is also the only durable source of token counts and plan-window share
+  once the scratchpad is cleared — see `references/runaway-guard.md` § Token accounting.
 - `setsid` alone does **not** make a group kill sufficient — see `references/runaway-guard.md`
   § Stop.
 - The final answer is in `<scratch>/<phase>.last.md` (`-o`), or the last `item.completed`

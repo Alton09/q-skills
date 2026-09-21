@@ -242,6 +242,16 @@ above is how you pick it when the project hasn't — drop to `haiku` only when v
 deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
 reports.
 
+**A sub-agent can fail *after* it has delivered.** A task notification with status
+`failed` — a rate limit, an API error, a killed process — means the agent stopped, not that
+its work is void. Read its hand-back first: if the agent already returned the artifact it was
+spawned for (a findings list, a verify verdict, a phase summary), treat that artifact as
+delivered and continue; do not re-spawn the agent to reproduce work you already hold.
+Measured 2026-09-19 (MenuLens session `21163bb7`): the Step 8 review agent returned all five
+findings and was then killed by a session rate limit, and the notification said `failed`.
+Re-running it would have burned the capstone review twice. If the hand-back is missing or
+truncated mid-artifact, re-spawn as usual and say so in the report.
+
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
   The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
@@ -304,6 +314,14 @@ resuming session reads and the file the rung-2 rescue block tells the user to op
 marker written anywhere else leaves the resume target with no record of the failure it is
 being asked to resume from. If the plan path you were given points outside the integration
 worktree, resolve it to the same relative path inside the worktree before writing.
+
+**Plans that live outside the project repo.** A plan kept in a separate repo — a notes vault,
+a docs repo — has no copy inside the integration worktree, so the resolve-into-the-worktree
+rule above does not apply to it. Write checkboxes and callouts to the plan file where it
+actually lives. Do **not** commit it in step 4: no worker touches that repo, so the
+destructive-git reasoning behind the commit rule does not hold, and a blind commit there
+sweeps in whatever else the user has uncommitted in it. Say in the report that plan state was
+updated in place and left uncommitted, and name the file.
 
 ## Step 8: Plan Review & Auto-fix
 

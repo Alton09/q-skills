@@ -79,9 +79,32 @@ only records with the same role and executor, so review/fix numbers cannot silen
 the worker row. A missing extraction makes that role/executor measure `token accounting
 unavailable`; it is not repaired from another role, model price, elapsed time, or a prior
 run. The Claude Code orchestrator is not a spawned worker: its row may use only a genuine
-per-run Claude Code record for its own cost, API calls, and peak context. This skill has no
-such record by default, so Step 10 explicitly reports each absent field rather than deriving
-it from its turns, messages, workers, or account-level quota.
+per-run Claude Code record for its own cost, API calls, and peak context. Its session
+transcript measures API calls and peak context, but has no dollar cost record; Step 10 must
+leave cost unavailable rather than deriving it from prices, usage, workers, or account-level
+quota.
+
+- **`claude` orchestrator** → Claude Code writes its transcript to
+  `~/.claude/projects/<project-slug>/<session-id>.jsonl`. Locate it by the orchestrator's
+  own session id; if that file cannot be identified unambiguously, print `unavailable —
+  session transcript not identified` for both API calls and peak context — never select the
+  newest file. An API call can occupy several assistant JSONL lines with the same
+  `message.id` (one per content block), so exclude `isSidechain == true`, retain assistant
+  lines with `message.usage`, then count distinct `message.id` values and take the maximum
+  context across those calls:
+  ```
+  jq -s '[.[] | select(.type == "assistant" and .isSidechain != true
+                       and .message.usage != null and .message.id != null)
+          | {id: .message.id,
+             context: (.message.usage.input_tokens
+                       + .message.usage.cache_creation_input_tokens
+                       + .message.usage.cache_read_input_tokens)}]
+         | unique_by(.id)
+         | {api_call_count: length, peak_context: (map(.context) | max // 0)}' \\
+     ~/.claude/projects/<project-slug>/<session-id>.jsonl
+  ```
+  The transcript contains no dollar figure. Leave orchestrator cost as `token accounting
+  unavailable`; F4 forbids a price-based estimate.
 
 - **`claude`** → totals arrive in the completion notification; nothing extra required.
 - **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. Sum across all qualifying events:

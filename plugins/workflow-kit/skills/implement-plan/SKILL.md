@@ -407,11 +407,14 @@ Once all phases are checked off:
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## Cost
-- **Orchestrator (Claude Code):** cost: `token accounting unavailable — this skill receives
-  no Claude Code per-run cost record`; API calls: `unavailable — this skill receives no
-  Claude Code per-run API-call record`; peak context: `unavailable — this skill receives no
-  Claude Code per-run peak-context record`. Do not substitute turns, messages, elapsed time,
-  worker totals, model prices, or a UI/account-level quota for any of these fields.
+- **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
+  transcript has no dollar cost record; F4 forbids estimating`; API calls: <measured distinct
+  `message.id` count from the orchestrator's own session transcript, or `unavailable —
+  session transcript not identified`>; peak context: <measured maximum context from that
+  transcript, or `unavailable — session transcript not identified`>. Extract API calls and
+  peak context as specified in `references/runaway-guard.md` § "Token accounting". Do not
+  substitute turns, messages, elapsed time, worker totals, model prices, or a UI/account-level
+  quota for any of these fields.
 - **Workers (by executor):** <one row for every executor that ran phase, retry, escalation,
   or gate-verify work; aggregate only its exit-time spawn records. If no accounting record
   exists for that executor, print `token accounting unavailable` rather than a total.>

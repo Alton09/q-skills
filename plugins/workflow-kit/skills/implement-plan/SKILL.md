@@ -206,11 +206,11 @@ Two rules are load-bearing and easy to get wrong:
 ### 5b. Runaway guard
 
 Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`) and a **token
-ceiling** checked on completion (`PHASE_TOKEN_CEILING`). Claude workers, which have no
-executor timeout, get a parallel background Bash `sleep` timer whose notification wakes
-the orchestrator; pi/codex use their command `timeout`. On a trip, stop the worker with its
-executor binding (`TaskStop`, process-group kill, or process-tree kill), page the user via
-`NOTIFY_SKILL`, and wait.
+ceiling** checked on completion (`PHASE_TOKEN_CEILING`). Claude and codex workers get a
+parallel background Bash `sleep` timer whose notification wakes the orchestrator; codex's
+command `timeout` has a five-minute margin and is only a backstop, while pi uses `timeout`
+directly. On a trip, stop the worker with its executor binding (`TaskStop`, process-group
+kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 
@@ -432,8 +432,9 @@ Once all phases are checked off:
   - `codex`: <new tokens>; plan-window usage: <5-hour and weekly first/last values and
     deltas from the token-count records>; no dollars. If either required record is absent,
     the later value is lower, or `resets_at` changed, print `token accounting unavailable`
-    for that window; never derive it. When codex workers overlap, report one whole-run codex
-    window delta rather than attributing the account-level change to individual workers.
+    for that window; never derive it. When codex workers overlap, merge the rollout files
+    named by their spawn-record thread ids and report the time-sorted whole-run delta using
+    `references/runaway-guard.md`, rather than attributing it to individual workers.
 - **Review + fix (by executor):** <one row for every executor that ran Step 8 review or
   fix work, using the same executor-specific form and source rules as Workers. If review was
   skipped, say `absent — review skipped: <reason>`; if it ran but has no accounting, say

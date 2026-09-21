@@ -25,7 +25,7 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
 
 - **Spawn command template:** Run with `Bash(run_in_background: true)`:
   ```bash
-  cd <worktree> && { setsid timeout <secs> pi -p --mode json --no-session \
+  cd <worktree> && { setsid timeout -k <grace> <budget-secs> pi -p --mode json --no-session \
     --model <provider/id> --skill <consumer .claude/skills> \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
     2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
@@ -51,13 +51,14 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
 
 - **Spawn command template:** Run setup once, then use `Bash(run_in_background: true)`:
   ```bash
-  cd <worktree> && { setsid timeout <secs> codex exec --json -m <model> \
+  cd <worktree> && { setsid timeout -k <grace> <budget-plus-5-min-secs> codex exec --json -m <model> \
     -s workspace-write --add-dir "$HOME" --add-dir "$(git rev-parse --git-common-dir)" \
     -c sandbox_workspace_write.network_access=true -o <scratch>/<phase>.last.md \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
     2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
   ```
-  `</dev/null` is mandatory: the 180 s probe otherwise waited for input with no stdout
+  Set the timeout to the wall-clock budget plus five minutes; it is only the backstop for
+  the orchestrator timer in `references/runaway-guard.md`. `</dev/null` is mandatory: the 180 s probe otherwise waited for input with no stdout
   (`rc=124`); `Reading additional input from stdin...` appears on stderr in both cases and
   is not a hang signal. Keep these narrowest-working sandbox flags: `workspace-write` alone
   blocks `~/.gradle`, `~/.maestro`, and adb; `--add-dir` accepts directories only, so `$HOME`

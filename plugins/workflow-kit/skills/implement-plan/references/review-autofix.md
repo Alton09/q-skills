@@ -49,7 +49,7 @@ handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
   instructions together with `--base` (`error: the argument '--base <BRANCH>' cannot be used
   with '[PROMPT]'`) and reports zero token usage. Spawn:
   ```bash
-  cd <integration> && { setsid timeout <secs> codex exec --json \
+  cd <integration> && { setsid timeout -k <grace> <budget-plus-5-min-secs> codex exec --json \
     -m <model part of REVIEW_MODEL> -s read-only \
     --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
     "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl \

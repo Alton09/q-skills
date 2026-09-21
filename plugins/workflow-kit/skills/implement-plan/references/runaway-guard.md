@@ -16,15 +16,22 @@ timeout while running, and the token total on completion.
 
 **Wall-clock budget (while running).** Set a per-phase time budget (`PHASE_TIME_BUDGET`,
 default 30 min; scale up for deep phases, and use `ESCALATION_TIME_BUDGET` for escalation
-attempts). Pi and codex enforce it with the `timeout` in their spawn commands. Claude has no
-executor timeout, so alongside each Claude Agent spawn start a timer with
-`Bash(run_in_background: true)` running `sleep <budget seconds>`. Its completion notification
-re-invokes the orchestrator even if the worker hangs silently. On that wakeup, if the Claude
-worker is still outstanding, it is runaway: stop it with `TaskStop`, then page the user
-(below). The extra timer is needed only for executors without their own `timeout` (currently
-Claude); do not use `ScheduleWakeup`, which is available only in `/loop` dynamic mode. Stop
-returns only status, not partial work — report what the orchestrator last knew, not a
-recovered transcript.
+attempts). Alongside every Claude or codex spawn, start a timer with
+`Bash(run_in_background: true)` running `sleep <budget seconds>`. In the spawn record, bind
+the timer task id to the exact worker it guards: the Agent task id for Claude or the pidfile
+for codex. Its completion notification re-invokes the orchestrator even if the worker hangs
+silently. On wakeup, act only if that same bound worker is still outstanding: use `TaskStop`
+for Claude or walk and stop the codex process tree while its parent is still alive, then page
+the user (below). When the worker completes first, `TaskStop` its timer immediately so an old
+attempt, completed phase, or parallel sibling's timer cannot stop later work.
+
+Pi enforces the budget directly with `timeout -k <grace> <budget-secs>`. Codex's command
+uses `timeout -k <grace> <budget-plus-5-min-secs>`—the wall-clock budget plus a five-minute
+margin—only as a backstop for a missed timer wakeup. Exit 124 from either pi/codex spawn, or
+137 when `timeout -k` had to KILL it, is a wall-clock trip handled by **On either trip**, not
+an ordinary worker failure: do not gate-verify, retry, or escalate. Do not use
+`ScheduleWakeup`, which is available only in `/loop` dynamic mode. Stop returns only status,
+not partial work—report what the orchestrator last knew, not a recovered transcript.
 
 **Token ceiling (on completion).** When the sub-agent returns, compare its budget figure
 against the resolved light/standard/deep tier ceiling in Configuration
@@ -128,19 +135,26 @@ quota.
 
   If the scratchpad JSONL is gone, the session file is the durable fallback — this is the
   second reason the codex contract forbids `--ephemeral`. Every `token_count` event carries
-  the run-cumulative totals *and* the live plan windows, so one read gives both figures
+  the run-cumulative totals and may carry the live plan windows. Extract tokens separately
+  so absent rate-limit data cannot discard recoverable token figures
   (measured 2026-09-19, MenuLens session `21163bb7`):
-  ```
+  ```bash
+  jq -s '[.[] | select(.payload.type=="token_count") | .payload] | last
+         | if . == null then {new: "unavailable", cached: "unavailable"}
+           else {new: (.info.total_token_usage.input_tokens
+                       - .info.total_token_usage.cached_input_tokens
+                       + .info.total_token_usage.output_tokens),
+                 cached: .info.total_token_usage.cached_input_tokens}
+           end' ~/.codex/sessions/<Y>/<M>/<D>/rollout-*-<thread_id>.jsonl
+
   jq -s 'def delta($a; $b):
-           if ($a.resets_at != $b.resets_at or $b.used_percent < $a.used_percent)
+           if ($a.used_percent == null or $b.used_percent == null
+               or $a.resets_at != $b.resets_at or $b.used_percent < $a.used_percent)
            then "unavailable" else ($b.used_percent - $a.used_percent) end;
-         [.[] | select(.payload.type=="token_count") | .payload] as $events
-         | ($events | first) as $first | ($events | last) as $last
-         | {new: ($last.info.total_token_usage.input_tokens
-                  - $last.info.total_token_usage.cached_input_tokens
-                  + $last.info.total_token_usage.output_tokens),
-            cached: $last.info.total_token_usage.cached_input_tokens,
-            window_5h_first: $first.rate_limits.primary.used_percent,
+         [.[] | select(.payload.type=="token_count")
+          | {timestamp, rate_limits: .payload.rate_limits}] | sort_by(.timestamp) as $events
+         | ($events[0] // null) as $first | ($events[-1] // null) as $last
+         | {window_5h_first: $first.rate_limits.primary.used_percent,
             window_5h_last: $last.rate_limits.primary.used_percent,
             window_5h_delta: delta($first.rate_limits.primary; $last.rate_limits.primary),
             window_weekly_first: $first.rate_limits.secondary.used_percent,
@@ -152,8 +166,28 @@ quota.
   `used_percent` figures are cumulative within the window, so report the explicitly extracted
   first/last delta. If the later value is lower or `resets_at` changed, report `unavailable`
   rather than deriving a number across the reset. When codex workers overlap in time (or
-  other account activity makes attribution ambiguous), report the window delta once for the
-  whole run's codex usage, not as a per-worker share.
+  other account activity makes attribution ambiguous), merge exactly the rollout files named
+  by the codex thread ids in this run's spawn records, sort their eligible events by time, and
+  report the window delta once for the whole run rather than per worker:
+
+  ```bash
+  jq -s 'def delta($a; $b):
+           if ($a.used_percent == null or $b.used_percent == null
+               or $a.resets_at != $b.resets_at or $b.used_percent < $a.used_percent)
+           then "unavailable" else ($b.used_percent - $a.used_percent) end;
+         [.[] | select(.payload.type=="token_count" and .payload.rate_limits != null)
+          | {timestamp, rate_limits: .payload.rate_limits}] | sort_by(.timestamp) as $events
+         | ($events[0] // null) as $first | ($events[-1] // null) as $last
+         | {window_5h_first: $first.rate_limits.primary.used_percent,
+            window_5h_last: $last.rate_limits.primary.used_percent,
+            window_5h_delta: delta($first.rate_limits.primary; $last.rate_limits.primary),
+            window_weekly_first: $first.rate_limits.secondary.used_percent,
+            window_weekly_last: $last.rate_limits.secondary.used_percent,
+            window_weekly_delta: delta($first.rate_limits.secondary; $last.rate_limits.secondary)}' \
+     <rollout-file-for-thread-id-1> <rollout-file-for-thread-id-2> [...]
+  ```
+
+  A changed `resets_at` makes that window's whole-run delta `unavailable`.
 
   The same first/last delta is the only plan-window share Step 10 may report for a codex
   review or fix record. Codex is subscription-backed: report its new tokens and window

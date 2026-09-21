@@ -341,7 +341,11 @@ Configuration) reviews the cumulative plan diff
 list only — the orchestrator never ingests the raw diff. Findings are triaged at
 `REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **light/standard phase-tier** fix pass run
 sequentially in the integration worktree under the same two-tier verify as a phase;
-below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_ROUNDS`.
+below-threshold are reported, not touched. The orchestrator never edits code for a finding:
+every finding fix is delegated to a fix sub-agent. That remains true when the user later asks
+to address a below-threshold finding; delegate it to a fix agent on the cheap tier of the
+active executor, never edit it in the orchestrator session. Re-review is bounded by
+`REVIEW_MAX_ROUNDS`.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
@@ -441,6 +445,11 @@ only, never dollars.
 - Review code and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
+
+The run is complete. Follow-up questions, fixes (including below-threshold findings), and
+re-verification belong in a fresh session, which starts near zero context rather than at this
+run's peak. Carry over the worktree path, branch, PR link, plan file path and its checked-off
+state, below-threshold findings left for you, and known gaps from this report.
 
 If hard-stopped due to failure:
 

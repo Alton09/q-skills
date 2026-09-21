@@ -65,7 +65,9 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
 - **At/above threshold** → auto-fix queue (8c).
 - **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
   touch. Collect them for the report (Step 10). Auto-fixing a reviewer's opinion churns good
-  code — leave that call to the user.
+  code — leave that call to the user. The orchestrator never edits code for any finding.
+  If the user later wants a below-threshold finding fixed, a fresh session delegates it to a
+  light-tier fix sub-agent resolved on the active executor; it is never an orchestrator edit.
 
 If the auto-fix queue is empty, skip to 8d.
 

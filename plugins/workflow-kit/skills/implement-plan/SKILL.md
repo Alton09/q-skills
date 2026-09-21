@@ -343,8 +343,9 @@ list only — the orchestrator never ingests the raw diff. Findings are triaged 
 sequentially in the integration worktree under the same two-tier verify as a phase;
 below-threshold are reported, not touched. The orchestrator never edits code for a finding:
 every finding fix is delegated to a fix sub-agent. That remains true when the user later asks
-to address a below-threshold finding; delegate it to a fix agent on the cheap tier of the
-active executor, never edit it in the orchestrator session. Re-review is bounded by
+to address a below-threshold finding; from a fresh session, delegate it to a light-tier fix
+sub-agent under the §8c two-tier verify, never edit it in the orchestrator session. Re-review
+is bounded by
 `REVIEW_MAX_ROUNDS`.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.

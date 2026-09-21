@@ -67,7 +67,9 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
   touch. Collect them for the report (Step 10). Auto-fixing a reviewer's opinion churns good
   code — leave that call to the user. The orchestrator never edits code for any finding.
   If the user later wants a below-threshold finding fixed, a fresh session delegates it to a
-  light-tier fix sub-agent resolved on the active executor; it is never an orchestrator edit.
+  light-tier fix sub-agent resolved on the active executor under §8c's same two-tier verify
+  contract (warm self-verify bounded by `SELF_VERIFY_LIMIT`, then an independent gate-verify);
+  it is never an orchestrator edit.
 
 If the auto-fix queue is empty, skip to 8d.
 

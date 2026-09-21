@@ -73,6 +73,16 @@ deferred accounting to Step 10, found the scratchpad emptied, and reported `toke
 unavailable` for a run whose numbers were fully recoverable. Step 10's F4 rule forbids
 estimating the gap away, so a deferred extraction turns into a permanently unmeasured run.
 
+**Keep the report split at exit.** Tag every spawn record with its role: `worker` for phase,
+retry, escalation, and gate-verify work; `review+fix` for Step 8 work. Step 10 aggregates
+only records with the same role and executor, so review/fix numbers cannot silently inflate
+the worker row. A missing extraction makes that role/executor measure `token accounting
+unavailable`; it is not repaired from another role, model price, elapsed time, or a prior
+run. The Claude Code orchestrator is not a spawned worker: its row may use only a genuine
+per-run Claude Code record for its own cost, API calls, and peak context. This skill has no
+such record by default, so Step 10 explicitly reports each absent field rather than deriving
+it from its turns, messages, workers, or account-level quota.
+
 - **`claude`** → totals arrive in the completion notification; nothing extra required.
 - **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. Sum across all qualifying events:
   ```
@@ -106,3 +116,7 @@ estimating the gap away, so a deferred extraction turns into a permanently unmea
   Use `total_token_usage`, never `last_token_usage`, which covers one turn only. The
   `used_percent` figures are cumulative within the window, so a worker's share is the
   difference between its first and last `token_count` event, not the last value.
+
+  The same first/last delta is the only plan-window share Step 10 may report for a codex
+  review or fix record. Codex is subscription-backed: report its new tokens and window
+  share, never dollars.

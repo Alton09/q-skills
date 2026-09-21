@@ -161,89 +161,10 @@ rely on the foreign worker's self-verify to have covered it.
 ## 5a.3 Execute each layer
 
 Walk layers in topological order (5a.1). `PHASE_EXECUTOR` (default `claude`) determines how
-each phase agent is spawned.
-
-**`claude` executor (default):** Every phase agent is spawned with the Agent tool
-and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
-the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
-wall-clock guard, and watch several agents at once), and each agent is cancellable via
-`TaskStop`. The completion notification carries the agent's total token count and
-duration, which feeds the 5b ceiling check.
-
-**`pi` executor:** Spawn with `Bash(run_in_background: true)`:
-
-```
-cd <worktree> && setsid timeout <secs> pi -p --mode json --no-session \
-  --model <provider/id> \
-  --skill <consumer .claude/skills> \
-  "$(cat <handoff-file>)" </dev/null \
-  > <scratch>/<phase>.jsonl 2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
-```
-
-Every clause is load-bearing:
-
-- `setsid` puts the worker in its own process group, so its PID is the group ID and
-  `kill -TERM -- -<pid>` stops the real `pi` process, not only the wrapper
-  (`references/runaway-guard.md` § Stop). Do not enable shell job control instead: it
-  fails under the Bash tool's zsh `eval` and the worker never starts.
-- `</dev/null` is **mandatory**. Without it pi never returns and emits nothing at all —
-  measured on 2026-09-16: a backgrounded invocation produced 0 bytes on stdout and stderr
-  and was killed at 180 s (rc=124). A worker that hangs silently is the one failure the
-  orchestrator cannot diagnose from output.
-- Pass the handoff via a file read into argv, never as a long inline argument — the 5a.2
-  payload is large and argv quoting is fragile.
-- `--skill` points at the consumer project's skill directory so the worker can run
-  `/verify`. No symlink into `.agents/`, no edits to `~/.pi/agent/settings.json`.
-- The worker's worktree is simply the process `cwd`. There is no session-root constraint,
-  because the orchestrator is not the confined process.
-
-**`codex` executor:** first run the one-time setup below, then spawn with
-`Bash(run_in_background: true)`:
-
-```
-cd <worktree> && setsid timeout <secs> codex exec --json -m <model> \
-  -s workspace-write --add-dir "$HOME" --add-dir "$(git rev-parse --git-common-dir)" \
-  -c sandbox_workspace_write.network_access=true \
-  -o <scratch>/<phase>.last.md \
-  "$(cat <handoff-file>)" </dev/null \
-  > <scratch>/<phase>.jsonl 2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!
-```
-
-Every clause is load-bearing (measured 2026-09-18, vault note `pi-runtime/codex-probe.md`):
-
-- `</dev/null` is **mandatory**, exactly as for pi. With stdin left open, `codex exec` waits
-  for more input and emits nothing on stdout until killed (180 s probe, rc=124). It prints
-  `Reading additional input from stdin...` to stderr in *both* cases, so that line is not a
-  hang signal.
-- The sandbox flags are the narrowest setting that lets a MenuLens worker run Gradle, `adb`,
-  Maestro, and `git commit`. `workspace-write` alone blocks `~/.gradle`, `~/.maestro` and the
-  `adb` socket. Robolectric writes a lock file directly in `$HOME`, and `--add-dir` takes only
-  directories, so `$HOME` is the narrowest writable root. Codex keeps `.git` read-only inside
-  writable roots, so the git common dir is added explicitly, or the 5a.2 commit fails with
-  `index.lock: Read-only file system`.
-- **No `--ephemeral`.** The `--json` stream never names the model. The session file
-  `~/.codex/sessions/**/rollout-*-<thread_id>.jsonl` does, in `turn_context.payload.model`;
-  `thread_id` comes from the `thread.started` event. Record that model for the report (F3).
-  The session file is also the only durable source of token counts and plan-window share
-  once the scratchpad is cleared — see `references/runaway-guard.md` § Token accounting.
-- `setsid` alone does **not** make a group kill sufficient — see `references/runaway-guard.md`
-  § Stop.
-- The final answer is in `<scratch>/<phase>.last.md` (`-o`), or the last `item.completed`
-  whose `item.type` is `agent_message`.
-
-**Codex one-time setup (per worktree, before its first codex spawn).** Codex has no per-call
-skill flag; it discovers skills only under `.agents/skills` (repo, parents) and
-`~/.agents/skills`. So the orchestrator:
-
-1. Ensures `<worktree>/.agents/skills` is a symlink to `../.claude/skills`, creating it if
-   missing.
-2. Appends `.agents/` to `$(git -C <worktree> rev-parse --git-path info/exclude)` if not
-   already there, so the link never reaches a commit.
-3. When a project skill depends on a user-level skill (for example MenuLens `verify` on
-   `android-cli`), ensures `~/.agents/skills/<name>` links to `~/.claude/skills/<name>`.
-
-This deliberately differs from pi: the "no `.agents` symlink" rule above applies to pi only.
-The user never creates these links; the orchestrator does.
+each phase agent is spawned. Use the selected entry in
+references/executors.md § "Executor entries" for its spawn command, model address syntax,
+stop mechanism, token extraction, and any one-time setup. With `PHASE_EXECUTOR` unset, use
+the `claude` entry: the Agent-tool `run_in_background: true` spawn remains the default path.
 
 The worktree-ownership rule and the destructive-git prohibition in the handoff (5a.2) apply
 identically to every executor — they are properties of the handoff, not the harness.

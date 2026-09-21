@@ -11,8 +11,8 @@ and the orchestrator holds only the findings list — it never ingests the raw d
 
 ## 8a. Delegate the review
 
-Spawn ONE review sub-agent on `REVIEW_EXECUTOR` with model `REVIEW_MODEL` (see SKILL.md
-Configuration; background; 5b guard applies). Payload:
+Resolve `REVIEW_MODEL` as `executor:model` (see SKILL.md Configuration), then spawn ONE
+review sub-agent with that registry entry (background; 5b guard applies). Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -69,15 +69,16 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
 
 If the auto-fix queue is empty, skip to 8d.
 
-## 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
+## 8c. Delegate the fixes (phase tiers, sequential in integration)
 
 Review findings cluster on shared files, so fixes run **in the integration worktree, not in
 parallel** — parallel fix agents would collide (the Step 5a file-overlap problem). Bundle
 the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
 
-1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
-   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to the
-   deep tier of `PHASE_EXECUTOR` only for genuinely tricky fixes.)
+1. Classify complexity across its findings → light (mechanical) or standard (needs
+   inference); use the max across the bundle. Resolve `PHASE_MODEL_LIGHT` or
+   `PHASE_MODEL_STANDARD` exactly like a phase worker (Step 5a.2), including its executor.
+   Use `PHASE_MODEL_DEEP` only for genuinely tricky fixes.
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
    fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your

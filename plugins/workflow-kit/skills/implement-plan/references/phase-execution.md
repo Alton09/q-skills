@@ -40,41 +40,30 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
-**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
-the phase's tasks and map to a model for the active executor (`PHASE_EXECUTOR`, default
-`claude`).
+**1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
+the phase's tasks as light, standard, or deep, then read `PHASE_MODEL_LIGHT`,
+`PHASE_MODEL_STANDARD`, or `PHASE_MODEL_DEEP`. Each value is an `executor:model` address;
+split only on the first colon and use the matching registry entry. An unprefixed model id
+always resolves to `claude:<id>` for backward compatibility. Reject an unknown executor or
+an invalid model id before spawning, with an error that names the resolved executor and id.
 
-**`claude` executor** — map to the Agent tool's `model` parameter:
+The shipped tier defaults preserve the existing `PHASE_EXECUTOR` shorthand:
 
-| Phase character | Agent `model` |
-|---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
-| Normal feature work (typical layer impl, standard tests) | `sonnet` |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
+| `PHASE_EXECUTOR` | light | standard | deep |
+|---|---|---|---|
+| `claude` (default) | `claude:haiku` | `claude:sonnet` | `claude:opus` |
+| `pi` | `pi:opencode-go/minimax-m3` | `pi:opencode-go/glm-5.3` | `pi:opencode-go/qwen3.8-max` |
+| `codex` | `codex:gpt-5.6-luna` | `codex:gpt-5.6-terra` | `codex:gpt-5.6-sol` |
 
-The values are the literal `model` enum tokens — pass them straight to the Agent tool.
-
-**`pi` executor** — map to an `opencode-go` model string:
-
-| Phase character (tier) | `--model` value |
-|---|---|
-| Mechanical/boilerplate (light) | `opencode-go/minimax-m3` |
-| Normal feature work (standard) | `opencode-go/glm-5.3` |
-| Complex/novel (deep) | `opencode-go/qwen3.8-max` |
+Explicit `PHASE_MODEL_*` values win over that shorthand, so tiers may use different
+executors. For example, `PHASE_MODEL_LIGHT=pi:opencode-go/minimax-m3` and
+`PHASE_MODEL_STANDARD=codex:gpt-5.6-terra` are valid in the same run.
 
 The deep tier is `qwen3.8-max`, not Kimi K3. In the 2026-09-16 bake-off, Kimi K3 failed
 C2 tool discipline: it stopped after 4 of 10 steps and reported the task done. Complex
 phases are the longest multi-step work and end with `/verify`, so a premature stop with a
 false completion claim costs most there. `qwen3.8-max` passed all three canaries and was
 faster and cheaper than Kimi K3 on each.
-
-**`codex` executor** — map to a Codex model id (OpenAI, ChatGPT-plan login):
-
-| Phase character (tier) | `-m` value |
-|---|---|
-| Mechanical/boilerplate (light) | `gpt-5.6-luna` |
-| Normal feature work (standard) | `gpt-5.6-terra` |
-| Complex/novel (deep) | `gpt-5.6-sol` |
 
 These are provisional defaults taken from the model descriptions, not from a bake-off. Every
 Codex model is GPT family. On a Plus plan a single large worker can take a double-digit share
@@ -149,7 +138,7 @@ skip into a visible one the report can state.
 The `claude` handoff is unchanged: Claude Code workers have the `Skill` tool, and "run
 /verify" above is sufficient.
 
-Expect foreign workers to follow the **static half** of a verify skill and skip the part that
+Expect foreign workers to follow the **static half** of a verify skill and possibly skip the part that
 needs a device or an emulator. Measured 2026-09-19 (MenuLens session `21163bb7`): both codex
 workers opened the architecture and verify skills as their first action and ran every Gradle
 check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose
@@ -160,8 +149,8 @@ rely on the foreign worker's self-verify to have covered it.
 
 ## 5a.3 Execute each layer
 
-Walk layers in topological order (5a.1). `PHASE_EXECUTOR` (default `claude`) determines how
-each phase agent is spawned. Use the selected entry in
+Walk layers in topological order (5a.1). The resolved `executor:model` address determines
+how each phase agent is spawned. Use the selected entry in
 references/executors.md § "Executor entries" for its spawn command, model address syntax,
 stop mechanism, token extraction, and any one-time setup. With `PHASE_EXECUTOR` unset, use
 the `claude` entry: the Agent-tool `run_in_background: true` spawn remains the default path.

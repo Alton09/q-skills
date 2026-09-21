@@ -1,9 +1,11 @@
 # Executor Registry
 
 The Claude Code orchestrator owns scheduling, worktrees, pacing, gate verification,
-notifications, and all decisions. An executor changes only a worker's harness. Select it
-with `PHASE_EXECUTOR` (default `claude`); use the matching entry below for every phase,
-retry, escalation, review, or fix spawn that routes to that executor.
+notifications, and all decisions. An executor changes only a worker's harness. Worker
+targets use `executor:model`; an unprefixed model resolves to `claude:model`. Split on the
+first colon and use the matching entry below for every phase, retry, escalation, review, or
+fix spawn. Reject unknown executors or model ids before spawning, and name the executor and
+id in the error (for example, `unknown model 'x' for executor 'pi'`).
 
 ## Executor entries
 
@@ -13,7 +15,8 @@ retry, escalation, review, or fix spawn that routes to that executor.
   `run_in_background: true`. This keeps the orchestrator responsive for the wall-clock
   guard and concurrent workers, makes the worker cancellable, and returns total tokens and
   duration in the completion notification.
-- **Model address syntax:** Literal Agent `model` enum token: `haiku`, `sonnet`, or `opus`.
+- **Model address syntax:** `claude:<enum>`; pass the suffix (`haiku`, `sonnet`, or `opus`)
+  as the Agent `model`. An unprefixed id is equivalent to `claude:<id>`.
 - **Stop mechanism:** `TaskStop`; it returns status only, not partial work.
 - **Token-accounting extraction:** Use the total from the completion notification; no extra
   extraction is required.
@@ -34,7 +37,8 @@ retry, escalation, review, or fix spawn that routes to that executor.
   file into argv, rather than inlining it. `--skill` exposes consumer skills for `/verify`;
   do not create an `.agents` symlink or edit `~/.pi/agent/settings.json`. Its cwd is the
   worktree; no session-root constraint applies because the orchestrator is not confined.
-- **Model address syntax:** `--model <provider/id>`; phase tiers currently use
+- **Model address syntax:** `pi:<provider/id>`; pass the suffix as `--model <provider/id>`.
+  Phase tiers currently use
   `opencode-go/minimax-m3`, `opencode-go/glm-5.3`, and `opencode-go/qwen3.8-max`.
 - **Stop mechanism:** TERM the recorded process group: `kill -TERM -- -<pid>`. See
   `references/runaway-guard.md` § "Stop" for the measured rationale and tree-kill caveat.
@@ -64,7 +68,7 @@ retry, escalation, review, or fix spawn that routes to that executor.
   `turn_context.payload.model` (`thread_id` comes from `thread.started`) and preserves token
   totals and plan windows. `setsid` alone is insufficient for stopping; the final answer is
   `-o` output or the last `item.completed` `agent_message`.
-- **Model address syntax:** `-m <model>`; phase tiers currently use `gpt-5.6-luna`,
+- **Model address syntax:** `codex:<model>`; pass the suffix as `-m <model>`. Phase tiers use `gpt-5.6-luna`,
   `gpt-5.6-terra`, and `gpt-5.6-sol` (all GPT family).
 - **Stop mechanism:** Walk descendants before killing, then TERM every discovered process
   group; `codex-linux-sandbox` creates sessions, so a launcher group kill leaves children.

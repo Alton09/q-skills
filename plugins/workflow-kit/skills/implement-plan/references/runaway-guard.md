@@ -15,7 +15,7 @@ timeout while running, and the token total on completion.
 > arrive (the metric the ceiling check uses).
 
 **Wall-clock budget (while running).** Set a per-phase time budget (`PHASE_TIME_BUDGET`,
-default 15 min; scale up for `opus` phases, and use `ESCALATION_TIME_BUDGET` for escalation
+default 30 min; scale up for `opus` phases, and use `ESCALATION_TIME_BUDGET` for escalation
 attempts). The orchestrator checks elapsed time on each natural re-invocation — the
 background-completion notification is the heartbeat, not a scheduled wakeup primitive. If
 any worker is still outstanding past its budget when the orchestrator next runs, treat it as

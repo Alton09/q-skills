@@ -138,7 +138,7 @@ skip into a visible one the report can state.
 The `claude` handoff is unchanged: Claude Code workers have the `Skill` tool, and "run
 /verify" above is sufficient.
 
-Expect foreign workers to follow the **static half** of a verify skill and possibly skip the part that
+Expect foreign workers to follow the **static half** of a verify skill. They may skip the part that
 needs a device or an emulator. Measured 2026-09-19 (MenuLens session `21163bb7`): both codex
 workers opened the architecture and verify skills as their first action and ran every Gradle
 check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose

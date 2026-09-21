@@ -40,16 +40,36 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
-**1. Classify complexity → pick the sub-agent model** (auto, no user prompt). Judge
-the phase's tasks and map to the Agent tool's `model` parameter:
+**1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
+the phase's tasks as light, standard, or deep, then read `PHASE_MODEL_LIGHT`,
+`PHASE_MODEL_STANDARD`, or `PHASE_MODEL_DEEP`. Each value is an `executor:model` address;
+split only on the first colon and use the matching registry entry. An unprefixed model id
+always resolves to `claude:<id>` for backward compatibility. Reject an unknown executor or
+an invalid model id before spawning, with an error that names the resolved executor and id.
 
-| Phase character | Agent `model` |
-|---|---|
-| Mechanical/boilerplate (wiring, renames, simple CRUD, test scaffolds) | `haiku` |
-| Normal feature work (typical layer impl, standard tests) | `sonnet` |
-| Complex/novel (tricky algorithms, cross-cutting design, ambiguous tasks) | `opus` |
+The shipped tier defaults preserve the existing `PHASE_EXECUTOR` shorthand:
 
-The values are the literal `model` enum tokens — pass them straight to the Agent tool.
+| `PHASE_EXECUTOR` | light | standard | deep |
+|---|---|---|---|
+| `claude` (default) | `claude:haiku` | `claude:sonnet` | `claude:opus` |
+| `pi` | `pi:opencode-go/minimax-m3` | `pi:opencode-go/glm-5.3` | `pi:opencode-go/qwen3.8-max` |
+| `codex` | `codex:gpt-5.6-luna` | `codex:gpt-5.6-terra` | `codex:gpt-5.6-sol` |
+
+Explicit `PHASE_MODEL_*` values win over that shorthand, so tiers may use different
+executors. For example, `PHASE_MODEL_LIGHT=pi:opencode-go/minimax-m3` and
+`PHASE_MODEL_STANDARD=codex:gpt-5.6-terra` are valid in the same run.
+
+The deep tier is `qwen3.8-max`, not Kimi K3. In the 2026-09-16 bake-off, Kimi K3 failed
+C2 tool discipline: it stopped after 4 of 10 steps and reported the task done. Complex
+phases are the longest multi-step work and end with `/verify`, so a premature stop with a
+false completion claim costs most there. `qwen3.8-max` passed all three canaries and was
+faster and cheaper than Kimi K3 on each.
+
+These are provisional defaults taken from the model descriptions, not from a bake-off. Every
+Codex model is GPT family. On a Plus plan a single large worker can take a double-digit share
+of the 5-hour window (one full-diff review on `gpt-6-astra` took 22 %), so `gpt-6-astra` is
+deliberately not a phase tier.
+
 Record the chosen model per phase for the final report.
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
@@ -87,14 +107,56 @@ everything the phase needs:
   next phase needs, your final self-verify result (pass/fail + remaining errors), and
   any tasks you could not complete.
 
+**3. Foreign executors: name the required skills by path.** For any executor other than
+`claude`, add a block to the handoff that lists, by file path, the project skills the worker
+must read **before editing** (e.g. the project's architecture skill before touching source)
+and the skill it must follow **to finish** (the project's verify skill). Resolve each path
+the way that executor sees skills — for `pi`, inside the `--skill` directory (e.g.
+`<consumer .claude/skills>/verify/SKILL.md`); for `codex`, under `<worktree>/.agents/skills/`
+(e.g. `.agents/skills/verify/SKILL.md`). Foreign workers have no `Skill` tool, and
+description-triggered loading proved unreliable: on a 2026-09-18 run, pi workers never
+opened the architecture skill in five phases that moved code between layers, and only two of
+six opened `verify`.
+
+Do **not** paste the commands a skill contains into the handoff — name the skill and let the
+worker read it. Inlined commands make the worker follow the handoff instead of the skill, and
+hide whether it can follow a skill at all.
+
+Naming the path is what makes the skill reachable, for both foreign executors. Neither
+harness puts a skill's body in the model's context: `--skill` registers only the skill's
+name and description, exactly as `.agents/skills` discovery does for codex (measured
+2026-09-19 — a pi worker given `--skill` listed both probe skills by name and answered
+`UNKNOWN` for a passphrase written in their bodies, then read both files and answered
+correctly the moment the handoff named their paths). So a worker that is not told to open
+the file has seen a one-line description and nothing else.
+
+Require **proof of reading** in the return format: the worker quotes one verbatim line from
+each required skill file — its first heading, plus the heading of the section it acted on.
+A worker that cannot produce the quotes did not read the skill, which turns a silent
+skip into a visible one the report can state.
+
+The `claude` handoff is unchanged: Claude Code workers have the `Skill` tool, and "run
+/verify" above is sufficient.
+
+Expect foreign workers to follow the **static half** of a verify skill. They may skip the part that
+needs a device or an emulator. Measured 2026-09-19 (MenuLens session `21163bb7`): both codex
+workers opened the architecture and verify skills as their first action and ran every Gradle
+check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose
+acceptance criterion was "sample recipes still render with a cleared database". So when a
+phase carries an acceptance criterion that only a running app can settle, name it explicitly
+in that phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do not
+rely on the foreign worker's self-verify to have covered it.
+
 ## 5a.3 Execute each layer
 
-Walk layers in topological order (5a.1). Every phase agent is spawned with the Agent tool
-and `run_in_background: true` — this gives no live token/tool feed, but it buys two things
-the orchestrator needs: it stays responsive instead of blocking (so it can run the 5b
-wall-clock guard, and watch several agents at once), and each agent is cancellable via
-`TaskStop`. The completion notification carries the agent's total token count and
-duration, which feeds the 5b ceiling check.
+Walk layers in topological order (5a.1). The resolved `executor:model` address determines
+how each phase agent is spawned. Use the selected entry in
+references/executors.md § "Executor entries" for its spawn command, model address syntax,
+stop mechanism, token extraction, and any one-time setup. With `PHASE_EXECUTOR` unset, use
+the `claude` entry: the Agent-tool `run_in_background: true` spawn remains the default path.
+
+The worktree-ownership rule and the destructive-git prohibition in the handoff (5a.2) apply
+identically to every executor — they are properties of the handoff, not the harness.
 
 **Single-phase layer (the common case — unchanged from sequential):**
 1. Spawn the phase agent in the integration worktree (background; 5b guard applies).

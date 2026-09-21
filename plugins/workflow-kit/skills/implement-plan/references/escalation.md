@@ -39,7 +39,10 @@ below, read it as "the failed phase or group."
 
 3. **Run the escalation pass** (reuse Step 5a.2 handoff + 5a.3 single-phase execution +
    Step 6 gate-verify), with these overrides:
-   - **Model forced to `opus`** regardless of the phase's complexity classification.
+   - **Rung 1 switches executor first:** a failed `pi:*` or `codex:*` worker is rescued by
+     `claude:opus`; a failed `claude:*` worker stays on `claude:opus`. This executor switch
+     is stronger than a same-harness model bump and is the default rescue address regardless
+     of the phase's complexity classification.
    - **Extended 5b budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET` instead
      of the per-phase defaults (these are the hardest cases; don't strangle the rescue).
    - **Richer payload** — beyond the normal phase handoff, include the full failure history

@@ -5,13 +5,14 @@ off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, SKIP this
 there is nothing coherent to review. Disable entirely with `RUN_REVIEW=false`. If
 `REVIEW_SKILL` is not available in the project, skip Step 8 and note it in the report.
 
-This step mirrors Step 5's delegation discipline: Opus reviews (judgment), a cheaper agent
-fixes (mechanical), and the orchestrator holds only the findings list — it never ingests
-the raw diff.
+This step mirrors Step 5's delegation discipline: the review sub-agent (resolved
+`REVIEW_MODEL`) reviews for judgment, a cheaper fix agent handles mechanical changes,
+and the orchestrator holds only the findings list — it never ingests the raw diff.
 
-## 8a. Delegate the review (Opus)
+## 8a. Delegate the review
 
-Spawn ONE review sub-agent with `model: opus` (background; 5b guard applies). Payload:
+Resolve `REVIEW_MODEL` as `executor:model` (see SKILL.md Configuration), then spawn ONE
+review sub-agent with that registry entry (background; 5b guard applies). Payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -23,8 +24,43 @@ Spawn ONE review sub-agent with `model: opus` (background; 5b guard applies). Pa
   like `/pr-review` (which prompts for finding selection / posting) would stall.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
+- **Confirm the resolved target before the findings.** A review skill may resolve its own
+  scope from the ambient git state instead of the assigned one, silently. Measured
+  2026-09-19 (MenuLens session `21163bb7`): `/code-review high`, spawned from a review agent
+  whose prompt named the integration worktree and `main...HEAD`, ran in the *main checkout*
+  and reviewed the previous commit there; all four findings were about an unrelated change.
+  Require the reviewer to open its return with the absolute repo path and the
+  `<base>...<head>` range it actually reviewed, and to check both against the assigned
+  worktree. On a mismatch it discards those findings, re-runs the review scoped explicitly
+  to the assigned diff, and says so. A findings list that arrives without that line is not
+  trusted: re-run the review before triage.
 
 The orchestrator keeps the findings list (small); it does not read the diff itself.
+
+**Foreign review executors (`pi`, `codex`).** A foreign reviewer cannot invoke `REVIEW_SKILL`
+(no `Skill` tool). Give it a written review handoff instead: the diff command above, the
+project's architecture skill named by path (5a.2 § 3), the review scope (correctness,
+behavior changes, build/packaging, architecture-rule violations; no style), and the findings
+format above. Tell it not to modify files. Record in the report that the review ran from a
+handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
+
+- **`pi`** → the 5a.3 pi spawn contract with the review handoff.
+- **`codex`** → `codex exec`, **not** `codex exec review`. The native command cannot take
+  instructions together with `--base` (`error: the argument '--base <BRANCH>' cannot be used
+  with '[PROMPT]'`) and reports zero token usage. Spawn:
+  ```bash
+  cd <integration> && { setsid timeout -k <grace> <budget-plus-5-min-secs> codex exec --json \
+    -m <model part of REVIEW_MODEL> -s read-only \
+    --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
+    "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl \
+    2> <scratch>/review.err & echo $! > <scratch>/review.pid; wait $!; }
+  ```
+  Run this with `Bash(run_in_background: true)`. The schema requires top-level `repo_path`
+  (absolute path), `range` (`<base>...<head>`), and `summary`, plus a `findings` array whose
+  items require `severity` (`critical|high|medium|low`), `category`, `file`, `line`, `title`
+  and `detail`. For schema output, the scope check above reads `repo_path` and `range`;
+  absent or mismatched fields make the findings untrusted and require a re-run. Stop and
+  token accounting follow `references/runaway-guard.md` for codex.
 
 ## 8b. Triage by severity
 
@@ -33,19 +69,24 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
 - **At/above threshold** → auto-fix queue (8c).
 - **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
   touch. Collect them for the report (Step 10). Auto-fixing a reviewer's opinion churns good
-  code — leave that call to the user.
+  code — leave that call to the user. The orchestrator never edits code for any finding.
+  If the user later wants a below-threshold finding fixed, a fresh session delegates it to a
+  light-tier fix sub-agent resolved on the active executor under §8c's same two-tier verify
+  contract (warm self-verify bounded by `SELF_VERIFY_LIMIT`, then an independent gate-verify);
+  it is never an orchestrator edit.
 
 If the auto-fix queue is empty, skip to 8d.
 
-## 8c. Delegate the fixes (Sonnet/Haiku, sequential in integration)
+## 8c. Delegate the fixes (phase tiers, sequential in integration)
 
 Review findings cluster on shared files, so fixes run **in the integration worktree, not in
 parallel** — parallel fix agents would collide (the Step 5a file-overlap problem). Bundle
 the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
 
-1. Classify complexity across its findings → `haiku` (mechanical) or `sonnet` (needs
-   inference); use the max across the bundle. Same table as Step 5a.2. (Escalate to `opus`
-   only for genuinely tricky fixes.)
+1. Classify complexity across its findings → light (mechanical) or standard (needs
+   inference); use the max across the bundle. Resolve `PHASE_MODEL_LIGHT` or
+   `PHASE_MODEL_STANDARD` exactly like a phase worker (Step 5a.2), including its executor.
+   Use `PHASE_MODEL_DEEP` only for genuinely tricky fixes.
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
    fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your

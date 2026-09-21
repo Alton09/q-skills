@@ -42,9 +42,10 @@ and owns the pass/fail decision and task tracking.
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
   real quality gate; it writes no code and makes no decisions.
-- **Review sub-agent** (Step 8, `opus`): reviews the full plan diff via the project's
-  review skill and returns a structured findings list only — no code, no decisions.
-- **Fix sub-agent** (Step 8, Sonnet/Haiku by complexity): applies the severity-gated
+- **Review sub-agent** (Step 8, resolved `REVIEW_MODEL` target): reviews the full plan diff
+  via the project's review skill and returns a structured findings list only — no code, no
+  decisions.
+- **Fix sub-agent** (Step 8, light/standard phase tier by complexity): applies the severity-gated
   findings in the integration worktree under the same two-tier verify contract as a phase.
 
 ## Workflow Overview
@@ -56,7 +57,7 @@ and owns the pass/fail decision and task tracking.
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
-8. **Plan Review & Auto-fix** — Opus sub-agent reviews the full plan diff; severity-gated findings auto-fixed by a Sonnet/Haiku sub-agent under the same two-tier verify
+8. **Plan Review & Auto-fix** — review sub-agent (`REVIEW_MODEL`) reviews the full plan diff; severity-gated findings auto-fixed by a phase-tier sub-agent under the same two-tier verify
 9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
 10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
 
@@ -204,11 +205,12 @@ Two rules are load-bearing and easy to get wrong:
 
 ### 5b. Runaway guard
 
-Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`, paced with
-`ScheduleWakeup` + `TaskStop`) and a **token ceiling** checked on completion
-(`PHASE_TOKEN_CEILING`). On either trip, do NOT advance — page the user via `NOTIFY_SKILL`
-and wait. The two primitives are all that work: a background Agent gives no live per-call
-feed, only its totals in the completion notification.
+Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`) and a **token
+ceiling** checked on completion (`PHASE_TOKEN_CEILING`). Claude and codex workers get a
+parallel background Bash `sleep` timer whose notification wakes the orchestrator; codex's
+command `timeout` has a five-minute margin and is only a backstop, while pi uses `timeout`
+directly. On a trip, stop the worker with its executor binding (`TaskStop`, process-group
+kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 
@@ -233,13 +235,30 @@ actually does:
 
 | `/verify` nature | gate-agent `model` |
 |---|---|
-| Pure pass/fail (build + tests, exit-code gate) | `haiku` |
-| Behavioral (run the app, observe behavior matches intent) | `sonnet` |
+| Pure pass/fail (build + tests, exit-code gate) | `claude:haiku` |
+| Behavioral (run the app, observe behavior matches intent) | `claude:sonnet` |
 
-`VERIFY_AGENT_MODEL` is the configured default (`sonnet`) and wins when set; the table
-above is how you pick it when the project hasn't — drop to `haiku` only when verify is a
+`VERIFY_AGENT_MODEL` is the configured default (`claude:sonnet`) and wins when set; the table
+above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
 deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
 reports.
+
+Resolve this address by the same `executor:model` rule as phase workers (5a.2). An
+unprefixed id still means `claude:<id>`. The independent checker should differ from the
+implementer by executor or model family whenever the configured pool offers such a target.
+This is intentionally inert on the backward-compatible all-Claude configuration, where
+every available model is Claude family; foreign phase defaults satisfy it at no extra setup
+because their default gate remains `claude:sonnet`.
+
+**A sub-agent can fail *after* it has delivered.** A task notification with status
+`failed` — a rate limit, an API error, a killed process — means the agent stopped, not that
+its work is void. Read its hand-back first: if the agent already returned the artifact it was
+spawned for (a findings list, a verify verdict, a phase summary), treat that artifact as
+delivered and continue; do not re-spawn the agent to reproduce work you already hold.
+Measured 2026-09-19 (MenuLens session `21163bb7`): the Step 8 review agent returned all five
+findings and was then killed by a session rate limit, and the notification said `failed`.
+Re-running it would have burned the capstone review twice. If the hand-back is missing or
+truncated mid-artifact, re-spawn as usual and say so in the report.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
@@ -258,7 +277,7 @@ reports.
 **On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation loop
-with the model forced to `opus`, an extended 5b budget (`ESCALATION_TOKEN_CEILING` /
+with the rescue target forced to `claude:opus` (switching executor first for pi/codex), an extended 5b budget (`ESCALATION_TOKEN_CEILING` /
 `ESCALATION_TIME_BUDGET`), a richer payload (full failure history + "diagnose root cause
 before fixing"), and capped at `ESCALATION_ATTEMPTS` (default 2). It reuses the existing
 machinery, so it inherits the runaway guard automatically — not a separate skill. The plan
@@ -304,17 +323,31 @@ marker written anywhere else leaves the resume target with no record of the fail
 being asked to resume from. If the plan path you were given points outside the integration
 worktree, resolve it to the same relative path inside the worktree before writing.
 
+**Plans that live outside the project repo.** A plan kept in a separate repo — a notes vault,
+a docs repo — has no copy inside the integration worktree, so the resolve-into-the-worktree
+rule above does not apply to it. Write checkboxes and callouts to the plan file where it
+actually lives. Do **not** commit it in step 4: no worker touches that repo, so the
+destructive-git reasoning behind the commit rule does not hold, and a blind commit there
+sweeps in whatever else the user has uncommitted in it. Say in the report that plan state was
+updated in place and left uncommitted, and name the file.
+
 ## Step 8: Plan Review & Auto-fix
 
 Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
 hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
 
-Mirrors Step 5's delegation discipline: an **Opus** sub-agent reviews the cumulative plan
-diff (`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
+Mirrors Step 5's delegation discipline: a review sub-agent (resolved `REVIEW_MODEL`, see
+Configuration) reviews the cumulative plan diff
+(`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
 list only — the orchestrator never ingests the raw diff. Findings are triaged at
-`REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **Sonnet/Haiku** fix pass run
+`REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **light/standard phase-tier** fix pass run
 sequentially in the integration worktree under the same two-tier verify as a phase;
-below-threshold are reported, not touched. Re-review is bounded by `REVIEW_MAX_ROUNDS`.
+below-threshold are reported, not touched. The orchestrator never edits code for a finding:
+every finding fix is delegated to a fix sub-agent. That remains true when the user later asks
+to address a below-threshold finding; from a fresh session, delegate it to a light-tier fix
+sub-agent under the §8c two-tier verify, never edit it in the orchestrator session. Re-review
+is bounded by
+`REVIEW_MAX_ROUNDS`.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
@@ -373,20 +406,55 @@ Once all phases are checked off:
 ✓ All phases passed verification
 
 ## Review & Auto-fix
-- Reviewer: Opus 4.8 on `<base>...HEAD` via <REVIEW_SKILL>
+- Reviewer: <REVIEW_MODEL> on `<base>...HEAD` via <REVIEW_SKILL>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
 - Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## Cost
-<measured from token accounting for this run, or "token accounting unavailable">
+- **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
+  transcript has no dollar cost record; F4 forbids estimating`; API calls: <measured distinct
+  `message.id` count from the orchestrator's own session transcript, or `unavailable —
+  session transcript not identified`>; peak context: <measured maximum context from that
+  transcript, or `unavailable — session transcript not identified`>. Extract API calls and
+  peak context as specified in `references/runaway-guard.md` § "Token accounting". Do not
+  substitute turns, messages, elapsed time, worker totals, model prices, or a UI/account-level
+  quota for any of these fields.
+- **Workers (by executor):** <one row for every executor that ran phase, retry, escalation,
+  or gate-verify work; aggregate only its exit-time spawn records. If no accounting record
+  exists for that executor, print `token accounting unavailable` rather than a total.>
+  - `claude`: <tokens from completion notifications>; cost: <measured cost record, or
+    `token accounting unavailable`>. Completion tokens alone do not establish dollars.
+  - `pi`: <new tokens, plus cache-read tokens separately>; equivalent value: <sum of
+    `cost.total`, labelled flat-rate equivalent value — not metered spend>. If an exit-time
+    record is missing, print `token accounting unavailable`.
+  - `codex`: <new tokens>; plan-window usage: <5-hour and weekly first/last values and
+    deltas from the token-count records>; no dollars. If either required record is absent,
+    the later value is lower, or `resets_at` changed, print `token accounting unavailable`
+    for that window; never derive it. When codex workers overlap, merge the rollout files
+    named by their spawn-record thread ids and report the time-sorted whole-run delta using
+    `references/runaway-guard.md`, rather than attributing it to individual workers.
+- **Review + fix (by executor):** <one row for every executor that ran Step 8 review or
+  fix work, using the same executor-specific form and source rules as Workers. If review was
+  skipped, say `absent — review skipped: <reason>`; if it ran but has no accounting, say
+  `token accounting unavailable`.>
+
+The three rows are independent. A measured worker or review value does not fill an absent
+orchestrator value (or vice versa). `pi`'s figure remains equivalent value, never cash
+spend; codex, the shipped subscription-backed executor, reports tokens and plan-window share
+only, never dollars.
 
 ## What's Next
 - Worktree is ready at <path>
 - Review code and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
+
+The run is complete. Follow-up questions, fixes (including below-threshold findings), and
+re-verification belong in a fresh session, which starts near zero context rather than at this
+run's peak. Carry over the worktree path, branch, PR link, plan file path and its checked-off
+state, below-threshold findings left for you, and known gaps from this report.
 
 If hard-stopped due to failure:
 
@@ -415,20 +483,22 @@ Projects can override via environment or project CLAUDE.md:
   the raw plan out of the orchestrator's persistent window while preserving the load-bearing
   extract verbatim. (Avoid `haiku`: the extract is load-bearing and needs light judgment.)
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
-- `VERIFY_AGENT_MODEL` — model for the delegated gate-verify sub-agent (Step 6). Default
-  `sonnet`; set `haiku` when the project's verify is a deterministic exit-code gate.
+- `VERIFY_AGENT_MODEL` — `executor:model` target for the delegated gate-verify sub-agent
+  (Step 6). Default `claude:sonnet`; set `claude:haiku` when the project's verify is a
+  deterministic exit-code gate. Unprefixed `sonnet`/`haiku` remain equivalent.
 - `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
   self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5a);
   and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
   escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
-- `PHASE_TOKEN_CEILING` — per-phase sub-agent token total that triggers a user page on
-  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by model:
-  `haiku` 80k / `sonnet` 150k / `opus` 250k. Single source for these numbers — Step 5b
-  references it.
+- `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
+  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
+  light 80k / standard 150k / deep 250k (therefore Claude's haiku/sonnet/opus values stay
+  80k/150k/250k). Measure Claude's notification total and pi/codex `new` tokens as defined
+  in `references/runaway-guard.md`. Single source for these numbers — Step 5b references it.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
-  sub-agent (Step 5b). Default 15 min; scale up for `opus` phases.
+  sub-agent (Step 5b). Default 30 min; scale up for `opus` phases.
 - `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
   before HALTED / user-wait. Default 2.
 - `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
@@ -451,6 +521,51 @@ Projects can override via environment or project CLAUDE.md:
 - `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
   set `false` to end the run at the local worktree branch. Has no effect when the project has
   no `/create-pr` — the step is skipped either way.
+- `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, `PHASE_MODEL_DEEP` — phase and fix worker
+  targets in `executor:model` form. Defaults are `claude:haiku`, `claude:sonnet`, and
+  `claude:opus`. Each tier may name a different executor. An unprefixed id always means
+  `claude:<id>`; an unknown executor or model fails before spawn with both the executor and
+  id in the error. Routing details live in `references/executors.md` § "Executor entries".
+- `PHASE_EXECUTOR` — backward-compatible shorthand selecting all three shipped tier
+  defaults: `claude` (default), `pi`, or `codex`. An explicit `PHASE_MODEL_*` overrides the
+  shorthand for that tier. The default/unset path therefore remains all-Claude.
+- `REVIEW_EXECUTOR` — backward-compatible shorthand choosing the default `REVIEW_MODEL`
+  executor for the Step 8 capstone review sub-agent: `claude`, `pi` or `codex`.
+  Default: follows `PHASE_EXECUTOR`, **except** that `PHASE_EXECUTOR=codex` defaults the
+  review to `claude` (see the codex rules below).
+  With `PHASE_EXECUTOR=pi`, the review runs on `opencode-go/grok-4.6` (xAI, family-diverse
+  from every default pi implementer: MiniMax, GLM, Qwen); set `REVIEW_EXECUTOR=claude`
+  explicitly to keep the reviewer on Opus while workers run on pi. `grok-4.6` was not in the
+  bake-off (`grok-4.5`, which passed all three canaries, is not exposed by pi).
+  **Diversity rule:** the reviewer and each implementer it checks must differ by executor
+  or model family whenever the configured pool offers such a target. The shipped foreign
+  defaults satisfy this: pi uses a Grok reviewer (different family), while codex uses a
+  Claude reviewer (different executor and family). The rule is inert—not falsely claimed
+  satisfied—on the backward-compatible all-Claude configuration. When pi families match
+  (e.g. a phase model overridden to a
+  Grok model), switch the reviewer to `pi:opencode-go/qwen3.8-max` — or to
+  `pi:opencode-go/glm-5.3` when the implementer is Qwen. **Caveat:**
+  no bake-off canary measured review *judgement* quality — C1 (coding), C2 (tool discipline),
+  and C3 (fidelity) cover implementation; review quality on a real diff is unmeasured and
+  Task 7 establishes it. Use `REVIEW_EXECUTOR=claude` if review reliability is a concern.
+  **Codex rules (mandatory).** Every Codex model is GPT family, so a codex reviewer is never
+  family-diverse from a codex implementer:
+  - `PHASE_EXECUTOR=codex` with `REVIEW_EXECUTOR` unset → the review defaults to `claude`
+    (Opus); it does **not** follow the phase executor.
+  - `REVIEW_EXECUTOR=codex` is valid with `PHASE_EXECUTOR=pi` or `claude`. `pi` + `codex` is
+    the pairing to evaluate as a cheap, family-diverse default: GPT reviewing open-weight
+    implementers.
+  - Refuse any resolved codex reviewer that would check a `codex:*` implementer: neither
+    executor nor family differs. Fail at startup with an error that names the family-diversity
+    rule (every Codex model is GPT family, so a codex reviewer never differs in family from a
+    codex implementer), includes both resolved addresses, and says **do not start the run**.
+  On a ChatGPT Plus plan one full-diff review is expensive: a `gpt-6-astra` review of a
+  106-file diff took 22 % of the 5-hour window (measured 2026-09-18).
+- `REVIEW_MODEL` — the `executor:model` target for the Step 8 review sub-agent. Its shipped
+  default follows `REVIEW_EXECUTOR`: `pi:opencode-go/grok-4.6` for pi,
+  `codex:gpt-5.6-sol` for codex (not `gpt-6-astra`, for the Plus-window cost above), and
+  `claude:opus` for claude, subject to the diversity override above. An explicit address
+  overrides both axes; an unprefixed id resolves to Claude for backward compatibility.
 
 ## Plan Format Example
 
@@ -511,9 +626,10 @@ Add ability to mark recipes as favorites and filter by them.
   raw source, so it doesn't get re-processed every turn.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
-- **Review is a capstone, not a phase gate** — after all phases pass, an Opus sub-agent
-  reviews the whole plan diff; only severity-gated findings are auto-fixed (Sonnet/Haiku),
-  the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`; disable with `RUN_REVIEW`.
+- **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent
+  (resolved `REVIEW_MODEL`) reviews the whole plan diff; only severity-gated
+  findings are auto-fixed, the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`;
+  disable with `RUN_REVIEW`.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).

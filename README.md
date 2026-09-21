@@ -96,6 +96,52 @@ claude plugin install workflow-kit
 claude plugin install dev-toolkit
 ```
 
+## Swappable phase executors
+
+`implement-plan` always orchestrates from Claude Code; an executor changes only the
+harness used for an individual phase, retry, review, or fix worker. Keeping scheduling,
+worktrees, pacing, gate verification, notifications, and decisions in Claude Code avoids
+the foreign-orchestrator failures observed in F1–F5 while still allowing worker choice.
+
+The default is Claude workers. Select the shipped pi worker tiers for one run with:
+
+```bash
+PHASE_EXECUTOR=pi
+```
+
+`PHASE_EXECUTOR` accepts `claude` (the default), `pi`, or `codex`, and sets all phase-tier
+defaults for that executor. `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, and
+`PHASE_MODEL_DEEP` can instead select each tier independently with an `executor:model`
+address; an unprefixed model means `claude:<model>`. The shipped tier defaults are:
+
+| `PHASE_EXECUTOR` | Light | Standard | Deep |
+|---|---|---|---|
+| `claude` (default) | `claude:haiku` | `claude:sonnet` | `claude:opus` |
+| `pi` | `pi:opencode-go/minimax-m3` | `pi:opencode-go/glm-5.3` | `pi:opencode-go/qwen3.8-max` |
+| `codex` | `codex:gpt-5.6-luna` | `codex:gpt-5.6-terra` | `codex:gpt-5.6-sol` |
+
+An explicit `PHASE_MODEL_*` setting overrides the shorthand for that tier. The
+per-worker wall-clock budget, `PHASE_TIME_BUDGET`, defaults to 30 minutes.
+
+For pi, install the `pi` CLI and authenticate its `opencode-go` provider. For Codex,
+install the Codex CLI and sign in with a ChatGPT plan. The orchestrator creates the
+per-worktree `.agents/skills` link Codex needs; no manual skill-link setup is required.
+
+`VERIFY_AGENT_MODEL` defaults to `claude:sonnet` (use `claude:haiku` only for a
+deterministic exit-code gate). `REVIEW_EXECUTOR` normally follows `PHASE_EXECUTOR`, except
+Codex phases default their review to Claude; `REVIEW_MODEL` defaults to `claude:opus`,
+`pi:opencode-go/grok-4.6`, or `codex:gpt-5.6-sol` for the selected review executor.
+Reviewers should differ from each implementer by executor or model family whenever the
+configured pool permits it, and a Codex reviewer cannot review a Codex implementer.
+
+Foreign workers may not cover device work during their warm self-verify: Codex workers
+skip that half, while pi workers may or may not run it. The independent gate covers device
+criteria in either case.
+
+Pi's flat-rate accounting is retail-equivalent value, not metered cash; its provider
+five-hour cap is the binding limit. Codex reports tokens and plan-window share, not dollars;
+ChatGPT Plus has both five-hour and weekly windows.
+
 ## Updating
 
 ```bash

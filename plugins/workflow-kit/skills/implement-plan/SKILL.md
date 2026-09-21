@@ -407,7 +407,31 @@ Once all phases are checked off:
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
 ## Cost
-<measured from token accounting for this run, or "token accounting unavailable">
+- **Orchestrator (Claude Code):** cost: `token accounting unavailable — this skill receives
+  no Claude Code per-run cost record`; API calls: `unavailable — this skill receives no
+  Claude Code per-run API-call record`; peak context: `unavailable — this skill receives no
+  Claude Code per-run peak-context record`. Do not substitute turns, messages, elapsed time,
+  worker totals, model prices, or a UI/account-level quota for any of these fields.
+- **Workers (by executor):** <one row for every executor that ran phase, retry, escalation,
+  or gate-verify work; aggregate only its exit-time spawn records. If no accounting record
+  exists for that executor, print `token accounting unavailable` rather than a total.>
+  - `claude`: <tokens from completion notifications>; cost: <measured cost record, or
+    `token accounting unavailable`>. Completion tokens alone do not establish dollars.
+  - `pi`: <new tokens, plus cache-read tokens separately>; equivalent value: <sum of
+    `cost.total`, labelled flat-rate equivalent value — not metered spend>. If an exit-time
+    record is missing, print `token accounting unavailable`.
+  - `codex`: <new tokens>; plan-window share: <5-hour and weekly deltas from the first and
+    last token-count records>; no dollars. If either required record is absent, print
+    `token accounting unavailable` for the unavailable measure; never derive it.
+- **Review + fix (by executor):** <one row for every executor that ran Step 8 review or
+  fix work, using the same executor-specific form and source rules as Workers. If review was
+  skipped, say `absent — review skipped: <reason>`; if it ran but has no accounting, say
+  `token accounting unavailable`.>
+
+The three rows are independent. A measured worker or review value does not fill an absent
+orchestrator value (or vice versa). `pi`'s figure remains equivalent value, never cash
+spend; codex, the shipped subscription-backed executor, reports tokens and plan-window share
+only, never dollars.
 
 ## What's Next
 - Worktree is ready at <path>

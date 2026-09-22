@@ -368,10 +368,11 @@ the copy in the integration worktree for a repository plan, or the original file
 outside the repository — and confirm every implemented phase shows `- [x]`. If any are still
 `- [ ]`, update them now (Step 7). Assemble the Step 10 report with `**PR:** pending` and
 write it to that plan file as `## Implementation Report — <YYYY-MM-DD>`. Replace only the
-section with today's exact heading, from that heading to the next `##` heading or end of file;
-append it only when no matching-date section exists. Earlier-dated report sections stay. This
-includes a resumed run after a crash before Step 9, when today's prior report says
-`PR: pending`. For a plan outside the project repository, write the report in place and leave
+latest (closest to end of file) `## Implementation Report` section whose `**PR:**` line is
+exactly `pending`, regardless of its date; otherwise replace the section with today's exact
+heading, from that heading to the next `##` heading or end of file; append only when neither
+exists. Earlier completed reports stay. For a plan outside the project repository, write the
+report in place and leave
 it uncommitted, even when its vault has other uncommitted edits. For a repository plan, write
 it to the integration-worktree copy and commit it using the Step 7 plan-state rule.
 
@@ -386,9 +387,11 @@ Expectations on the project's `/create-pr`: open a **draft** PR, never merge any
 without prompting (Step 9 is unattended), and return the PR URL for the report. If no
 `/create-pr` skill exists in the session, or `CREATE_PR=false`, skip it. Patch only the
 persisted report's `**PR:**` line to `skipped — <reason>`; do not reassemble the report. The
-report still goes to the plan and the run ends at the local worktree branch, as before. After
-`/create-pr` returns, patch only that line to its URL; do not reassemble the report or change
-its measured figures. Read the returned PR body through the available read-only PR detail. If
+report still goes to the plan and the run ends at the local worktree branch, as before.
+Otherwise, after `/create-pr` returns, patch only that line to its URL; do not reassemble the
+report or change its measured figures. After either PR-line patch, commit a repository plan
+using the Step 7 plan-state rule; leave an outside-repository plan uncommitted. Read the
+returned PR body through the available read-only PR detail. If
 it omits the report, leave the body unchanged and mark that omission for Step 10's terminal
 summary.
 

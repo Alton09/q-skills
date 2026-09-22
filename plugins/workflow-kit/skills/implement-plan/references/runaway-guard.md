@@ -137,9 +137,9 @@ quota.
               | last)}' <scratch>/<phase>.jsonl
   ```
   `new` (`input + output`) is the budget figure checked against the 5b token ceiling. `cacheRead` is reported on its own line and **excluded** from the budget: pi re-reports the cached context on every turn, so it grows with turns × context size and means nothing as a budget. Do not use `totalTokens`, which includes `cacheRead` — on a real run it reported 3.65M tokens for a worker that used 63k new. On flat-rate `opencode-go`, `cost.total` is retail-equivalent value, not metered cash — report it as equivalent value and never as metered spend. The cap that matters is the provider's rate limit, not a dollar ceiling.
-- **`codex`** → `--json` emits exactly one `turn.completed` per `codex exec`, and its `usage` already covers the whole run (every tool call and model request). No summing is needed. At exit, run this one command; `-o` already wrote the final answer:
+- **`codex`** → `--json` emits exactly one `turn.completed` per `codex exec`, and its `usage` already covers the whole run (every tool call and model request). No summing is needed. At exit, run this one command; `-o` normally wrote the final answer, but a missing file is a failed hand-back, not lost accounting:
   ```
-  jq -s --rawfile final_answer <scratch>/<phase>.last.md '[.[] | select(.type=="turn.completed") | .usage][0]
+  jq -cs --rawfile final_answer <(if [ -f <scratch>/<phase>.last.md ]; then cat <scratch>/<phase>.last.md; fi) '[.[] | select(.type=="turn.completed") | .usage][0]
          | {new: (.input_tokens - .cached_input_tokens + .output_tokens),
             cached: .cached_input_tokens, final_answer: $final_answer}' <scratch>/<phase>.jsonl
   ```

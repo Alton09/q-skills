@@ -58,8 +58,8 @@ and owns the pass/fail decision and task tracking.
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review & Auto-fix** — review sub-agent (`REVIEW_MODEL`) reviews the full plan diff; severity-gated findings auto-fixed by a phase-tier sub-agent under the same two-tier verify
-9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
-10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
+9. **Pull Request** — pass the persisted report path to the project's `/create-pr` skill, if it exists
+10. **Report** — persist the full report to the plan before Step 9; finalize its PR link after Step 9
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -355,20 +355,41 @@ is bounded by
 
 Runs only after Step 8 has fully settled — every review round finished, every auto-fix
 committed and gate-verified. If the project provides a `/create-pr` skill and `CREATE_PR`
-is not `false`, invoke it from the integration worktree, passing the branch, and let it own
-everything else — push, title, body, templates, host tooling. PR conventions vary too much
-between projects for this skill to bundle an implementation.
+is not `false`, first complete Step 10's report assembly and initial persistence. Invoke
+`/create-pr` from the integration worktree, passing the branch and the **path of the plan file
+that contains the `## Implementation Report` section**, with a request to include that report
+in the PR body. Let `/create-pr` own everything else — push, title, body, templates, and host
+tooling. The orchestrator never edits the PR body itself. PR conventions vary too much between
+projects for this skill to bundle an implementation.
 
 Expectations on the project's `/create-pr`: open a **draft** PR, never merge anything, run
 without prompting (Step 9 is unattended), and return the PR URL for the report. If no
-`/create-pr` skill exists in the session, skip this step and say so in the report — the run
-ends at the local worktree branch, as before.
+`/create-pr` skill exists in the session, or `CREATE_PR=false`, skip this step. The report
+still goes to the plan and its terminal summary must say the PR was skipped — the run ends at
+the local worktree branch, as before. After `/create-pr` returns, complete Step 10's PR
+finalization with its URL (or its skipped reason).
 
 ## Step 10: Final Report
 
-Before writing the report, re-read the plan file **in the integration worktree** (the copy
-Step 7 writes, and the only copy that carries this run's state) and confirm every implemented
-phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
+Assemble this report **before Step 9**. Re-read the plan file at the Step 7 plan-state
+location — the copy in the integration worktree for a repository plan, or the original file
+for a plan outside the repository — and confirm every implemented phase shows `- [x]`. If any
+are still `- [ ]`, update them now (Step 7) before continuing.
+
+Write the full report to that plan file as a dated `## Implementation Report` section. On the
+first write, set `**PR:** pending`. On every write, replace the prior section that this skill
+owns, from its `## Implementation Report` heading to the next `##` heading or end of file;
+never append a second report. This includes a resumed run after a crash between this write and
+Step 9, when the prior report says `PR: pending`. For a plan outside the project repository,
+write the report in place and leave it uncommitted, even when its vault has other uncommitted
+edits. For a repository plan, write it to the integration-worktree copy and commit it using
+the Step 7 plan-state rule.
+
+Step 9 passes this plan-file path to `/create-pr`. When Step 9 returns, replace the same report
+section again, changing only the PR result to its returned URL or `skipped — <reason>`; do not
+change the measured report figures. The exact assembled report is the copy requested for the
+PR body. The orchestrator does not edit that body. If Step 9 is skipped, finalize the plan
+report with the skipped reason.
 
 Two rules govern the report's contents and have been violated in practice:
 
@@ -389,30 +410,34 @@ figure was wrong by 13× in a real run; no number is better than a wrong one.
 Once all phases are checked off:
 
 ```markdown
-# Implementation Summary
+## Implementation Report
+
+**Date:** <YYYY-MM-DD>
+
+### Implementation Summary
 
 **Plan:** <plan-name>
 **Orchestrator:** <orchestrator model, e.g. Opus 4.8>
 **Worktree:** <path>
 **Branch:** <branch-name>
-**PR:** <url, or `skipped — <reason>`>
+**PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>
 
-## Phases Completed
+### Phases Completed
 - Phase 1: <description> — sub-agent: <model>
 - Phase 2: <description> — sub-agent: <model>
 - Phase 3: <description> — sub-agent: <model>
 
-## Verification Status
+### Verification Status
 ✓ All phases passed verification
 
-## Review & Auto-fix
+### Review & Auto-fix
 - Reviewer: <REVIEW_MODEL> on `<base>...HEAD` via <REVIEW_SKILL>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
 - Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
-## Cost
+### Cost
 - **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
   transcript has no dollar cost record; F4 forbids estimating`; API calls: <measured distinct
   `message.id` count from the orchestrator's own session transcript, or `unavailable —
@@ -445,11 +470,15 @@ orchestrator value (or vice versa). `pi`'s figure remains equivalent value, neve
 spend; codex, the shipped subscription-backed executor, reports tokens and plan-window share
 only, never dollars.
 
-## What's Next
+### What's Next
 - Worktree is ready at <path>
 - Review code and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
+
+After finalizing the plan report, print only a short terminal summary: completion status, PR
+URL or `PR skipped — <reason>`, and `Full report: <plan-file path>`. Do not print the full
+report to the terminal.
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this

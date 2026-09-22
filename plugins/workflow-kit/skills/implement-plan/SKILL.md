@@ -451,7 +451,7 @@ Once all phases are checked off:
 
 ### E2E
 - Worker: <actual executor:model from the E2E spawn record>
-- Status: <pass | fail | env-error — E2E did not run | skipped — reason | not finished — reason>
+- Status: <pass | fail — failed names or failed hand-back | env-error — E2E did not run | skipped — reason | not finished — reason>
 - Passed: <n>/<total>
 - Failed: <names; empty if none>
 - Flaky: <names; empty if none>
@@ -566,7 +566,8 @@ Projects can override via environment or project CLAUDE.md:
 - `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
   (Step 5a.1/5a.3). Default 3; larger groups run in batches of this size.
 - `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
-  Default `true`; set `false` to stop after implementation.
+  Default `true`; set `false` to skip review only. E2E still runs unless its own skip
+  condition applies.
 - `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
   **non-interactive and read-only**: it runs as a background sub-agent with no user present
   and must not build or test while E2E owns those resources. A skill that prompts mid-run

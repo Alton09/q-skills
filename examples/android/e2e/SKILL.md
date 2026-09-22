@@ -30,6 +30,8 @@ Set these project-specific values before use:
 E2E_AVD=<headless-test-avd>
 E2E_PACKAGE=<application-id>
 E2E_ACTIVITY=<application-id/.MainActivity>
+E2E_EVIDENCE="/tmp/${E2E_PACKAGE//./-}-e2e-evidence"
+mkdir -p "$E2E_EVIDENCE"
 ```
 
 Keep the non-live Maestro flows in `.maestro/`. Each tagged criterion must name or map to a
@@ -42,17 +44,29 @@ selection, install, and Maestro. If the lock is held, do not use that device: re
 
 ```bash
 exec 9>"/tmp/${E2E_AVD//[^[:alnum:]_-]/-}-e2e.lock"
-flock -n 9
+flock -n 9 || { printf 'AVD lock held\n' > "$E2E_EVIDENCE/reservation-error.txt"; exit 1; }
 ```
+
+Keep fd 9 open through install and Maestro so the reservation covers the whole run. On the
+nonzero exit above, return the fixed-shape `env-error` hand-back with `E2E_EVIDENCE`.
 
 Reuse `E2E_DEVICE_SERIAL` only when this run reserved it. Otherwise boot the dedicated AVD on
 an unused emulator port. Do not select an arbitrary device from `adb devices`: it may belong to
 another run.
 
 ```bash
-emulator -avd "$E2E_AVD" -port 5556 -no-window -no-audio -no-boot-anim \
+E2E_EMULATOR_PORT=""
+for candidate in $(seq 5554 2 5682); do
+  if ! ss -ltn "sport = :$candidate" | grep -q LISTEN \
+    && ! ss -ltn "sport = :$((candidate + 1))" | grep -q LISTEN; then
+    E2E_EMULATOR_PORT="$candidate"
+    break
+  fi
+done
+[ -n "$E2E_EMULATOR_PORT" ] || exit 1
+emulator -avd "$E2E_AVD" -port "$E2E_EMULATOR_PORT" -no-window -no-audio -no-boot-anim \
   -gpu swiftshader_indirect >"/tmp/${E2E_PACKAGE//./-}-e2e-emulator.log" 2>&1 &
-E2E_DEVICE_SERIAL=emulator-5556
+E2E_DEVICE_SERIAL="emulator-$E2E_EMULATOR_PORT"
 adb -s "$E2E_DEVICE_SERIAL" wait-for-device
 until [ "$(adb -s "$E2E_DEVICE_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do
   sleep 2
@@ -66,7 +80,7 @@ If boot, device readiness, or reservation fails, return `env-error` with the evi
 Run these commands from the supplied worktree. An install failure is `env-error`.
 
 ```bash
-./gradlew installDevDebug
+ANDROID_SERIAL="$E2E_DEVICE_SERIAL" ./gradlew installDevDebug
 adb -s "$E2E_DEVICE_SERIAL" shell pm clear "$E2E_PACKAGE"
 adb -s "$E2E_DEVICE_SERIAL" shell am start -W -n "$E2E_ACTIVITY"
 ```
@@ -80,11 +94,12 @@ Run the non-live Maestro suite. Let Maestro create its normal run directory unde
 `~/.maestro/tests/`; use that directory as `evidence`.
 
 ```bash
-maestro test .maestro
+maestro --device "$E2E_DEVICE_SERIAL" test .maestro
 ```
 
 Record each failed flow name. Re-run every failed flow once against the reserved device. A flow
-that passes on that re-run is `flaky`; keep its Maestro output under the same evidence directory.
+that passes on that re-run is `flaky`; keep its Maestro output under the same evidence directory
+and use `--device "$E2E_DEVICE_SERIAL"` for the re-run.
 
 ## 4. Check Tagged Criteria
 

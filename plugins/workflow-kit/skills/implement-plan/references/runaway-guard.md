@@ -45,6 +45,12 @@ be fine, but the cost signal is worth a glance, and it lets you tune the ceiling
 
 **On either trip:**
 
+For a Step 8 review or E2E worker, mark only that worker `not finished`, do not apply the
+phase wait below, and let its enabled sibling continue. Wait for that sibling, then continue
+Step 8; do not automatically re-run the stopped worker in that round.
+
+For all other workers:
+
 1. **Do NOT** check off the phase, run the gate-verify, or advance to the next phase.
 2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
    ```

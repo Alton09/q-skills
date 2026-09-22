@@ -55,11 +55,16 @@ E2E payload:
 - The contract in `references/e2e.md`. The worker writes no code and returns only its
   required hand-back.
 
+For a foreign E2E executor, name `E2E_SKILL` by the path that executor can read, as in
+5a.2 § 3. Require proof of reading in its hand-back: one verbatim line from that skill's
+first heading and the heading of the section it acted on.
+
 Before accepting `status: pass`, check in one Bash call that `evidence` exists and its
 timestamp is newer than the E2E spawn time. A missing or stale path is a failed hand-back,
-not a pass. This proof guards foreign workers that skip device work. An `env-error` means
-E2E did not run. It does not block the review path, never enters the fix queue, and does
-not stop Step 9 from opening the PR.
+not a pass: record it as `status: fail` with `failed: failed hand-back`, and list that value
+in the E2E Status. This proof guards foreign workers that skip device work. An `env-error`
+means E2E did not run. It does not block the review path, never enters the fix queue, and
+does not stop Step 9 from opening the PR.
 
 If one worker hits its runaway guard, stop and report only that worker as `not finished`.
 The other worker's result still counts. Do not re-run the stopped worker automatically in
@@ -125,16 +130,17 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — one independent confirmation for the combined pass, exactly as
    for a phase. Do not run a gate per source.
-4. Gate fail → report the open result and stop this combined loop. Do not use the Step 6
-   opus rescue for a Step 8 failure.
+4. Gate fail → report the open result and stop this combined loop. If the fix committed,
+   re-run enabled E2E on that `HEAD` before reporting, so the reported E2E result is not
+   from before the commit. Do not use the Step 6 opus rescue for a Step 8 failure.
 
 ## 8d. Bounded re-run
 
 A fix can introduce new issues or only partly address a finding. After a fix commit passes
-the gate, start the next round: re-review and re-run E2E together on the new `HEAD`. An E2E
-result from before that commit feeds only the fix pass and never the final report. If the
-fix pass commits nothing, keep the last E2E result and re-review only when another round is
-needed; do not re-run E2E.
+the gate, start the next round: re-spawn only the still-enabled review and E2E workers on the
+new `HEAD`. An E2E result from before that commit feeds only the fix pass and never the final
+report. If the fix pass commits nothing, keep the last E2E result and re-review only when
+review is still enabled and another round is needed; do not re-run E2E.
 
 Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the cap is hit or
 a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list

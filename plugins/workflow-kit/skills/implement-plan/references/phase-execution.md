@@ -146,10 +146,11 @@ Expect foreign workers to follow the **static half** of a verify skill. They may
 needs a device or an emulator. Measured 2026-09-19 (MenuLens session `21163bb7`): both codex
 workers opened the architecture and verify skills as their first action and ran every Gradle
 check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose
-acceptance criterion was "sample recipes still render with a cleared database". So when a
-phase carries an acceptance criterion that only a running app can settle, name it explicitly
-in that phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do not
-rely on the foreign worker's self-verify to have covered it.
+acceptance criterion was "sample recipes still render with a cleared database". When E2E
+will run in Step 8, route every criterion tagged `[e2e]` to that worker and omit it from the
+per-phase gate payload. When E2E will be skipped, name each tagged criterion explicitly in
+its phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do
+not rely on the foreign worker's self-verify to have covered it.
 
 ## 5a.3 Execute each layer
 

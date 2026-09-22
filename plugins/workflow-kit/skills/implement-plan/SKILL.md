@@ -45,6 +45,9 @@ and owns the pass/fail decision and task tracking.
 - **Review sub-agent** (Step 8, resolved `REVIEW_MODEL` target): reviews the full plan diff
   via the project's review skill and returns a structured findings list only — no code, no
   decisions.
+- **E2E sub-agent** (Step 8, resolved `E2E_MODEL` target): runs the project's `/e2e`
+  skill against the integration worktree and returns the `references/e2e.md` verdict. It
+  writes no code.
 - **Fix sub-agent** (Step 8, light/standard phase tier by complexity): applies the severity-gated
   findings in the integration worktree under the same two-tier verify contract as a phase.
 
@@ -57,7 +60,7 @@ and owns the pass/fail decision and task tracking.
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
-8. **Plan Review & Auto-fix** — review sub-agent (`REVIEW_MODEL`) reviews the full plan diff; severity-gated findings auto-fixed by a phase-tier sub-agent under the same two-tier verify
+8. **Plan Review, E2E & Auto-fix** — review and E2E workers run together on the same `HEAD`; one phase-tier fix pass handles review findings and E2E failures under the same two-tier verify
 9. **Pull Request & Report Finalization** — persist the report with `PR: pending`, invoke `/create-pr` or skip it, then patch only the PR line
 10. **Report Contents & Terminal Summary** — define the persisted report and print its short hand-off
 
@@ -106,6 +109,9 @@ load-bearing data exactly:
   headings and the `## Task Dependency Graph`), the `**Files**:` list, and the **verbatim
   task lines** (do not paraphrase or drop tasks).
 - Also return the parallel/sequential tag per phase from the dependency graph.
+- Also return every acceptance criterion whose task line ends in `[e2e]`, verbatim and
+  paired with its phase. For example:
+  `- [ ] Sample recipes still render after a cleared database [e2e]`.
 
 Why verbatim: the orchestrator injects each phase's task list into its handoff (5a.2) and
 feeds the `Files` lists into the file-overlap *safety* check (5a.1) — a lossy summary there
@@ -342,27 +348,23 @@ updated in place and left uncommitted, and name the file.
 
 ## Step 8: Plan Review & Auto-fix
 
-Run ONLY after every phase is implemented and checked off (Step 7). Skip if the plan
-hard-stopped, any phase is BLOCKED/HALTED, `RUN_REVIEW=false`, or `REVIEW_SKILL` is absent.
+Run ONLY after every phase is implemented and checked off (Step 7). On the last phase's
+`HEAD`, spawn the enabled review and E2E workers together. Each has its own runaway guard
+and shares the parallel-worker limit. Skip both after a hard stop or BLOCKED/HALTED phase.
+Otherwise, each worker runs alone when the other is disabled or its skill is absent. State
+every skip reason in the report.
 
-Mirrors Step 5's delegation discipline: a review sub-agent (resolved `REVIEW_MODEL`, see
-Configuration) reviews the cumulative plan diff
-(`git diff <base>...HEAD`, no PR) via `REVIEW_SKILL` and returns a structured findings
-list only — the orchestrator never ingests the raw diff. Findings are triaged at
-`REVIEW_AUTOFIX_SEVERITY`: at/above-threshold go to a **light/standard phase-tier** fix pass run
-sequentially in the integration worktree under the same two-tier verify as a phase;
-below-threshold are reported, not touched. The orchestrator never edits code for a finding:
-every finding fix is delegated to a fix sub-agent. That remains true when the user later asks
-to address a below-threshold finding; from a fresh session, delegate it to a light-tier fix
-sub-agent under the §8c two-tier verify, never edit it in the orchestrator session. Re-review
-is bounded by
-`REVIEW_MAX_ROUNDS`.
+The review worker reads the cumulative diff without building or testing. The E2E worker
+receives the worktree, the prep extract's `[e2e]` criteria, and `references/e2e.md`. Wait for
+both enabled workers. Then delegate one combined fix pass for at-threshold review findings
+and E2E failures. Re-run E2E only after a fix commit. One cap, `REVIEW_MAX_ROUNDS`, bounds
+the combined loop. The orchestrator never reads the raw diff or verbatim E2E failures.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
 
 ## Step 9: Pull Request
 
-Runs only after Step 8 has fully settled — every review round finished, every auto-fix
+Runs only after Step 8 has fully settled — every review/E2E round finished, every auto-fix
 committed and gate-verified. First re-read the plan file at the Step 7 plan-state location —
 the copy in the integration worktree for a repository plan, or the original file for a plan
 outside the repository — and confirm every implemented phase shows `- [x]`. If any are still
@@ -447,6 +449,15 @@ Once all phases are checked off:
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
+### E2E
+- Worker: <actual executor:model from the E2E spawn record>
+- Status: <pass | fail | env-error — E2E did not run | skipped — reason | not finished — reason>
+- Passed: <n>/<total>
+- Failed: <names; empty if none>
+- Flaky: <names; empty if none>
+- Rounds: <R> of <REVIEW_MAX_ROUNDS>
+- Evidence: <path, or absent>
+
 ### Cost
 - **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
   transcript has no dollar cost record; F4 forbids estimating`; API calls: <measured distinct
@@ -474,8 +485,12 @@ Once all phases are checked off:
   fix work, using the same executor-specific form and source rules as Workers. If review was
   skipped, say `absent — review skipped: <reason>`; if it ran but has no accounting, say
   `token accounting unavailable`.>
+- **E2E (by executor):** <one row for every executor that ran the Step 8 E2E worker, using
+  the same executor-specific form and source rules as Workers. If E2E was skipped, say
+  `absent — E2E skipped: <reason>`; if it ran but has no accounting, say
+  `token accounting unavailable`.>
 
-The three rows are independent. A measured worker or review value does not fill an absent
+The four rows are independent. A measured worker, review, or E2E value does not fill an absent
 orchestrator value (or vice versa). `pi`'s figure remains equivalent value, never cash
 spend; codex, the shipped subscription-backed executor, reports tokens and plan-window share
 only, never dollars.
@@ -487,8 +502,9 @@ only, never dollars.
 ```
 
 After Step 9 finalizes the plan report, print only a short terminal summary: plan, branch,
-worktree, pass/fail per phase, findings left for the user, the orchestrator cost row, PR URL
-or `PR skipped — <reason>`, and `Full report: <plan-file path>`. If `/create-pr` opened a PR
+worktree, pass/fail per phase, E2E status, findings and failures left for the user, the
+orchestrator cost row, PR URL or `PR skipped — <reason>`, and
+`Full report: <plan-file path>`. If `/create-pr` opened a PR
 but its returned body omits the report, also print `PR report omitted — /create-pr left the
 report out`. Do not print the full report to the terminal.
 
@@ -552,13 +568,23 @@ Projects can override via environment or project CLAUDE.md:
 - `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
   Default `true`; set `false` to stop after implementation.
 - `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
-  **non-interactive**: it runs as a background sub-agent with no user present, so a skill that
-  prompts mid-run (e.g. `/pr-review`, which asks which findings to keep and whether to post)
-  will stall. If absent, Step 8 is skipped.
+  **non-interactive and read-only**: it runs as a background sub-agent with no user present
+  and must not build or test while E2E owns those resources. A skill that prompts mid-run
+  (e.g. `/pr-review`, which asks which findings to keep and whether to post) will stall. If
+  a consumer review skill builds, disable review or E2E, or give E2E its own build directory.
+  If absent, review is skipped.
+- `RUN_E2E` — whether to run E2E in Step 8. Default `true`.
+- `E2E_SKILL` — project's E2E skill. Default `/e2e`. E2E is skipped when it is absent.
+- `E2E_MODEL` — `executor:model` target for the E2E worker. Default `claude:sonnet` because
+  the Claude gate ran the device checks reliably in both paired runs. Foreign targets are
+  allowed; the fresh-evidence check in `references/review-autofix.md` guards them.
+- `E2E_TIME_BUDGET` — E2E wall-clock budget. Default 45 min so a cold emulator and the
+  Maestro suite can finish.
+- `E2E_TOKEN_CEILING` — E2E token ceiling. Default 150k.
 - `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
   Default: high / correctness and above; lower-severity findings are reported, not touched.
-- `REVIEW_MAX_ROUNDS` — max review↔fix rounds before stopping and listing anything still
-  open (Step 8d). Default 2.
+- `REVIEW_MAX_ROUNDS` — max combined review/E2E↔fix rounds before stopping and listing
+  open findings and failures (Step 8d). Default 2.
 - `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
   set `false` to end the run at the local worktree branch. Has no effect when the project has
   no `/create-pr` — the step is skipped either way.
@@ -675,10 +701,9 @@ Add ability to mark recipes as favorites and filter by them.
   contracts remain intact.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
-- **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent
-  (resolved `REVIEW_MODEL`) reviews the whole plan diff; only severity-gated
-  findings are auto-fixed, the rest are reported for you. Bounded by `REVIEW_MAX_ROUNDS`;
-  disable with `RUN_REVIEW`.
+- **Review and E2E are the capstone** — after all phases pass, the enabled review and E2E
+  workers run together on the same `HEAD`. One fix pass handles their actionable results.
+  The combined loop is bounded by `REVIEW_MAX_ROUNDS`; disable either worker independently.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).

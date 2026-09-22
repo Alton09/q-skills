@@ -26,7 +26,7 @@ your project's `.claude/skills/` before running implement-plan or feature-plan:
 | `/create-worktree` | Required | Create an isolated git worktree and branch; return its path |
 | `/clean-architecture` | Required | Load layer rules and naming conventions into context |
 | `/research` | **Optional** | Look up latest API docs for a given surface; return findings as text. Skipped gracefully if absent. |
-| `/create-pr` | **Optional** | Open a **draft** PR for the finished worktree branch, non-interactively, and return its URL. implement-plan's final step delegates here; skipped gracefully if absent. |
+| `/create-pr` | **Optional** | Open a **draft** PR for the finished worktree branch, non-interactively, include the report at the supplied plan-file path in the PR body, and return its URL. implement-plan delegates here; skipped gracefully if absent. |
 
 See [`examples/android/`](examples/android/) for a working reference implementation targeting
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those

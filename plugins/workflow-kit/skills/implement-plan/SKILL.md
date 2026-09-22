@@ -58,8 +58,8 @@ and owns the pass/fail decision and task tracking.
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review & Auto-fix** — review sub-agent (`REVIEW_MODEL`) reviews the full plan diff; severity-gated findings auto-fixed by a phase-tier sub-agent under the same two-tier verify
-9. **Pull Request** — delegate to the project's `/create-pr` skill, if it exists
-10. **Report** — summary, per-phase models, review outcome, PR link, worktree path, status
+9. **Pull Request & Report Finalization** — persist the report with `PR: pending`, invoke `/create-pr` or skip it, then patch only the PR line
+10. **Report Contents & Terminal Summary** — define the persisted report and print its short hand-off
 
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
@@ -191,6 +191,12 @@ worktree path, carry-forward, and self-verify + commit instructions), then walks
 single-phase layers run in the integration worktree; multi-phase layers fan out into
 **sibling** child worktrees, merge back, and advance atomically.
 
+Carry-forward is dependency-local: pass only contracts, constraining decisions, and assigned
+follow-ups needed by direct dependents; committed files hold implementation detail. Measured
+2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan-file edits + carry-forward
+added 12.2% / 17.9% of positive orchestrator context growth. The exact payload rule is in
+`references/phase-execution.md` § "5a.2 Per-phase handoff payload".
+
 Two rules are load-bearing and easy to get wrong:
 
 - **File-overlap demotion** — phases that share a file (or any phase missing `**Files**:`
@@ -227,8 +233,11 @@ Verification is **two-tier**:
    gate — so after the phase agent returns, the **orchestrator delegates an independent
    `/verify`** to a fresh sub-agent (the implementer never confirms its own work). The
    orchestrator does NOT run `/verify` in its own context: that would pour build/test
-   output into the expensive Opus window every phase. It gets back only `pass | fail +
-   verbatim errors`.
+   output into the expensive Opus window every phase. Its return is fixed-shape:
+   `status: pass|fail`; `errors: none|<verbatim errors>`; no command log, successful-check
+   recap, or prose. This preserves the complete error artifact on failure while making a
+   pass two lines. Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`):
+   gate-verify spawn/results added 10.2% / 11.9% of positive orchestrator context growth.
 
 **Gate-verify model** — classify like a phase (Step 5a), by what the project's `/verify`
 actually does:
@@ -354,21 +363,43 @@ is bounded by
 ## Step 9: Pull Request
 
 Runs only after Step 8 has fully settled — every review round finished, every auto-fix
-committed and gate-verified. If the project provides a `/create-pr` skill and `CREATE_PR`
-is not `false`, invoke it from the integration worktree, passing the branch, and let it own
-everything else — push, title, body, templates, host tooling. PR conventions vary too much
-between projects for this skill to bundle an implementation.
+committed and gate-verified. First re-read the plan file at the Step 7 plan-state location —
+the copy in the integration worktree for a repository plan, or the original file for a plan
+outside the repository — and confirm every implemented phase shows `- [x]`. If any are still
+`- [ ]`, update them now (Step 7). Assemble the Step 10 report with `**PR:** pending` and
+write it to that plan file as `## Implementation Report — <YYYY-MM-DD>`. Replace only the
+latest (closest to end of file) `## Implementation Report` section whose `**PR:**` line is
+exactly `pending`, regardless of its date; otherwise replace the section with today's exact
+heading, from that heading to the next `##` heading or end of file; append only when neither
+exists. Earlier completed reports stay. For a plan outside the project repository, write the
+report in place and leave
+it uncommitted, even when its vault has other uncommitted edits. For a repository plan, write
+it to the integration-worktree copy and commit it using the Step 7 plan-state rule.
+
+Then invoke `/create-pr` from the integration worktree when it exists and `CREATE_PR` is not `false`,
+passing the branch and the **path of the plan file that contains the dated
+`## Implementation Report — <YYYY-MM-DD>` section**, with a request to include that report in
+the PR body. Let `/create-pr` own everything else — push, title, body, templates, and host
+tooling. The orchestrator never edits the PR body itself. PR conventions vary too much between
+projects for this skill to bundle an implementation.
 
 Expectations on the project's `/create-pr`: open a **draft** PR, never merge anything, run
 without prompting (Step 9 is unattended), and return the PR URL for the report. If no
-`/create-pr` skill exists in the session, skip this step and say so in the report — the run
-ends at the local worktree branch, as before.
+`/create-pr` skill exists in the session, or `CREATE_PR=false`, skip it. Patch only the
+persisted report's `**PR:**` line to `skipped — <reason>`; do not reassemble the report. The
+report still goes to the plan and the run ends at the local worktree branch, as before.
+Otherwise, after `/create-pr` returns, patch only that line to its URL; do not reassemble the
+report or change its measured figures. After either PR-line patch, commit a repository plan
+using the Step 7 plan-state rule; leave an outside-repository plan uncommitted. Read the
+returned PR body through the available read-only PR detail. If
+it omits the report, leave the body unchanged and mark that omission for Step 10's terminal
+summary.
 
-## Step 10: Final Report
+## Step 10: Report Contents & Terminal Summary
 
-Before writing the report, re-read the plan file **in the integration worktree** (the copy
-Step 7 writes, and the only copy that carries this run's state) and confirm every implemented
-phase shows `- [x]`. If any are still `- [ ]`, update them now (Step 7) before continuing.
+Step 9 assembles, persists, and finalizes this report. Step 10 defines its contents and prints
+the terminal summary. Never rewrite a report that Step 9 has finalized. The exact assembled
+report is the copy requested for the PR body. The orchestrator does not edit that body.
 
 Two rules govern the report's contents and have been violated in practice:
 
@@ -389,30 +420,34 @@ figure was wrong by 13× in a real run; no number is better than a wrong one.
 Once all phases are checked off:
 
 ```markdown
-# Implementation Summary
+## Implementation Report — <YYYY-MM-DD>
+
+**Date:** <YYYY-MM-DD>
+
+### Implementation Summary
 
 **Plan:** <plan-name>
 **Orchestrator:** <orchestrator model, e.g. Opus 4.8>
 **Worktree:** <path>
 **Branch:** <branch-name>
-**PR:** <url, or `skipped — <reason>`>
+**PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>
 
-## Phases Completed
+### Phases Completed
 - Phase 1: <description> — sub-agent: <model>
 - Phase 2: <description> — sub-agent: <model>
 - Phase 3: <description> — sub-agent: <model>
 
-## Verification Status
+### Verification Status
 ✓ All phases passed verification
 
-## Review & Auto-fix
+### Review & Auto-fix
 - Reviewer: <REVIEW_MODEL> on `<base>...HEAD` via <REVIEW_SKILL>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
 - Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
-## Cost
+### Cost
 - **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
   transcript has no dollar cost record; F4 forbids estimating`; API calls: <measured distinct
   `message.id` count from the orchestrator's own session transcript, or `unavailable —
@@ -445,11 +480,17 @@ orchestrator value (or vice versa). `pi`'s figure remains equivalent value, neve
 spend; codex, the shipped subscription-backed executor, reports tokens and plan-window share
 only, never dollars.
 
-## What's Next
+### What's Next
 - Worktree is ready at <path>
 - Review code and decide: merge, iterate, or cleanup
 - Skill does NOT auto-merge or cleanup — that's your call
 ```
+
+After Step 9 finalizes the plan report, print only a short terminal summary: plan, branch,
+worktree, pass/fail per phase, findings left for the user, the orchestrator cost row, PR URL
+or `PR skipped — <reason>`, and `Full report: <plan-file path>`. If `/create-pr` opened a PR
+but its returned body omits the report, also print `PR report omitted — /create-pr left the
+report out`. Do not print the full report to the terminal.
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this
@@ -624,6 +665,14 @@ Add ability to mark recipes as favorites and filter by them.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
   (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
   raw source, so it doesn't get re-processed every turn.
+- **Carry-forward is dependency-local** — retain only contracts, constraining decisions,
+  and assigned follow-ups needed by direct dependents; committed files hold implementation
+  detail. Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan edits +
+  carry-forward were 12.2% / 17.9% of positive context growth.
+- **Measured small buckets stay unchanged** — worker hand-backs (3.9% / 5.9%), foreign
+  output extraction (0.0% / 1.1%), and timer/bookkeeping calls (8.4% / 5.5%) were each below
+  10% in those runs, so their full summary, extracted-only accounting, and timer-binding
+  contracts remain intact.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent

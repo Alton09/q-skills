@@ -76,10 +76,10 @@ The orchestrator is always Claude Code regardless of which executor the workers 
 
 ### Token accounting
 
-At foreign-worker exit, invoke token and final-answer extraction as one shell command whose
-stdout contains only the extracted fields shown below plus the worker's final answer, never
-the raw pi/codex event stream. Keep the JSONL redirected to its scratch file; do not `Read`,
-print, or return the event stream before filtering.
+At foreign-worker exit, use the executor's single combined extraction below. Its stdout
+contains only the extracted fields and the worker's final answer, never the raw pi/codex event
+stream. Keep the JSONL redirected to its scratch file; do not `Read`, print, or return the
+event stream before filtering.
 Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): foreign-output/accounting
 extraction was only 0.0% / 1.1% of positive orchestrator context growth, so keep its existing
 one-command extracted-fields contract rather than adding turns or a new summary layer.
@@ -126,18 +126,22 @@ quota.
   unavailable`; F4 forbids a price-based estimate.
 
 - **`claude`** → totals arrive in the completion notification; nothing extra required.
-- **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. Sum across all qualifying events:
+- **`pi`** → `--mode json` writes a JSONL event stream to stdout. Token and cost data live at `.message.usage` on `message_end` events where `.message.role == "assistant"`. Top-level usage on `turn_end`, `agent_end`, and `agent_settled` is `null`; there is **no run-level aggregate event**. At exit, run this one command; it emits the token fields and the last assistant text as `final_answer`:
   ```
-  jq -s '[.[] | select(.type=="message_end" and .message.role=="assistant") | .message.usage]
-         | {new: (map(.input + .output)|add), cacheRead: (map(.cacheRead)|add),
-            cost: (map(.cost.total)|add)}'
+  jq -s '[.[] | select(.type=="message_end" and .message.role=="assistant")]
+         | {new: (map(.message.usage.input + .message.usage.output)|add),
+            cacheRead: (map(.message.usage.cacheRead)|add),
+            cost: (map(.message.usage.cost.total)|add),
+            final_answer: ([.[] | .message.content
+              | if type == "string" then . else [.[]? | select(.type == "text") | .text] | join("") end]
+              | last)}' <scratch>/<phase>.jsonl
   ```
   `new` (`input + output`) is the budget figure checked against the 5b token ceiling. `cacheRead` is reported on its own line and **excluded** from the budget: pi re-reports the cached context on every turn, so it grows with turns × context size and means nothing as a budget. Do not use `totalTokens`, which includes `cacheRead` — on a real run it reported 3.65M tokens for a worker that used 63k new. On flat-rate `opencode-go`, `cost.total` is retail-equivalent value, not metered cash — report it as equivalent value and never as metered spend. The cap that matters is the provider's rate limit, not a dollar ceiling.
-- **`codex`** → `--json` emits exactly one `turn.completed` per `codex exec`, and its `usage` already covers the whole run (every tool call and model request). No summing is needed:
+- **`codex`** → `--json` emits exactly one `turn.completed` per `codex exec`, and its `usage` already covers the whole run (every tool call and model request). No summing is needed. At exit, run this one command; `-o` already wrote the final answer:
   ```
-  jq -s '[.[] | select(.type=="turn.completed") | .usage][0]
+  jq -s --rawfile final_answer <scratch>/<phase>.last.md '[.[] | select(.type=="turn.completed") | .usage][0]
          | {new: (.input_tokens - .cached_input_tokens + .output_tokens),
-            cached: .cached_input_tokens}'
+            cached: .cached_input_tokens, final_answer: $final_answer}' <scratch>/<phase>.jsonl
   ```
   `cached_input_tokens` is a **subset** of `input_tokens` (the session file's `total_tokens` equals `input + output`), so the budget figure subtracts it; this is not the same arithmetic as pi. There is no cost field: codex runs on a ChatGPT subscription, so report tokens and the plan-window share, **never a dollar figure**.
 

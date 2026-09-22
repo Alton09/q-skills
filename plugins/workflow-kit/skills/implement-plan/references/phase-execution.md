@@ -83,10 +83,14 @@ everything the phase needs:
   In both cases do NOT pass `isolation: "worktree"` — the orchestrator creates and owns
   every worktree explicitly; letting the Agent tool spawn its own scatters each phase's
   edits and breaks carry-forward. Edits never touch `main`.
-- **Carry-forward**: a short summary the orchestrator maintains — files created/modified,
-  key decisions, public interfaces introduced — covering **all completed prerequisite
-  phases**, so this phase builds correctly on what came before. (Within a parallel group,
-  members do NOT see each other's in-flight work — fine, they have no mutual dependency.)
+- **Carry-forward**: include only facts this phase needs from its **direct prerequisites**:
+  public interfaces/contracts introduced, non-obvious decisions that constrain this phase,
+  and any prerequisite blocker or follow-up assigned to it. Do not accumulate files touched,
+  verification history, or summaries from unrelated/indirect phases; the committed tree is
+  the source of truth for their implementation. Within a parallel group, members do NOT see
+  each other's in-flight work — fine, they have no mutual dependency. Measured 2026-09-21
+  (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan-file edits + carry-forward added
+  12.2% / 17.9% of positive orchestrator context growth.
 - Self-verify instruction: "After implementing, run /verify. If it fails, iterate to
   fix — up to <SELF_VERIFY_LIMIT, default 2> rounds — then stop regardless. Report your
   final /verify result (pass/fail) and any remaining errors verbatim."
@@ -163,8 +167,9 @@ identically to every executor — they are properties of the handoff, not the ha
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
-4. Gate pass → IMMEDIATELY check off the phase (Step 7), append its summary to the
-   carry-forward, advance. Do not batch checkbox updates — write after each phase.
+4. Gate pass → IMMEDIATELY check off the phase (Step 7), retain only the return facts that
+   a direct dependent needs under 5a.2's compact carry-forward rule, and advance. Do not
+   batch checkbox updates — write after each phase.
 
 **Multi-phase layer (parallel group):**
 1. For each phase, create a child worktree + branch off integration HEAD, as a **sibling**
@@ -186,8 +191,9 @@ identically to every executor — they are properties of the handoff, not the ha
 4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
    child can pass alone yet break once merged.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
-   passes — check off ALL phases in the group (Step 7), append every member's summary to
-   the carry-forward, then clean up (5a.4) and advance to the next layer.
+   passes — check off ALL phases in the group (Step 7), retain only each member's facts
+   needed by a direct dependent under 5a.2's compact carry-forward rule, then clean up
+   (5a.4) and advance to the next layer.
 6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
    on the merged integration worktree (warm: read the full merged diff + verbatim error),

@@ -76,6 +76,14 @@ The orchestrator is always Claude Code regardless of which executor the workers 
 
 ### Token accounting
 
+At foreign-worker exit, invoke token and final-answer extraction as one shell command whose
+stdout contains only the extracted fields shown below plus the worker's final answer, never
+the raw pi/codex event stream. Keep the JSONL redirected to its scratch file; do not `Read`,
+print, or return the event stream before filtering.
+Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): foreign-output/accounting
+extraction was only 0.0% / 1.1% of positive orchestrator context growth, so keep its existing
+one-command extracted-fields contract rather than adding turns or a new summary layer.
+
 **Extract at worker exit, not at report time.** As soon as a foreign worker's process ends,
 run its extraction below and write the numbers into that phase's spawn record (5a.2), beside
 the model that actually ran. The JSONL logs live in the session scratchpad, which does not

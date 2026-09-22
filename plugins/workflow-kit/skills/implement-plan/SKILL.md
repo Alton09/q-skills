@@ -191,6 +191,12 @@ worktree path, carry-forward, and self-verify + commit instructions), then walks
 single-phase layers run in the integration worktree; multi-phase layers fan out into
 **sibling** child worktrees, merge back, and advance atomically.
 
+Carry-forward is dependency-local: pass only contracts, constraining decisions, and assigned
+follow-ups needed by direct dependents; committed files hold implementation detail. Measured
+2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan-file edits + carry-forward
+added 12.2% / 17.9% of positive orchestrator context growth. The exact payload rule is in
+`references/phase-execution.md` § "5a.2 Per-phase handoff payload".
+
 Two rules are load-bearing and easy to get wrong:
 
 - **File-overlap demotion** — phases that share a file (or any phase missing `**Files**:`
@@ -227,8 +233,11 @@ Verification is **two-tier**:
    gate — so after the phase agent returns, the **orchestrator delegates an independent
    `/verify`** to a fresh sub-agent (the implementer never confirms its own work). The
    orchestrator does NOT run `/verify` in its own context: that would pour build/test
-   output into the expensive Opus window every phase. It gets back only `pass | fail +
-   verbatim errors`.
+   output into the expensive Opus window every phase. Its return is fixed-shape:
+   `status: pass|fail`; `errors: none|<verbatim errors>`; no command log, successful-check
+   recap, or prose. This preserves the complete error artifact on failure while making a
+   pass two lines. Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`):
+   gate-verify spawn/results added 10.2% / 11.9% of positive orchestrator context growth.
 
 **Gate-verify model** — classify like a phase (Step 5a), by what the project's `/verify`
 actually does:
@@ -653,6 +662,14 @@ Add ability to mark recipes as favorites and filter by them.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
   (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
   raw source, so it doesn't get re-processed every turn.
+- **Carry-forward is dependency-local** — retain only contracts, constraining decisions,
+  and assigned follow-ups needed by direct dependents; committed files hold implementation
+  detail. Measured 2026-09-21 (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan edits +
+  carry-forward were 12.2% / 17.9% of positive context growth.
+- **Measured small buckets stay unchanged** — worker hand-backs (3.9% / 5.9%), foreign
+  output extraction (0.0% / 1.1%), and timer/bookkeeping calls (8.4% / 5.5%) were each below
+  10% in those runs, so their full summary, extracted-only accounting, and timer-binding
+  contracts remain intact.
 - **Sub-agents are observed** — runaway token burn or silent loops pause the phase and
   page you (Step 5b) rather than burning budget unattended.
 - **Review is a capstone, not a phase gate** — after all phases pass, a review sub-agent

@@ -56,15 +56,16 @@ E2E payload:
   required hand-back.
 
 For a foreign E2E executor, name `E2E_SKILL` by the path that executor can read, as in
-5a.2 § 3. Require proof of reading in its hand-back: one verbatim line from that skill's
-first heading and the heading of the section it acted on.
+5a.2 § 3. Alongside the five-field verdict, require a sibling proof-of-reading field: one
+verbatim line from that skill's first heading and the heading of the section it acted on. A
+missing quote is a failed hand-back.
 
-Before accepting `status: pass`, check in one Bash call that `evidence` exists and its
-timestamp is newer than the E2E spawn time. A missing or stale path is a failed hand-back,
-not a pass: record it as `status: fail` with `failed: failed hand-back`, and list that value
-in the E2E Status. This proof guards foreign workers that skip device work. An `env-error`
-means E2E did not run. It does not block the review path, never enters the fix queue, and
-does not stop Step 9 from opening the PR.
+Before accepting `status: pass`, check in one Bash call that `evidence` exists, is non-empty,
+and its timestamp is newer than the E2E spawn time. A missing, empty, or stale path is a
+failed hand-back, not a pass: record it as `status: fail` with `failed: failed hand-back`, and
+list that value in the E2E Status. This proof guards foreign workers that skip device work.
+An `env-error` means E2E did not run. It does not block the review path, never enters the fix
+queue, and does not stop Step 9 from opening the PR.
 
 If one worker hits its runaway guard, stop and report only that worker as `not finished`.
 The other worker's result still counts. Do not re-run the stopped worker automatically in
@@ -141,6 +142,9 @@ the gate, start the next round: re-spawn only the still-enabled review and E2E w
 new `HEAD`. An E2E result from before that commit feeds only the fix pass and never the final
 report. If the fix pass commits nothing, keep the last E2E result and re-review only when
 review is still enabled and another round is needed; do not re-run E2E.
+
+If E2E alone remains failed and the fix pass commits nothing, stop: keep the last E2E result,
+list its open failed names in the report, and do not wait for another 8a or 8c.
 
 Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the cap is hit or
 a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list

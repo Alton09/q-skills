@@ -31,7 +31,6 @@ E2E_AVD=<headless-test-avd>
 E2E_PACKAGE=<application-id>
 E2E_ACTIVITY=<application-id/.MainActivity>
 E2E_EVIDENCE="/tmp/${E2E_PACKAGE//./-}-e2e-evidence"
-mkdir -p "$E2E_EVIDENCE"
 ```
 
 Keep the non-live Maestro flows in `.maestro/`. Each tagged criterion must name or map to a
@@ -44,7 +43,7 @@ selection, install, and Maestro. If the lock is held, do not use that device: re
 
 ```bash
 exec 9>"/tmp/${E2E_AVD//[^[:alnum:]_-]/-}-e2e.lock"
-flock -n 9 || { printf 'AVD lock held\n' > "$E2E_EVIDENCE/reservation-error.txt"; exit 1; }
+flock -n 9 || { mkdir -p "$E2E_EVIDENCE"; printf 'AVD lock held\n' > "$E2E_EVIDENCE/reservation-error.txt"; exit 1; }
 ```
 
 Keep fd 9 open through install and Maestro so the reservation covers the whole run. On the
@@ -91,7 +90,7 @@ activity explicitly after each clear; do not rely on Maestro to choose the launc
 ## 3. Run the Suite
 
 Run the non-live Maestro suite. Let Maestro create its normal run directory under
-`~/.maestro/tests/`; use that directory as `evidence`.
+`~/.maestro/tests/`; on pass, use its non-empty run directory as `evidence`.
 
 ```bash
 maestro --device "$E2E_DEVICE_SERIAL" test .maestro

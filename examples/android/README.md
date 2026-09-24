@@ -17,9 +17,8 @@ mkdir -p ~/your-project/.claude/skills/
 # Copy a single skill
 cp -r examples/android/verify ~/your-project/.claude/skills/
 
-# Or copy all five at once
+# Or copy all four at once
 cp -r examples/android/verify \
-       examples/android/e2e \
        examples/android/clean-architecture \
        examples/android/create-worktree \
        examples/android/research \
@@ -33,7 +32,6 @@ Then adapt each `SKILL.md` to match your project's module layout, Gradle command
 | Skill | Required | What it does |
 |---|---|---|
 | [`/verify`](./verify/SKILL.md) | Required | Runs Gradle quality gates (ktlint, detekt, unit tests, compile check). Returns `pass` or `fail` with raw output. |
-| [`/e2e`](./e2e/SKILL.md) | **Optional** | Runs unattended Maestro device checks and returns a compact pass, fail, or environment-error verdict with an evidence path. |
 | [`/clean-architecture`](./clean-architecture/SKILL.md) | Required | Loads layer rules (presentation/domain/data), naming conventions, and NEVER constraints into context once before implementation begins. |
 | [`/create-worktree`](./create-worktree/SKILL.md) | Required | Creates an isolated git worktree + branch and copies `local.properties` so the worktree builds. Returns the worktree path. |
 | [`/research`](./research/SKILL.md) | **Optional** | Looks up Android API surfaces using the `android` CLI. Requires `android` CLI installed on PATH. feature-plan degrades gracefully if absent. |

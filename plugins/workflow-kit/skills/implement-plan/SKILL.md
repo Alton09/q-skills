@@ -24,7 +24,7 @@ and owns the pass/fail decision and task tracking.
 
 ## Roles
 
-- **Orchestrator** (this agent, Opus 4.8 by default): pre-flight, worktree setup,
+- **Orchestrator** (this agent, opus by default): pre-flight, worktree setup,
   building the dependency-graph schedule, per-phase model selection, child-worktree
   creation + merge + cleanup, spawning + observing sub-agents (sequentially or in
   parallel groups), delegating the authoritative gate-verify, the pass/fail decision,
@@ -54,7 +54,7 @@ and owns the pass/fail decision and task tracking.
 ## Workflow Overview
 
 1. **Plan Selection** — file path or inline markdown; parse delegated to a cheap prep agent
-2. **Orchestrator Model** — Opus 4.8 default (per-phase sub-agent models auto-selected)
+2. **Orchestrator Model** — opus default (per-phase sub-agent models auto-selected)
 3. **Worktree Setup** — delegate to `/create-worktree` skill
 4. **Plan Structure** — work from the delegated parse extract
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
@@ -67,12 +67,12 @@ and owns the pass/fail decision and task tracking.
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
 Before reading source files, writing code, or spawning any phase/implementation
-sub-agent, you MUST collect three answers in order (the Step 1 plan-parse prep agent
-is part of answering #1 and is allowed):
+sub-agent, you MUST complete three pre-flight items in order (the Step 1 plan-parse prep
+agent is part of #1 and is allowed):
 
 1. Plan path/content (Step 1)
-2. Orchestrator model confirmation (Step 2) — Opus 4.8 default; per-phase
-   sub-agent models are auto-selected later, NOT asked here
+2. Orchestrator model check (Step 2) — opus default; confirm only for a non-Opus session;
+   per-phase sub-agent models are auto-selected later, NOT asked here
 3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
    and note the new worktree path, then proceed immediately
 
@@ -130,14 +130,15 @@ diff rather than in the checkbox.
 ## Step 2: Orchestrator Model
 
 The orchestrator runs on **whatever model this session was launched with** — it cannot
-switch its own model mid-run. `ORCHESTRATOR_MODEL` (default Opus 4.8) is the *recommended*
+switch its own model mid-run. `ORCHESTRATOR_MODEL` (default `opus`, any Opus-family model) is the *recommended*
 model because the orchestrator holds cross-phase state, judges complexity, and supervises
 sub-agents, which is exactly the work Opus is best at.
 
-Confirm with the user (one line). If the session isn't already on the recommended model,
-they relaunch on it — you can't change it from here:
+Only when the session model is not in the recommended family (for default `opus`, not an
+Opus model), confirm with the user (one line). They relaunch on it — you can't change it
+from here:
 ```
-Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> recommended. To use a
+Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> family recommended. To use a
 different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
 
@@ -429,7 +430,7 @@ Once all phases are checked off:
 ### Implementation Summary
 
 **Plan:** <plan-name>
-**Orchestrator:** <orchestrator model, e.g. Opus 4.8>
+**Orchestrator:** <orchestrator model, e.g. claude-opus-5>
 **Worktree:** <path>
 **Branch:** <branch-name>
 **PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>
@@ -548,7 +549,7 @@ Projects can override via environment or project CLAUDE.md:
   and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
   escalation pass (Step 6). One knob, both retry budgets.
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
-- `ORCHESTRATOR_MODEL` — orchestrator model (default: Opus 4.8)
+- `ORCHESTRATOR_MODEL` — orchestrator model (default: `opus`, any Opus-family model)
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
   completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
   light 80k / standard 150k / deep 250k (therefore Claude's haiku/sonnet/opus values stay

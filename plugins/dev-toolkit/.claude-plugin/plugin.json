@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "name": "dev-toolkit",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Standalone Claude Code dev utilities: macOS notifications, PR review, and post-merge retrospectives with nudge hook"
 }

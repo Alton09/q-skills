@@ -1,7 +1,7 @@
 # Runaway Guard (Step 5b)
 
 Referenced from `SKILL.md` Step 5. Applies to every sub-agent the orchestrator spawns —
-phase, retry, escalation, review, and fix agents.
+phase, retry, escalation, review, E2E, and fix agents.
 
 The orchestrator cannot read a running sub-agent's live token count or inspect its
 individual tool calls mid-flight — a background Agent surfaces its totals only in the
@@ -15,8 +15,8 @@ timeout while running, and the token total on completion.
 > arrive (the metric the ceiling check uses).
 
 **Wall-clock budget (while running).** Set a per-phase time budget (`PHASE_TIME_BUDGET`,
-default 30 min; scale up for deep phases, and use `ESCALATION_TIME_BUDGET` for escalation
-attempts). Alongside every Claude or codex spawn, start a timer with
+default 30 min; scale up for deep phases, use `ESCALATION_TIME_BUDGET` for escalation
+attempts, and use `E2E_TIME_BUDGET` for E2E). Alongside every Claude or codex spawn, start a timer with
 `Bash(run_in_background: true)` running `sleep <budget seconds>`. In the spawn record, bind
 the timer task id to the exact worker it guards: the Agent task id for Claude or the pidfile
 for codex. Its completion notification re-invokes the orchestrator even if the worker hangs
@@ -35,7 +35,8 @@ not partial work—report what the orchestrator last knew, not a recovered trans
 
 **Token ceiling (on completion).** When the sub-agent returns, compare its budget figure
 against the resolved light/standard/deep tier ceiling in Configuration
-(`PHASE_TOKEN_CEILING`, or `ESCALATION_TOKEN_CEILING` for escalation attempts): Claude uses
+(`PHASE_TOKEN_CEILING`, `ESCALATION_TOKEN_CEILING` for escalation attempts, or
+`E2E_TOKEN_CEILING` for E2E): Claude uses
 the completion-notification total, while pi and codex use `new` tokens below. The phase
 agent's total now includes its warm self-verify loop, so the ceilings already budget for
 impl + verify — don't double-count. If it overran, do NOT silently accept the result — page
@@ -43,6 +44,12 @@ the user before the gate-verify so an overrun phase gets a human look (the outpu
 be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
 
 **On either trip:**
+
+For a Step 8 review or E2E worker, mark only that worker `not finished`, do not apply the
+phase wait below, and let its enabled sibling continue. Wait for that sibling, then continue
+Step 8; do not automatically re-run the stopped worker in that round.
+
+For all other workers:
 
 1. **Do NOT** check off the phase, run the gate-verify, or advance to the next phase.
 2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
@@ -93,9 +100,9 @@ unavailable` for a run whose numbers were fully recoverable. Step 10's F4 rule f
 estimating the gap away, so a deferred extraction turns into a permanently unmeasured run.
 
 **Keep the report split at exit.** Tag every spawn record with its role: `worker` for phase,
-retry, escalation, and gate-verify work; `review+fix` for Step 8 work. Step 10 aggregates
-only records with the same role and executor, so review/fix numbers cannot silently inflate
-the worker row. A missing extraction makes that role/executor measure `token accounting
+retry, escalation, and gate-verify work; `review+fix` for Step 8 review and fix work; and
+`e2e` for Step 8 E2E work. Step 10 aggregates only records with the same role and executor,
+so review, fix, or E2E numbers cannot silently inflate the worker row. A missing extraction makes that role/executor measure `token accounting
 unavailable`; it is not repaired from another role, model price, elapsed time, or a prior
 run. The Claude Code orchestrator is not a spawned worker: its row may use only a genuine
 per-run Claude Code record for its own cost, API calls, and peak context. Its session

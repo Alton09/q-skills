@@ -19,6 +19,7 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/create-worktree`
 - `/clean-architecture`
 - `/verify`
+- `/e2e` (optional)
 - `/research` (optional)
 - `/create-pr` (optional) — implement-plan's final step delegates PR creation here; skipped if absent
 

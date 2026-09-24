@@ -1,18 +1,26 @@
-# Plan Review & Auto-fix (Step 8)
+# Plan Review, E2E & Auto-fix (Step 8)
 
 Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented and checked
-off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, SKIP this step —
-there is nothing coherent to review. Disable entirely with `RUN_REVIEW=false`. If
-`REVIEW_SKILL` is not available in the project, skip Step 8 and note it in the report.
+off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
+and state the reason in the report. Disable review with `RUN_REVIEW=false`; skip it when
+`REVIEW_SKILL` is absent. Disable E2E with `RUN_E2E=false`; skip it when `E2E_SKILL` is
+absent. E2E runs alone when review is skipped. Review runs alone when E2E is skipped.
 
-This step mirrors Step 5's delegation discipline: the review sub-agent (resolved
-`REVIEW_MODEL`) reviews for judgment, a cheaper fix agent handles mechanical changes,
-and the orchestrator holds only the findings list — it never ingests the raw diff.
+This step mirrors Step 5's delegation discipline. The review sub-agent judges the diff.
+The E2E sub-agent runs device checks. One cheaper fix agent handles both result sets. The
+orchestrator holds only the findings list and compact E2E hand-back. It never ingests the
+raw diff or verbatim E2E failures.
 
-## 8a. Delegate the review
+## 8a. Fan out review and E2E
 
-Resolve `REVIEW_MODEL` as `executor:model` (see SKILL.md Configuration), then spawn ONE
-review sub-agent with that registry entry (background; 5b guard applies). Payload:
+Resolve `REVIEW_MODEL` and `E2E_MODEL` as `executor:model` (see SKILL.md Configuration).
+When enabled, spawn ONE review sub-agent and ONE E2E sub-agent together on the same `HEAD`.
+Use the executor registry and background spawn contract for each. Both share the worktree
+and the Step 5 concurrent-worker limit. Give each its own runaway timer: the review uses its
+resolved tier budget; E2E uses `E2E_TIME_BUDGET` and `E2E_TOKEN_CEILING`. Record the spawn
+time for E2E. Wait for both enabled workers before 8b, even when one finishes much earlier.
+
+Review payload:
 
 - Integration worktree path + the base ref. Phases commit to the integration branch (5a.2)
   but nothing is pushed, so there is no GitHub PR — instruct it to review the **cumulative diff
@@ -20,8 +28,10 @@ review sub-agent with that registry entry (background; 5b guard applies). Payloa
   not a PR. (This diff is non-empty precisely because phases commit; uncommitted work would be
   invisible here.)
 - Invoke the project's review skill (`REVIEW_SKILL`, default `/code-review`) on that diff. It
-  must be **non-interactive** — running headless in a sub-agent, an interactive review skill
-  like `/pr-review` (which prompts for finding selection / posting) would stall.
+  must be **non-interactive and read-only**. It must not build, test, or write files. Running
+  headless, an interactive review skill like `/pr-review` would stall. A build or test also
+  contends with E2E for the Gradle lock. If a consumer review skill builds, disable review
+  or E2E, or give E2E its own build directory.
 - Required return format: a **structured findings list only** — each item is `severity`,
   `file:line`, one-line problem, suggested fix. No narrative, no diff echo.
 - **Confirm the resolved target before the findings.** A review skill may resolve its own
@@ -36,6 +46,31 @@ review sub-agent with that registry entry (background; 5b guard applies). Payloa
   trusted: re-run the review before triage.
 
 The orchestrator keeps the findings list (small); it does not read the diff itself.
+
+E2E payload:
+
+- Absolute integration worktree path.
+- Every `[e2e]` acceptance criterion from the Step 1 extract, verbatim with its phase. An
+  empty list still runs the normal suite.
+- The contract in `references/e2e.md`. The worker writes no code and returns only its
+  required hand-back.
+
+For a foreign E2E executor, name `E2E_SKILL` by the path that executor can read, as in
+5a.2 § 3. Alongside the five-field verdict, require a sibling proof-of-reading field: one
+verbatim line from that skill's first heading and the heading of the section it acted on. A
+missing quote is a failed hand-back.
+
+Before accepting `status: pass`, check in one Bash call that `evidence` exists, is non-empty,
+and its timestamp is newer than the E2E spawn time. A missing, empty, or stale path is a
+failed hand-back, not a pass: record it as `status: fail` with `failed: failed hand-back`, and
+list that value in the E2E Status. This proof guards foreign workers that skip device work.
+An `env-error` means E2E did not run. It does not block the review path, never enters the fix
+queue, and does not stop Step 9 from opening the PR.
+
+If one worker hits its runaway guard, stop and report only that worker as `not finished`.
+The other worker's result still counts. Do not re-run the stopped worker automatically in
+that round. Wait for the other worker before continuing. A Step 8 runaway does not enter
+the Step 6 opus rescue; it is an open result for the user.
 
 **Foreign review executors (`pi`, `codex`).** A foreign reviewer cannot invoke `REVIEW_SKILL`
 (no `Skill` tool). Give it a written review handoff instead: the diff command above, the
@@ -62,7 +97,7 @@ handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
   absent or mismatched fields make the findings untrusted and require a re-run. Stop and
   token accounting follow `references/runaway-guard.md` for codex.
 
-## 8b. Triage by severity
+## 8b. Triage findings and failures
 
 Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and above):
 
@@ -75,29 +110,43 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
   contract (warm self-verify bounded by `SELF_VERIFY_LIMIT`, then an independent gate-verify);
   it is never an orchestrator edit.
 
-If the auto-fix queue is empty, skip to 8d.
+Add failed E2E names to the auto-fix queue with the `evidence` path. Do not add flaky names,
+`env-error`, a failed hand-back, or a stopped E2E worker. If the combined queue is empty,
+skip to 8d.
 
 ## 8c. Delegate the fixes (phase tiers, sequential in integration)
 
-Review findings cluster on shared files, so fixes run **in the integration worktree, not in
-parallel** — parallel fix agents would collide (the Step 5a file-overlap problem). Bundle
-the auto-fix queue into ONE fix pass (or a few, grouped by area). For each pass:
+Review findings and E2E failures can share files, so fixes run **in the integration worktree,
+not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
 
 1. Classify complexity across its findings → light (mechanical) or standard (needs
    inference); use the max across the bundle. Resolve `PHASE_MODEL_LIGHT` or
    `PHASE_MODEL_STANDARD` exactly like a phase worker (Step 5a.2), including its executor.
-   Use `PHASE_MODEL_DEEP` only for genuinely tricky fixes.
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
-   verbatim findings to fix and the **same two-tier verify contract as Step 5** — "after
-   fixing, run /verify and iterate while warm (bounded by `SELF_VERIFY_LIMIT`); report your
-   self-verify result."
+   verbatim at-threshold review findings, the E2E failed names, and the `evidence` path. The
+   fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include
+   the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
+   and iterate while warm, bounded by `SELF_VERIFY_LIMIT`; commit on pass; report whether a
+   commit was made.
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
-   integration worktree — independent confirmation, exactly as for a phase.
-4. Gate fail → the Step 6 retry / escalation path, unchanged.
+   integration worktree — one independent confirmation for the combined pass, exactly as
+   for a phase. Do not run a gate per source.
+4. Gate fail → report the open result and stop this combined loop. If the fix committed,
+   re-run enabled E2E on that `HEAD` before reporting, so the reported E2E result is not
+   from before the commit. Do not use the Step 6 opus rescue for a Step 8 failure.
 
-## 8d. Bounded re-review
+## 8d. Bounded re-run
 
-A fix can introduce new issues or only partly address a finding. After the fixes verify
-clean, re-run 8a→8c. Cap total review rounds at `REVIEW_MAX_ROUNDS` (default 2). Stop when
-the cap is hit OR a round returns no at/above-threshold findings; list anything still open
-in the report. Never loop review↔fix unbounded.
+A fix can introduce new issues or only partly address a finding. After a fix commit passes
+the gate, start the next round: re-spawn only the still-enabled review and E2E workers on the
+new `HEAD`. An E2E result from before that commit feeds only the fix pass and never the final
+report. If the fix pass commits nothing, keep the last E2E result and re-review only when
+review is still enabled and another round is needed; do not re-run E2E.
+
+If E2E alone remains failed and the fix pass commits nothing, stop: keep the last E2E result,
+list its open failed names in the report, and do not wait for another 8a or 8c.
+
+Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the cap is hit or
+a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list
+open findings and failed names in the report. The report shows only the last E2E run on the
+code that ships. Never loop review/E2E↔fix unbounded.

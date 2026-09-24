@@ -102,6 +102,7 @@ Example:
 
 **Acceptance criteria**:
 - [ ] [Specific, verifiable criterion]
+- [ ] Sample recipes still render after a cleared database [e2e]
 
 #### Task 2: [Task Name]
 - **Module**: [module path]
@@ -158,6 +159,10 @@ Write as if handing off to a capable engineer who hasn't seen the rest of the co
 - Define input/output contracts between tasks so sequential work integrates cleanly
 - Call out what NOT to change if there's risk of overlap with sibling tasks
 - Keep scope tight — one clear responsibility per task
+
+Tag an acceptance criterion with a trailing `[e2e]` when only a running app can settle it.
+For example: `- [ ] Sample recipes still render after a cleared database [e2e]`. Do not tag
+criteria that a build, unit test, or static check can settle.
 
 ## Step 4: Save the Plan
 

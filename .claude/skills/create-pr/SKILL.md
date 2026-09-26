@@ -1,42 +1,51 @@
 ---
 name: create-pr
-description: Create a PR or open a pull request for the current q-skills branch; use when asked to "create a pr" or "open a pull request".
+description: Push the current q-skills branch and open (or update) a draft pull request with a conventional-commit title. Use this whenever asked to create a PR, open a pull request, "ship this", or "push and open a draft", and as implement-plan's final PR step — including when it passes a plan file whose implementation report belongs in the PR body.
 ---
 
 # Create Pull Request
 
-Run non-interactively from the repository or worktree root. Accept an optional plan-file path
-and an optional request to include its latest `## Implementation Report — <date>` section in
-the PR body. Never merge a PR: this repository squash-merges after review.
+Run non-interactively from the repository or worktree root. Inputs are optional: a
+plan-file path, and whether to include its latest `## Implementation Report — <date>`
+section in the body.
 
-1. Identify the current branch with `git branch --show-current`, then push it:
+This skill stops at a draft PR. The repo squash-merges only after human review, so leave
+merging, approving, and marking ready to the reviewer.
+
+1. Push the current branch:
 
    ```bash
    git push -u origin "$(git branch --show-current)"
    ```
 
-2. Inspect the branch diff and recent conventional-commit history. Choose a concise title in
-   the established form `feat(<skill>): …`, `fix(<skill>): …`, or `chore(<skill>): …`.
-3. Compose a body with short summary bullets. If requested and the plan file is supplied,
-   append its latest `## Implementation Report — <date>` section, stopping at the next `## `
-   heading. End the body with exactly:
+2. Read the branch diff and recent commit history. Pick a title in the repo's
+   conventional-commit form: `feat(<skill>): …`, `fix(<skill>): …`, or `chore(<skill>): …`.
+3. Write a body of short summary bullets. If a plan file was supplied and the report was
+   requested, append its latest `## Implementation Report — <date>` section, stopping at
+   the next `## ` heading. End the body with exactly:
 
    ```markdown
    🤖 Generated with [Claude Code](https://claude.com/claude-code)
    ```
 
-4. Create a draft PR against `main`, supplying the composed body directly:
+4. Check for an existing PR on this branch, since `gh pr create` fails when one exists
+   (common when implement-plan is re-run):
 
    ```bash
-   gh pr create --draft --base main --title "$title" --body "$body"
+   gh pr list --head "$(git branch --show-current)" --state open --json number,url
    ```
 
-If a body correction is needed, `gh pr edit` can fail with the GraphQL error `Projects
-(classic) is being deprecated`. Use this workaround instead:
+   - None: create a draft against `main`:
 
-```bash
-gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f body="$body"
-```
+     ```bash
+     gh pr create --draft --base main --title "$title" --body "$body"
+     ```
 
-Return the draft PR URL and the exact body used. Do not merge, approve, or otherwise change
-the PR after creating it.
+   - One exists: update it instead. Use `gh api`, not `gh pr edit` — `gh pr edit` fails
+     in this repo with the GraphQL error `Projects (classic) is being deprecated`:
+
+     ```bash
+     gh api -X PATCH repos/{owner}/{repo}/pulls/<number> -f title="$title" -f body="$body"
+     ```
+
+Return the PR URL and the exact body used.

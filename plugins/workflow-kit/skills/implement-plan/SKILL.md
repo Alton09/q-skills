@@ -430,7 +430,7 @@ Once all phases are checked off:
 ### Implementation Summary
 
 **Plan:** <plan-name>
-**Orchestrator:** <orchestrator model, e.g. claude-opus-5>
+**Orchestrator:** <orchestrator model, e.g. claude-opus-5-5>
 **Worktree:** <path>
 **Branch:** <branch-name>
 **PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>

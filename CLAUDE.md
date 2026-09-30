@@ -23,4 +23,6 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/research` (optional)
 - `/create-pr` (optional) — implement-plan's final step delegates PR creation here; skipped if absent
 
+This repo provides `/verify` and `/create-pr` in `.claude/skills/` for its own changes.
+
 See `examples/android/` for reference implementations targeting Kotlin/Compose/Hilt.

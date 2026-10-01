@@ -173,7 +173,7 @@ layer 1 over layer 4, layer 4 over layer 6.
   but do not edit those files.
 
 State file path: `~/.claude/pr-retro/<owner>__<repo>/done` (one PR number per
-line). The nudge hook writes `baseline` and `last-check` in the same directory.
+line). The nudge hook writes `baseline`, `last-check`, and `pending` in the same directory.
 
 `<owner>__<repo>` always comes from the `origin` remote URL (same parse as the
 nudge hook): strip `git@github.com:` or `https://github.com/`, drop `.git`, then

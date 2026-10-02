@@ -148,16 +148,17 @@ workers opened the architecture and verify skills as their first action and ran 
 check in them, and neither ran `adb`, the emulator or Maestro — including for a phase whose
 acceptance criterion was "sample recipes still render with a cleared database". When E2E
 will run in Step 8, route every criterion tagged `[e2e]` to that worker and omit it from the
-per-phase gate payload. When E2E will be skipped, name each tagged criterion explicitly in
+per-phase gate payload; this holds under `reserved-device` too. When E2E will be skipped, name each tagged criterion explicitly in
 its phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do
 not rely on the foreign worker's self-verify to have covered it.
 
 That measurement is history for the default `workspace-write` sandbox without a device. Under
 `CODEX_DEVICE_MODE=reserved-device` (default), a codex worker or gate given a reserved device
-runs the device half of verify. Measured 2026-10-02 (q-skills implement-plan session
+runs the device half of verify. Reserve only for the codex worker that carries device checks:
+a phase worker or gate given them (the `[e2e]` criteria of a skipped-E2E run, or device steps
+in verify), or the codex E2E worker. Measured 2026-10-02 (q-skills implement-plan session
 `e67625dd`; no MenuLens session): adb, Gradle install, `pm clear`, and Maestro all exited 0
-inside the sandbox. Reserve the device and pass the serial per `references/executors.md`
-§ codex. With `off`, the rules above stand.
+inside the sandbox. Reserve the device and pass it per `references/executors.md` § codex. With `off`, the rules above stand.
 
 ## 5a.3 Execute each layer
 

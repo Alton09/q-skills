@@ -219,7 +219,7 @@ Two rules are load-bearing and easy to get wrong:
 ### 5b. Runaway guard
 
 Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`) and a **token
-ceiling** checked on completion (`PHASE_TOKEN_CEILING`). Claude and codex workers get a
+ceiling** checked on completion (`PHASE_TOKEN_CEILING`, or `CODEX_PHASE_TOKEN_CEILING` for codex). Claude and codex workers get a
 parallel background Bash `sleep` timer whose notification wakes the orchestrator; codex's
 command `timeout` has a five-minute margin and is only a backstop, while pi uses `timeout`
 directly. On a trip, stop the worker with its executor binding (`TaskStop`, process-group
@@ -258,8 +258,8 @@ actually does:
 above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
 deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
 reports.
-A codex gate whose phase has device checks gets the same device reservation, `ANDROID_SERIAL`,
-and "Use only device `<serial>`" handoff line as a codex worker; see `references/executors.md`
+A codex gate that is given device checks gets the same device reservation, `ANDROID_SERIAL`,
+`DEVICE_RESERVED=1`, and reserved-device handoff line as a codex worker; see `references/executors.md`
 § codex and `CODEX_DEVICE_MODE`.
 
 Resolve this address by the same `executor:model` rule as phase workers (5a.2). An
@@ -555,13 +555,15 @@ Projects can override via environment or project CLAUDE.md:
 - `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
 - `ORCHESTRATOR_MODEL` — orchestrator model (default: `opus`, any Opus-family model)
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
-  completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
-  light 80k / standard 150k / deep 250k (therefore Claude's haiku/sonnet/opus values stay
-  80k/150k/250k, and pi uses the same values). **Codex** has its own defaults: light 200k /
-  standard 250k / deep 400k, because its `new` tokens include the verify output the worker
-  reads (see `references/runaway-guard.md`). Measure Claude's notification total and
-  pi/codex `new` tokens as defined in `references/runaway-guard.md`. Single source for these
-  numbers — Step 5b references it.
+  completion (Step 5b). Now budgets impl + warm self-verify together. Governs claude and pi.
+  Defaults by tier: light 80k / standard 150k / deep 250k (therefore Claude's
+  haiku/sonnet/opus values stay 80k/150k/250k, and pi uses the same values). Measure
+  Claude's notification total and pi `new` tokens as defined in `references/runaway-guard.md`.
+  Single source for these numbers — Step 5b references it.
+- `CODEX_PHASE_TOKEN_CEILING` — the codex override of the per-phase ceiling, by tier. Defaults:
+  light 200k / standard 250k / deep 400k, because codex `new` tokens include the verify
+  output the worker reads (see `references/runaway-guard.md`). `PHASE_TOKEN_CEILING` never
+  applies to codex.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
   sub-agent (Step 5b). Default 30 min; scale up for `opus` phases.
 - `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
@@ -591,7 +593,8 @@ Projects can override via environment or project CLAUDE.md:
   `full-access` | `off`. Default `reserved-device` (measured 2026-10-02; the orchestrator
   reserves a device and passes the serial). `full-access` runs device phases with
   `danger-full-access` and needs a per-run user confirmation recorded in the report. `off`
-  routes device criteria to a Claude worker. Details in `references/executors.md` § codex.
+  applies 5a.2 routing unchanged (no reservation, so a codex worker, gate, or E2E worker
+  cannot run device checks). Details in `references/executors.md` § codex.
 - `E2E_TIME_BUDGET` — E2E wall-clock budget. Default 45 min so a cold emulator and the
   Maestro suite can finish.
 - `E2E_TOKEN_CEILING` — E2E token ceiling. Default 150k.

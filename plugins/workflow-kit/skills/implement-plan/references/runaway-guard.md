@@ -35,7 +35,7 @@ not partial work—report what the orchestrator last knew, not a recovered trans
 
 **Token ceiling (on completion).** When the sub-agent returns, compare its budget figure
 against the resolved light/standard/deep tier ceiling in Configuration
-(`PHASE_TOKEN_CEILING`, `ESCALATION_TOKEN_CEILING` for escalation attempts, or
+(`PHASE_TOKEN_CEILING`, `CODEX_PHASE_TOKEN_CEILING`, `ESCALATION_TOKEN_CEILING` for escalation attempts, or
 `E2E_TOKEN_CEILING` for E2E): Claude uses
 the completion-notification total, while pi and codex use `new` tokens below. The phase
 agent's total now includes its warm self-verify loop, so the ceilings already budget for
@@ -43,7 +43,7 @@ impl + verify — don't double-count. If it overran, do NOT silently accept the 
 the user before the gate-verify so an overrun phase gets a human look (the output may still
 be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
 
-Codex has higher default ceilings than Claude and pi because its `new` total includes the
+Codex has higher default ceilings (`CODEX_PHASE_TOKEN_CEILING`) than Claude and pi because its `new` total includes the
 verify output (e.g. full Gradle logs) the worker reads: MenuLens retro sessions `1bdbb8d2`
 (186k, light), `27cab714` (213k and 164k, standard) and `09cbe7b9` (122k light, 200k
 standard) all tripped the shared Claude/pi tier ceilings on otherwise normal phases.

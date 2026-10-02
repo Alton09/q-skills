@@ -152,6 +152,13 @@ per-phase gate payload. When E2E will be skipped, name each tagged criterion exp
 its phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perform itself. Do
 not rely on the foreign worker's self-verify to have covered it.
 
+That measurement is history for the default `workspace-write` sandbox without a device. Under
+`CODEX_DEVICE_MODE=reserved-device` (default), a codex worker or gate given a reserved device
+runs the device half of verify. Measured 2026-10-02 (q-skills implement-plan session
+`e67625dd`; no MenuLens session): adb, Gradle install, `pm clear`, and Maestro all exited 0
+inside the sandbox. Reserve the device and pass the serial per `references/executors.md`
+§ codex. With `off`, the rules above stand.
+
 ## 5a.3 Execute each layer
 
 Walk layers in topological order (5a.1). The resolved `executor:model` address determines

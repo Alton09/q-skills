@@ -258,6 +258,9 @@ actually does:
 above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
 deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
 reports.
+A codex gate whose phase has device checks gets the same device reservation, `ANDROID_SERIAL`,
+and "Use only device `<serial>`" handoff line as a codex worker; see `references/executors.md`
+§ codex and `CODEX_DEVICE_MODE`.
 
 Resolve this address by the same `executor:model` rule as phase workers (5a.2). An
 unprefixed id still means `claude:<id>`. The independent checker should differ from the
@@ -458,6 +461,7 @@ Once all phases are checked off:
 - Flaky: <names; empty if none>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 - Evidence: <path, or absent>
+- Codex device mode: <reserved-device | full-access (user confirmed: yes/no) | off>
 
 ### Cost
 - **Orchestrator (Claude Code):** cost: `token accounting unavailable — the session
@@ -583,6 +587,11 @@ Projects can override via environment or project CLAUDE.md:
 - `E2E_MODEL` — `executor:model` target for the E2E worker. Default `claude:sonnet` because
   the Claude gate ran the device checks reliably in both paired runs. Foreign targets are
   allowed; the fresh-evidence check in `references/review-autofix.md` guards them.
+- `CODEX_DEVICE_MODE` — how codex workers and gates get device work: `reserved-device` |
+  `full-access` | `off`. Default `reserved-device` (measured 2026-10-02; the orchestrator
+  reserves a device and passes the serial). `full-access` runs device phases with
+  `danger-full-access` and needs a per-run user confirmation recorded in the report. `off`
+  routes device criteria to a Claude worker. Details in `references/executors.md` § codex.
 - `E2E_TIME_BUDGET` — E2E wall-clock budget. Default 45 min so a cold emulator and the
   Maestro suite can finish.
 - `E2E_TOKEN_CEILING` — E2E token ceiling. Default 150k.

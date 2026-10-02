@@ -69,6 +69,34 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
   `turn_context.payload.model` (`thread_id` comes from `thread.started`) and preserves token
   totals and plan windows. `setsid` alone is insufficient for stopping; the final answer is
   `-o` output or the last `item.completed` `agent_message`.
+- **Device path (`CODEX_DEVICE_MODE`):** Boot nothing inside the sandbox: `/dev/kvm` is hidden
+  there (MenuLens sessions `27cab714`, `09cbe7b9`), so emulator boot stays with the
+  orchestrator. Measured 2026-10-02 (codex-cli 0.158.0, 2026-10-02 probe in q-skills
+  implement-plan session `e67625dd`, recorded in the plan's Probe results; no MenuLens
+  session exists for it): with the flags above unchanged, codex ran `adb devices`,
+  `adb -s <serial> shell getprop`, `ANDROID_SERIAL=<serial> ./gradlew installDevDebug`,
+  `pm clear`, `maestro --device <serial> test ...`, and `screenrecord` plus `adb pull`, all
+  exit 0. No extra env vars were needed, and `ADB_SERVER_SOCKET` was not needed, provided the
+  adb server already runs outside the sandbox. The per-serial lock
+  `${XDG_RUNTIME_DIR}/menulens-e2e-<serial>.lock` is visible and contended inside the sandbox
+  (`XDG_RUNTIME_DIR=/run/user/1000` on both sides). A fresh consumer worktree may still need
+  gitignored files (MenuLens: `local.properties`); that is the consumer's worktree setup, not
+  the device path. Default mode `reserved-device`:
+  1. Before spawning a codex worker or gate whose phase has device work (a criterion tagged
+     `[e2e]`, or a gate told to run device checks), the orchestrator runs `adb start-server`
+     and reserves a device outside the sandbox. It uses the consumer project's reservation
+     convention where one exists; otherwise `flock` on a per-serial lock file. It boots an
+     emulator when none is free.
+  2. It passes `ANDROID_SERIAL=<serial>` in the spawn environment and adds this line to the
+     handoff: "Use only device `<serial>`; do not boot, pick, or shut down a device."
+  3. After the worker exits, it releases the lock and shuts down only an emulator it booted.
+  - `full-access` (opt-in): spawn device phases with `-s danger-full-access` in place of
+    `workspace-write` and its `--add-dir` flags. Ask the user once per run before the first
+    such spawn and record the answer in the report's E2E section; without a yes, fall back to
+    `reserved-device`. Every other codex spawn keeps `workspace-write`. The auto-mode
+    classifier may flag `danger-full-access`; surface the block to the user and never work
+    around it.
+  - `off`: device criteria route to a Claude worker, as before.
 - **Model address syntax:** `codex:<model>`; pass the suffix as `-m <model>`. Phase tiers use `gpt-5.6-luna`,
   `gpt-5.6-terra`, and `gpt-5.6-sol` (all GPT family).
 - **Stop mechanism:** Walk descendants before killing, then TERM every discovered process

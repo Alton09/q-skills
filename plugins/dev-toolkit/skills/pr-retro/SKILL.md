@@ -100,6 +100,15 @@ gh api repos/{owner}/{repo}/pulls/<n>/reviews --paginate
 gh run list --branch <headRefName> --json databaseId,conclusion,name,createdAt,headSha
 ```
 
+If `gh run list` returns nothing, CI is not GitHub Actions. Fall back to
+commit statuses: for each commit in `gh pr view --json commits`, read
+`gh api repos/{owner}/{repo}/commits/<sha>/statuses`, keep entries whose
+`state` is `failure` or `error`, and record `context`, `created_at` and
+`target_url`. Also run `gh pr checks <n>` for the final state. External CI
+logs (Bitrise and similar) usually need auth, so look for the failure cause in
+the linked sessions instead. In MenuLens the sessions recorded every cause (a
+Bitrise merge conflict at Git Clone).
+
 For each failed CI run: `gh run view <id> --log-failed`, truncated to the
 decisive lines. A run that failed and later passed is a signal; the final green
 does not erase it. Rank human reviewer comments above bot comments.
@@ -122,7 +131,10 @@ for a bare `#<n>` alone; it matches unrelated text.
 
 For each matching JSONL, show:
 - session id, project dir, mtime, size
-- first non-meta user prompt (one line)
+- first real user prompt (one line): skip messages containing
+  `<command-name>/clear`, `<local-command`, or a `Caveat:` preamble; show a
+  slash-command prompt as `<command-name> <command-args>`.
+  `python3 ${CLAUDE_SKILL_DIR}/scripts/first_prompt.py <jsonl>...` does this.
 - guessed role: plan, implement, review-fix, prior-retro, or other
 
 Present the list and let the user deselect sessions before reading. Read

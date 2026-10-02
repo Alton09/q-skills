@@ -43,6 +43,11 @@ impl + verify — don't double-count. If it overran, do NOT silently accept the 
 the user before the gate-verify so an overrun phase gets a human look (the output may still
 be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
 
+Codex has higher default ceilings than Claude and pi because its `new` total includes the
+verify output (e.g. full Gradle logs) the worker reads: MenuLens retro sessions `1bdbb8d2`
+(186k, light), `27cab714` (213k and 164k, standard) and `09cbe7b9` (122k light, 200k
+standard) all tripped the shared Claude/pi tier ceilings on otherwise normal phases.
+
 **On either trip:**
 
 For a Step 8 review or E2E worker, mark only that worker `not finished`, do not apply the

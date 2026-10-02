@@ -553,14 +553,17 @@ Projects can override via environment or project CLAUDE.md:
 - `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
   completion (Step 5b). Now budgets impl + warm self-verify together. Defaults by tier:
   light 80k / standard 150k / deep 250k (therefore Claude's haiku/sonnet/opus values stay
-  80k/150k/250k). Measure Claude's notification total and pi/codex `new` tokens as defined
-  in `references/runaway-guard.md`. Single source for these numbers — Step 5b references it.
+  80k/150k/250k, and pi uses the same values). **Codex** has its own defaults: light 200k /
+  standard 250k / deep 400k, because its `new` tokens include the verify output the worker
+  reads (see `references/runaway-guard.md`). Measure Claude's notification total and
+  pi/codex `new` tokens as defined in `references/runaway-guard.md`. Single source for these
+  numbers — Step 5b references it.
 - `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
   sub-agent (Step 5b). Default 30 min; scale up for `opus` phases.
 - `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
   before HALTED / user-wait. Default 2.
 - `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
-  the per-phase ceiling for the rescue. Default 400k (above the `opus` phase 250k — these
+  the per-phase ceiling for the rescue. Default 400k (above the `opus` phase ceiling — these
   are the hardest cases).
 - `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
   30 min.

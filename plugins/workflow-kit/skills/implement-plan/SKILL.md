@@ -594,7 +594,7 @@ Projects can override via environment or project CLAUDE.md:
   reserves a device and passes the serial). `full-access` runs device phases with
   `danger-full-access` and needs a per-run user confirmation recorded in the report. `off`
   applies 5a.2 routing unchanged (no reservation, so a codex worker, gate, or E2E worker
-  cannot run device checks). Details in `references/executors.md` § codex.
+  cannot run device checks; a `codex:*` E2E worker falls back to `claude:sonnet`). Details in `references/executors.md` § codex.
 - `E2E_TIME_BUDGET` — E2E wall-clock budget. Default 45 min so a cold emulator and the
   Maestro suite can finish.
 - `E2E_TOKEN_CEILING` — E2E token ceiling. Default 150k.

@@ -88,15 +88,28 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
      and reserves a device outside the sandbox. It uses the consumer project's reservation
      convention where one exists; otherwise it probes each candidate serial's lock file with
      non-blocking `flock -n`, takes the first one acquired, and holds it from a background
-     process (`flock -o <lock> sleep infinity &`, recording that PID). `-o` closes the lock fd
-     before exec, so the child `sleep` does not inherit it and killing the flock process frees
-     the lock; without `-o` the lock survives the kill. Before spawning the worker it confirms
+     process in its own process group (`setsid flock -o <lock> sleep infinity &`, recording
+     that PID, which is also the group id). `-o` closes the lock fd before exec, so the child
+     `sleep` does not inherit it and killing the flock process frees the lock; without `-o`
+     the lock survives the kill. The `sleep` child still outlives a kill of the flock PID
+     alone (measured 2026-10-03, MenuLens session `92a4589c`), which is why release kills the
+     group. Before spawning the worker it confirms
      the holder is alive and holding (for example, `kill -0 <pid>` and a failing `flock -n`
      probe on the same lock). It boots an emulator only when no candidate lock was acquired.
   2. The orchestrator holds the reservation for the worker's lifetime. It passes
      `ANDROID_SERIAL=<serial>` and `DEVICE_RESERVED=1` in the spawn environment and adds this
      line to the handoff: "Device `<serial>` is already reserved for you; use only it, reuse
-     the reservation, and do not boot, shut down, or re-lock a device."
+     the reservation, and do not boot, shut down, or re-lock a device. Run any device suite
+     detached (`nohup <cmd> > <log> 2>&1 &`) and poll its log or report until it finishes; a
+     foreground suite is killed when the command's wait ends. Never start a suite while an
+     earlier run is still active on `<serial>`; check with `pgrep -af -- '--device <serial>'`
+     and wait for it instead."
+     Measured 2026-10-03 (MenuLens session `92a4589c`, codex gate thread `01a10533`): without
+     these two lines the gate ran `run_e2e.sh` in the foreground, the suite was cut off
+     mid-run, and each retry started a second Maestro client on the same serial. Two clients
+     on one device kill each other's device server, so every later flow failed in about 100 ms
+     with `DeviceServerDiedException`. `DEVICE_RESERVED=1` skips the lock, so the lock does
+     not stop a worker from colliding with itself.
      Device-phase spawn: use the codex template above with
      `ANDROID_SERIAL=<serial> DEVICE_RESERVED=1` placed before `setsid`.
   3. The worker's consumer skill (`/verify`, `/e2e`) must honour `DEVICE_RESERVED=1`: use
@@ -104,9 +117,16 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
      sandbox, so a skill that re-acquires it blocks until the time budget trips. A consumer
      skill that cannot honour a pre-held reservation is incompatible with `reserved-device`;
      use `off`. That consumer-side change belongs to the consumer project.
-  4. After the worker exits, the orchestrator releases the reservation (kills the recorded
-     `flock` PID, then confirms the lock is actually free with a succeeding `flock -n`) and
-     shuts down only an emulator it booted.
+  4. After the worker exits, the orchestrator first stops device processes the worker left
+     behind. Sandboxed commands start their own sessions, so a detached suite and its Maestro
+     client outlive `codex exec`; in the 2026-10-03 run they were still driving the device
+     after the gate exited. Find them by the reserved serial, not by the codex tree (the
+     parent is gone): on Linux, every PID whose `/proc/<pid>/environ` holds
+     `ANDROID_SERIAL=<serial>`, plus `pgrep -f -- '--device <serial>'`; TERM each one's process
+     group. Do this before any retry or re-spawn on the same serial as well. Then release the
+     reservation: `kill -TERM -- -<holder pid>` (the whole holder group, flock and `sleep`),
+     confirm `pgrep -g <holder pid>` is empty and a `flock -n` on the lock succeeds, and shut
+     down only an emulator it booted.
   - `full-access` (opt-in): spawn device phases with `-s danger-full-access` in place of
     `workspace-write` and its `--add-dir` flags. Ask the user once per run before the first
     such spawn and record the answer in the report's E2E section; without a yes, fall back to

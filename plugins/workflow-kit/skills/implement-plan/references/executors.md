@@ -99,26 +99,32 @@ id in the error (for example, `unknown model 'x' for executor 'pi'`).
   2. The orchestrator holds the reservation for the worker's lifetime. It passes
      `ANDROID_SERIAL=<serial>` and `DEVICE_RESERVED=1` in the spawn environment and adds this
      line to the handoff: "Device `<serial>` is already reserved for you; use only it, reuse
-     the reservation, and do not boot, shut down, or re-lock a device. Run any device suite
-     detached (`nohup <cmd> > <log> 2>&1 &`) and poll its log or report until it finishes; a
-     foreground suite is killed when the command's wait ends. Never start a suite while an
-     earlier run is still active on `<serial>`; check with `pgrep -af -- '--device <serial>'`
-     and wait for it instead."
-     Measured 2026-10-03 (MenuLens session `92a4589c`, codex gate thread `01a10533`): without
-     these two lines the gate ran `run_e2e.sh` in the foreground, the suite was cut off
-     mid-run, and each retry started a second Maestro client on the same serial. Two clients
-     on one device kill each other's device server, so every later flow failed in about 100 ms
-     with `DeviceServerDiedException`. `DEVICE_RESERVED=1` skips the lock, so the lock does
-     not stop a worker from colliding with itself.
+     the reservation, and do not boot, shut down, or re-lock a device.
+     Start each device suite exactly once, in the foreground, and keep polling that same
+     command session until it exits (codex returns a `session_id` while the command runs;
+     poll it with empty `write_stdin`). Never relaunch a suite: a command that returned while
+     still running is not dead, and `pgrep` cannot see it."
+     Measured 2026-10-03/04 (MenuLens sessions `92a4589c` and `43d4d0c4`, codex gate threads
+     `01a10533` and `01a106ea`): each codex command runs in its own PID namespace (a detached
+     `run_e2e.sh` reported `pid=4`), so a later command's `pgrep` found nothing, the gate
+     concluded the suite had died, and it relaunched it up to four times on the same serial.
+     Two Maestro clients on one device kill each other's device server, so overlapping runs
+     failed every flow in about 100 ms with `DeviceServerDiedException`. `DEVICE_RESERVED=1`
+     skips the reservation lock, so only a consumer-side run lock (a second `flock -n` per
+     serial, taken by the suite runner itself) can reject an overlapping run; file locks work
+     across codex commands where `pgrep` does not.
      Device-phase spawn: use the codex template above with
      `ANDROID_SERIAL=<serial> DEVICE_RESERVED=1` placed before `setsid`.
   3. The worker's consumer skill (`/verify`, `/e2e`) must honour `DEVICE_RESERVED=1`: use
-     `ANDROID_SERIAL` and skip its own selection and lock. The lock is contended inside the
+     `ANDROID_SERIAL` and skip its own selection and lock. It should still take its own
+     non-blocking per-serial run lock and exit with "suite already running" when that lock is
+     busy, so an overlapping run fails fast instead of crashing the live one. The reservation
+     lock is contended inside the
      sandbox, so a skill that re-acquires it blocks until the time budget trips. A consumer
      skill that cannot honour a pre-held reservation is incompatible with `reserved-device`;
      use `off`. That consumer-side change belongs to the consumer project.
   4. After the worker exits, the orchestrator first stops device processes the worker left
-     behind. Sandboxed commands start their own sessions, so a detached suite and its Maestro
+     behind. Sandboxed commands start their own sessions, so a running suite and its Maestro
      client outlive `codex exec`; in the 2026-10-03 run they were still driving the device
      after the gate exited. Find them by the reserved serial, not by the codex tree (the
      parent is gone): on Linux, every PID whose `/proc/<pid>/environ` holds

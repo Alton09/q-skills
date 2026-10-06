@@ -54,6 +54,9 @@ E2E payload:
   empty list still runs the normal suite.
 - The contract in `references/e2e.md`. The worker writes no code and returns only its
   required hand-back.
+- A codex E2E worker (`E2E_MODEL=codex:*`) gets the reserved-device steps from
+  `references/executors.md` § codex. Under `CODEX_DEVICE_MODE=off` it falls back to
+  `claude:sonnet`; say so on the report's E2E worker line.
 
 For a foreign E2E executor, name `E2E_SKILL` by the path that executor can read, as in
 5a.2 § 3. Alongside the five-field verdict, require a sibling proof-of-reading field: one

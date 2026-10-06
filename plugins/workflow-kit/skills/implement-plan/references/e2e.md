@@ -8,7 +8,9 @@ device-bound checks after implementation. It runs unattended and returns a compa
 Do not prompt. Select a device or emulator, boot it when needed, install the build from the
 current worktree, and clear app state where a suite or criterion needs a first launch.
 
-The skill owns device selection. Do not reuse a device that another run is using. Reserve the
+The skill owns device selection, unless the orchestrator pre-reserved a device
+(`DEVICE_RESERVED=1` with `ANDROID_SERIAL`): then use that device and do not re-acquire its
+lock. Otherwise do not reuse a device that another run is using. Reserve the
 selected device for this run before installing or testing. If no unreserved device is available,
 return `env-error`.
 

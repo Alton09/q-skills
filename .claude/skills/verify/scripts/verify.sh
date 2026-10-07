@@ -28,6 +28,10 @@ while IFS= read -r -d '' verify_file; do
   check "bash-n:${verify_file}" bash -n "$verify_file"
 done < <(find plugins .claude -type f -name '*.sh' -print0)
 
+while IFS= read -r -d '' verify_file; do
+  check "test:${verify_file}" bash "$verify_file"
+done < <(find plugins -type f -name '*.test.sh' -print0)
+
 check py-compile env PYTHONPYCACHEPREFIX="$verify_tmp/pycache" python3 - <<'PY'
 import pathlib
 import py_compile

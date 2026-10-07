@@ -5,7 +5,9 @@ notifications, and all decisions. An executor changes only a worker's harness. W
 targets use `executor:model`; an unprefixed model resolves to `claude:model`. Split on the
 first colon and use the matching entry below for every phase, retry, escalation, review, or
 fix spawn. Reject unknown executors or model ids before spawning, and name the executor and
-id in the error (for example, `unknown model 'x' for executor 'pi'`).
+id in the error (for example, `unknown model 'x' for executor 'pi'`). For an unpinned role
+the `executor:model` address may come from the quota-aware router
+(`references/routing.md`); the entries below apply to it unchanged.
 
 ## Executor entries
 

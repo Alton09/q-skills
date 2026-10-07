@@ -14,7 +14,12 @@ raw diff or verbatim E2E failures.
 ## 8a. Fan out review and E2E
 
 Resolve `REVIEW_MODEL` and `E2E_MODEL` as `executor:model` (see SKILL.md Configuration).
-When enabled, spawn ONE review sub-agent and ONE E2E sub-agent together on the same `HEAD`.
+Unless `REVIEW_MODEL` or `REVIEW_EXECUTOR` is explicitly set (a pin), first call the router
+with `--role review`, adding `--exclude-executor codex` when any phase or fix spawn record in
+this run used a `codex:*` target, per `references/routing.md` § "Calling the router". A
+non-null `target` is the review address; `target: null` resolves `REVIEW_MODEL` as before.
+The reviewer diversity rules in SKILL.md Configuration still apply to the routed target.
+E2E is not routed. When enabled, spawn ONE review sub-agent and ONE E2E sub-agent together on the same `HEAD`.
 Use the executor registry and background spawn contract for each. Both share the worktree
 and the Step 5 concurrent-worker limit. Give each its own runaway timer: the review uses its
 resolved tier budget; E2E uses `E2E_TIME_BUDGET` and `E2E_TOKEN_CEILING`. Record the spawn
@@ -123,8 +128,10 @@ Review findings and E2E failures can share files, so fixes run **in the integrat
 not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
 
 1. Classify complexity across its findings → light (mechanical) or standard (needs
-   inference); use the max across the bundle. Resolve `PHASE_MODEL_LIGHT` or
-   `PHASE_MODEL_STANDARD` exactly like a phase worker (Step 5a.2), including its executor.
+   inference); use the max across the bundle. Resolve that tier exactly like a phase worker
+   (Step 5a.2), including its executor: unless the tier is pinned, route it with
+   `--role phase --tier <tier>` (a fresh quota read per fix spawn); otherwise, or on
+   `target: null`, use `PHASE_MODEL_LIGHT` or `PHASE_MODEL_STANDARD`.
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim at-threshold review findings, the E2E failed names, and the `evidence` path. The
    fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include

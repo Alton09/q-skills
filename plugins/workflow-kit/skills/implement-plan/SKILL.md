@@ -51,13 +51,16 @@ and owns the pass/fail decision and task tracking.
 - **Fix sub-agent** (Step 8, light/standard phase tier by complexity): applies the severity-gated
   findings in the integration worktree under the same two-tier verify contract as a phase.
 
+Unpinned phase, fix, gate-verify, and review targets come from the routing config when one
+is present (`references/routing.md`).
+
 ## Workflow Overview
 
 1. **Plan Selection** — file path or inline markdown; parse delegated to a cheap prep agent
 2. **Orchestrator Model** — opus default (per-phase sub-agent models auto-selected)
 3. **Worktree Setup** — delegate to `/create-worktree` skill
 4. **Plan Structure** — work from the delegated parse extract
-5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running
+5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running; unpinned worker targets come from the routing config when present
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — check off completed phases in plan file
 8. **Plan Review, E2E & Auto-fix** — review and E2E workers run together on the same `HEAD`; one phase-tier fix pass handles review findings and E2E failures under the same two-tier verify
@@ -256,18 +259,19 @@ actually does:
 
 `VERIFY_AGENT_MODEL` is the configured default (`claude:sonnet`) and wins when set; the table
 above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
-deterministic exit-code gate. Spawn it with the worktree path; it writes no code and only
-reports.
+deterministic exit-code gate. When no `VERIFY_AGENT_MODEL` pin applies, call the router with
+`--role gateVerify` before each gate spawn per `references/routing.md` § "Calling the router";
+a non-null `target` is the gate address, and `target: null` resolves as above. Spawn it with
+the worktree path; it writes no code and only reports.
 A codex gate that is given device checks gets the same device reservation, `ANDROID_SERIAL`,
 `DEVICE_RESERVED=1`, and reserved-device handoff line as a codex worker; see `references/executors.md`
 § codex and `CODEX_DEVICE_MODE`.
 
 Resolve this address by the same `executor:model` rule as phase workers (5a.2). An
-unprefixed id still means `claude:<id>`. The independent checker should differ from the
-implementer by executor or model family whenever the configured pool offers such a target.
-This is intentionally inert on the backward-compatible all-Claude configuration, where
-every available model is Claude family; foreign phase defaults satisfy it at no extra setup
-because their default gate remains `claude:sonnet`.
+unprefixed id still means `claude:<id>`. For gate verify the routing list order wins, so
+the same executor or model family may implement and verify: gate verify mostly runs `/verify`
+and reads exit codes, so the soft diversity rule is relaxed for gate verify only. Reviewer
+diversity (Configuration, `REVIEW_EXECUTOR`) stays mandatory.
 
 **A sub-agent can fail *after* it has delivered.** A task notification with status
 `failed` — a rate limit, an API error, a killed process — means the agent stopped, not that
@@ -281,7 +285,9 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
-  The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
+  Resolve the retry agent's target through the phase tier again (5a.2 step 1): an unpinned
+  tier gets a fresh router call, so a fallback can take over mid-run. The re-spawned gate
+  routes again the same way. The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
   same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary.
@@ -415,7 +421,9 @@ transcribed from configuration defaults or a routing table. A report that echoes
 defaults can never reveal an override or substitution — the only case where the audit
 matters. Where actual and configured differ, print both:
 `Phase 3 (light): <actual> (configured: <configured>)`. Where the actual model cannot be
-recovered, print `unknown (configured: <id>)` — never fill the gap from a table.
+recovered, print `unknown (configured: <id>)` — never fill the gap from a table. Phase,
+gate, review, and fix model lines carry the router reason in parentheses, also from the
+spawn record, per `references/routing.md` § "Report format".
 
 **F4 — Cost: measured or absent, never estimated.** Any cost figure comes from token
 accounting for this run and nothing else. Unavailable → emit `token accounting unavailable`
@@ -439,17 +447,18 @@ Once all phases are checked off:
 **PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>
 
 ### Phases Completed
-- Phase 1: <description> — sub-agent: <model>
-- Phase 2: <description> — sub-agent: <model>
-- Phase 3: <description> — sub-agent: <model>
+- Phase 1 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
+- Phase 2 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
+- Phase 3 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
+- Routing warnings: <each router warning once, or none>
 
 ### Verification Status
 ✓ All phases passed verification
 
 ### Review & Auto-fix
-- Reviewer: <REVIEW_MODEL> on `<base>...HEAD` via <REVIEW_SKILL>
+- Reviewer: <REVIEW_MODEL> (<router reason | pinned>) on `<base>...HEAD` via <REVIEW_SKILL>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
-- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model>
+- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model> (<router reason | pinned>)
 - Left for you (below threshold): <one line each, severity + file:line + problem>
 - Rounds: <R> of <REVIEW_MAX_ROUNDS>
 
@@ -547,7 +556,8 @@ Projects can override via environment or project CLAUDE.md:
 - `VERIFY_SKILL` — project's verification skill (default: `/verify`)
 - `VERIFY_AGENT_MODEL` — `executor:model` target for the delegated gate-verify sub-agent
   (Step 6). Default `claude:sonnet`; set `claude:haiku` when the project's verify is a
-  deterministic exit-code gate. Unprefixed `sonnet`/`haiku` remain equivalent.
+  deterministic exit-code gate. Unprefixed `sonnet`/`haiku` remain equivalent. A set value
+  pins the role and skips quota routing.
 - `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
   self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5a);
   and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
@@ -610,6 +620,7 @@ Projects can override via environment or project CLAUDE.md:
   `claude:opus`. Each tier may name a different executor. An unprefixed id always means
   `claude:<id>`; an unknown executor or model fails before spawn with both the executor and
   id in the error. Routing details live in `references/executors.md` § "Executor entries".
+  A set value pins that tier and skips quota routing.
 - `PHASE_EXECUTOR` — backward-compatible shorthand selecting all three shipped tier
   defaults: `claude` (default), `pi`, or `codex`. An explicit `PHASE_MODEL_*` overrides the
   shorthand for that tier. The default/unset path therefore remains all-Claude.
@@ -649,7 +660,16 @@ Projects can override via environment or project CLAUDE.md:
   default follows `REVIEW_EXECUTOR`: `pi:opencode-go/grok-4.6` for pi,
   `codex:gpt-5.6-sol` for codex (not `gpt-6-astra`, for the Plus-window cost above), and
   `claude:opus` for claude, subject to the diversity override above. An explicit address
-  overrides both axes; an unprefixed id resolves to Claude for backward compatibility.
+  overrides both axes; an unprefixed id resolves to Claude for backward compatibility. A set
+  value pins the role and skips quota routing.
+- Routing config (`~/.claude/workflow-kit.json`, `<repo>/.claude/workflow-kit.json`) —
+  optional JSON file supplying ordered fallback lists for unpinned phase, fix, gate-verify,
+  and review roles; before each such spawn `scripts/route-target.sh` picks the first target
+  with quota budget. The project file overrides the user file per list. Explicit settings
+  (including `PHASE_EXECUTOR` and `REVIEW_EXECUTOR`) pin and win; with no file, every role
+  resolves from the defaults above. If the router itself exits non-zero (for example `jq`
+  missing), print its stderr once and resolve as if it returned `target: null`. Schema,
+  precedence, budget rules, and fail-safe: `references/routing.md`.
 
 ## Plan Format Example
 

@@ -260,7 +260,7 @@ actually does:
 `VERIFY_AGENT_MODEL` is the configured default (`claude:sonnet`) and wins when set; the table
 above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
 deterministic exit-code gate. When no `VERIFY_AGENT_MODEL` pin applies, call the router with
-`--role gateVerify` before each gate spawn per `references/routing.md` § "Calling the router";
+`--role gateVerify --project-dir <run-root>` (the repo root the run started from) before each gate spawn per `references/routing.md` § "Calling the router";
 a non-null `target` is the gate address, and `target: null` resolves as above. Spawn it with
 the worktree path; it writes no code and only reports.
 A codex gate that is given device checks gets the same device reservation, `ANDROID_SERIAL`,
@@ -667,8 +667,11 @@ Projects can override via environment or project CLAUDE.md:
   and review roles; before each such spawn `scripts/route-target.sh` picks the first target
   with quota budget. The project file overrides the user file per list. Explicit settings
   (including `PHASE_EXECUTOR` and `REVIEW_EXECUTOR`) pin and win; with no file, every role
-  resolves from the defaults above. If the router itself exits non-zero (for example `jq`
-  missing), print its stderr once and resolve as if it returned `target: null`. Schema,
+  resolves from the defaults above. If the router itself exits non-zero, writes nothing to stdout, or prints a
+  non-JSON line (for example `jq` missing), print its stderr once and resolve as if it
+  returned `target: null`. Always pass `--project-dir <run-root>`, the repo root the run
+  started from; when `REVIEW_EXECUTOR=codex` or a `codex:*` `REVIEW_MODEL` is pinned, pass
+  `--exclude-executor codex` on every phase and fix router call. Schema,
   precedence, budget rules, and fail-safe: `references/routing.md`.
 
 ## Plan Format Example

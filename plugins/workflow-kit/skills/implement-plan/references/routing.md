@@ -69,8 +69,10 @@ each; they may see the same snapshot and all pick the same target.
 ```bash
 <skill-dir>/scripts/route-target.sh --role phase|gateVerify|review [--tier light|standard|deep] \
   [--exclude-executor <claude|pi|codex>]... \
-  [--project-dir <dir>] [--user-config <file>] [--quota-json <file>]
+  --project-dir <run-root> [--user-config <file>] [--quota-json <file>]
 ```
+
+`<run-root>` is the repo root the run started from, resolved once at startup. Always pass it.
 
 - `--role` is `phase`, `gateVerify`, or `review`. Fix workers use `--role phase` with the
   tier of the work they fix.
@@ -79,14 +81,22 @@ each; they may see the same snapshot and all pick the same target.
   flag for more than one. On the `review` call, pass `--exclude-executor codex` whenever any
   phase or fix spawn record in this run used a `codex:*` target, so routing cannot produce a
   reviewer the codex reviewer refusal would reject.
-- `--project-dir` defaults to the git toplevel of the current directory (empty outside a
-  repo). Pass the project root the run started from when the current directory is a child
-  worktree that lacks an uncommitted project file.
+- Pinned codex reviewer: when the resolved reviewer is pinned to codex (`REVIEW_EXECUTOR=codex`
+  or a `codex:*` `REVIEW_MODEL`), the review call is skipped, so the rule above never fires.
+  Pass `--exclude-executor codex` on every `--role phase` call instead (phase, retry, and fix
+  spawns), so routing cannot put a codex implementer under the pinned codex reviewer. The
+  startup refusal cannot catch this: it runs before any phase has been routed.
+- `--project-dir` is always passed, as `<run-root>`. Without it the script defaults to the git
+  toplevel of the current directory, which is a child or integration worktree that lacks an
+  uncommitted `<run-root>/.claude/workflow-kit.json`, so the project file would be skipped
+  silently. The default (empty outside a repo) exists for by-hand checks only.
 - `--user-config` defaults to `$HOME/.claude/workflow-kit.json`.
 - `--quota-json` reads quota-axi output from a file instead of running quota-axi. It exists
   for tests and by-hand checks; the orchestrator does not pass it in a real run.
-- A usage error exits 2 with a message on stderr. Every other outcome exits 0 and prints
-  exactly one JSON line on stdout. The script never spawns anything and never writes files.
+- A usage error (or missing `jq`) exits 2 with a message on stderr. Every other handled
+  outcome exits 0 and prints exactly one JSON line on stdout. An unexpected crash can exit
+  non-zero or leave stdout empty; see § "Fail-safe". The script never spawns anything and never
+  writes files.
 
 **Output.** One line, for example:
 
@@ -112,6 +122,8 @@ each; they may see the same snapshot and all pick the same target.
 - `target` non-null: spawn it through the executor registry in `references/executors.md`,
   exactly as if the user had set it.
 - `target: null`: resolve as before routing, from the shipped defaults.
+- Non-zero exit, empty stdout, or a stdout line that is not JSON: print stderr once and treat
+  the result as `target: null` (§ "Fail-safe").
 - Print each entry in `warnings` once, as a single line. Do not repeat a warning that already
   printed earlier in the run.
 - Record `target`, `reason`, and `warnings` in the spawn record, beside the model. The Step 10
@@ -156,6 +168,9 @@ Per target, after `--exclude-executor` matches are removed:
 
 Routing never stops a run.
 
+- Router failure: on a non-zero exit, empty stdout, or a non-JSON line, print its stderr once
+  and treat the result as `target: null`, resolving from the shipped defaults. This covers
+  usage errors, a missing `jq` (exit 2), and mid-script crashes.
 - quota-axi missing, non-zero exit, timeout, or unparseable output: `quota` is
   `unavailable`, the first target in the list is chosen, and the warning is
   `quota-axi unavailable: <short cause>; using first target`.

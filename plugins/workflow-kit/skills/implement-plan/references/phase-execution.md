@@ -43,8 +43,10 @@ For each phase (sequential or parallel), build its handoff:
 **1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
 the phase's tasks as light, standard, or deep. If no explicit pin applies for that tier
 (`PHASE_MODEL_<TIER>` for the tier, or `PHASE_EXECUTOR`), call the router with
-`--role phase --tier <tier>` per `references/routing.md` § "Calling the router" and use its
-non-null `target`. When a pin applies, or the router returns `target: null` (always the case
+`--role phase --tier <tier> --project-dir <run-root>` (the repo root the run started from)
+per `references/routing.md` § "Calling the router", adding `--exclude-executor codex` when
+the resolved reviewer is pinned to codex, and use its non-null `target`. Treat a non-zero
+exit, empty stdout, or non-JSON output as `target: null` (§ "Fail-safe"). When a pin applies, or the router returns `target: null` (always the case
 with no config file), read `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, or
 `PHASE_MODEL_DEEP` as before. Either way the result is an `executor:model` address;
 split only on the first colon and use the matching registry entry. An unprefixed model id

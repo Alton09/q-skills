@@ -41,8 +41,14 @@ batches of that size.
 For each phase (sequential or parallel), build its handoff:
 
 **1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
-the phase's tasks as light, standard, or deep, then read `PHASE_MODEL_LIGHT`,
-`PHASE_MODEL_STANDARD`, or `PHASE_MODEL_DEEP`. Each value is an `executor:model` address;
+the phase's tasks as light, standard, or deep. If no explicit pin applies for that tier
+(`PHASE_MODEL_<TIER>` for the tier, or `PHASE_EXECUTOR`), call the router with
+`--role phase --tier <tier> --project-dir <run-root>` (the repo root the run started from)
+per `references/routing.md` § "Calling the router", adding `--exclude-executor codex` when
+the resolved reviewer is pinned to codex, and use its non-null `target`. Treat a non-zero
+exit, empty stdout, or non-JSON output as `target: null` (§ "Fail-safe"). When a pin applies, or the router returns `target: null` (always the case
+with no config file), read `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, or
+`PHASE_MODEL_DEEP` as before. Either way the result is an `executor:model` address;
 split only on the first colon and use the matching registry entry. An unprefixed model id
 always resolves to `claude:<id>` for backward compatibility. Reject an unknown executor or
 an invalid model id before spawning, with an error that names the resolved executor and id.
@@ -70,7 +76,9 @@ Codex model is GPT family. On a Plus plan a single large worker can take a doubl
 of the 5-hour window (one full-diff review on `gpt-6-astra` took 22 %), so `gpt-6-astra` is
 deliberately not a phase tier.
 
-Record the chosen model per phase for the final report.
+Record the chosen model per phase for the final report, with the router `reason` (or
+`pinned` when an explicit setting chose it) and any router warnings, per
+`references/routing.md` § "Report format".
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
 everything the phase needs:

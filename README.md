@@ -142,6 +142,38 @@ Pi's flat-rate accounting is retail-equivalent value, not metered cash; its prov
 five-hour cap is the binding limit. Codex reports tokens and plan-window share, not dollars;
 ChatGPT Plus has both five-hour and weekly windows.
 
+### Quota-aware routing
+
+Instead of picking targets by hand before each run, write an ordered fallback list per
+role once. Before every phase, fix, gate-verify, and review spawn, `implement-plan` reads
+local quota and uses the first target in the role's list that still has budget:
+
+```json
+{
+  "version": 1,
+  "minBudgetPercent": 15,
+  "minBudgetPercentByRole": { "review": 25 },
+  "routing": {
+    "phase": {
+      "light":    ["codex:gpt-5.6-luna",  "claude:haiku"],
+      "standard": ["codex:gpt-5.6-terra", "claude:sonnet"],
+      "deep":     ["codex:gpt-5.6-sol",   "claude:opus"]
+    },
+    "gateVerify": ["codex:gpt-5.6-luna", "claude:sonnet"],
+    "review":     ["pi:opencode-go/grok-4.6", "claude:opus"]
+  }
+}
+```
+
+Put it at `~/.claude/workflow-kit.json` (your default) or `<repo>/.claude/workflow-kit.json`
+(per project, replacing whole lists). Precedence, highest first: explicit `PHASE_MODEL_*`,
+`PHASE_EXECUTOR`, `VERIFY_AGENT_MODEL`, `REVIEW_MODEL`, or `REVIEW_EXECUTOR` settings pin a
+role with no quota check, then the project file, then the user file, then the shipped
+defaults; with no file, nothing changes. Routing needs `quota-axi` and `jq` on `PATH`; without
+`quota-axi` it falls back safely to the first target in each list. Escalation stays on
+`claude:opus`. The run report shows why each target was chosen. Full rules:
+`plugins/workflow-kit/skills/implement-plan/references/routing.md`.
+
 ## Updating
 
 ```bash

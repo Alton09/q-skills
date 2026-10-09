@@ -53,8 +53,15 @@ was supplied, refuse with a message naming `--worktree`.
 With `--worktree <path>`, check that the path is a worktree whose branch is
 `<headRefName>`; refuse a mismatch. Without it, find a worktree whose branch is
 `refs/heads/<headRefName>` with `git worktree list --porcelain`. If none exists, run
-`git fetch origin <headRefName>`, then add `../<repo>-pr-<number>` as a sibling of the repo
-root with `git worktree add ../<repo>-pr-<number> <headRefName>`. Do not use
+`git fetch origin <headRefName>`. Resolve `<repo-root>` with `git rev-parse --show-toplevel`
+and make `<abs-sibling>` the absolute path `dirname(<repo-root>)/<repo>-pr-<number>`. From
+`<repo-root>`, if `refs/heads/<headRefName>` is missing, run:
+
+```bash
+git worktree add -b <headRefName> <abs-sibling> origin/<headRefName>
+```
+
+Otherwise, add `<abs-sibling>` with the existing local `<headRefName>` branch. Do not use
 `/create-worktree`, which creates new branches in consumer projects.
 
 If the worktree is dirty, stop and ask. Then run `git pull --ff-only`. If the branch has
@@ -87,9 +94,8 @@ Follow exactly one mode reference. Each mode produces zero or more fix jobs with
 
 ### Step 5: Fix workers
 
-Batch fix jobs so no two jobs in a parallel group share a file. Run at most
-`MAX_PARALLEL_AGENTS` (default `3`) at once in the PR worktree. Jobs sharing a file run
-one after another.
+Run fix jobs one at a time in the PR worktree. Each worker may stage and commit its assigned
+changes, so serial execution prevents concurrent `git add` and `git commit` mutations.
 
 Before each spawn, unless `PR_FIX_MODEL` pins the role, call:
 
@@ -101,7 +107,7 @@ Do not pass `--tier`: `prFix` has no tier. A `null` target resolves to `claude:s
 `PR_FIX_MODEL` is an `executor:model` value that pins the fix-worker role and skips routing.
 Spawn through `../implement-plan/references/executors.md § "Executor entries"`, including
 the codex `.agents` setup. Apply `../implement-plan/references/runaway-guard.md` with
-`PR_FIX_TIME_BUDGET` (default `30 min`) and the standard-tier token ceiling.
+`PR_FIX_TIME_BUDGET` (default `30m` for `timeout(1)`) and the standard-tier token ceiling.
 
 The handoff tells every worker to apply only its listed fixes, run `VERIFY_SKILL` and iterate
 up to `SELF_VERIFY_LIMIT` times, commit with the project's commit convention, and end with:
@@ -172,15 +178,14 @@ Set these through the environment or project `CLAUDE.md`:
 
 - `VERIFY_SKILL` — default `/verify`.
 - `SELF_VERIFY_LIMIT` — default `2`.
-- `MAX_PARALLEL_AGENTS` — default `3`.
 - `PR_FIX_MODEL` — `executor:model` pin for fix workers; skips routing. The default is
   `claude:sonnet` when routing returns `null`.
 - `VERIFY_AGENT_MODEL` — pins gate verify.
-- `PR_FIX_TIME_BUDGET` — default `30 min`.
+- `PR_FIX_TIME_BUDGET` — default 30 min (`30m` in `timeout(1)` syntax).
 - `PR_BOT_ALLOWLIST` — default
-  `copilot-pull-request-reviewer[bot],coderabbitai[bot]`.
+  `copilot-pull-request-reviewer,copilot-pull-request-reviewer[bot],coderabbitai,coderabbitai[bot]`.
 - `CI_FIX_MAX_ROUNDS` — default `2`.
-- `CI_WAIT_TIMEOUT` — default `30 min`.
+- `CI_WAIT_TIMEOUT` — default 30 min (`30m` in `timeout(1)` syntax).
 - `CI_REPRO_COMMAND` — optional local command mirroring CI for `--ci` checks whose logs gh
   cannot fetch.
 

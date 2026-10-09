@@ -65,9 +65,9 @@ of the following are true:
 
 - It is unresolved.
 - Its last comment does not contain the marker.
-- The actionable comment's author is a human, or is listed in
-  `PR_BOT_ALLOWLIST`. The default allowlist is
-  `copilot-pull-request-reviewer[bot],coderabbitai[bot]`.
+- The actionable comment's author is a human, or its GraphQL `author.login` is listed in
+  `PR_BOT_ALLOWLIST`. The default allowlist recognizes both login forms:
+  `copilot-pull-request-reviewer,copilot-pull-request-reviewer[bot],coderabbitai,coderabbitai[bot]`.
 
 Skip comments from bots not in that allowlist. A marked reply is the reliable
 record that this skill already handled the thread, even when the user's `gh`
@@ -77,6 +77,9 @@ Treat each non-empty review summary `body` from `reviews(last:50)` as needing
 action when `submittedAt` is after the newest marked round-summary comment's
 `createdAt`. On a first run, every such review body needs action. Apply the same
 human-or-allowlisted-bot author rule to review summaries.
+
+If no thread or review summary needs action, report that there is nothing to address and
+exit the mode. Do not start workers, push, reply to threads, or post a round-summary comment.
 
 Classify every actionable thread or review body as exactly one of:
 
@@ -105,7 +108,7 @@ thread, the thread `path`, `line`, `diffHunk`, full comment text, and thread
 `id`. Give the job a stable `id`. Do not create a fix job for `answer`,
 `pushback`, or `ask-user` items that resolve as replies.
 
-Send these jobs through the normal fix-worker flow in `SKILL.md` Steps 5--7.
+Send these jobs through the serial fix-worker flow in `SKILL.md` Steps 5--7.
 Respect its router decisions and report each router `warnings` entry once in the
 terminal report; comment mode does not alter the Ask tier or GitHub push rules.
 

@@ -44,10 +44,10 @@ If one or more checks are pending, wait rather than guessing their result. Start
 background Bash command, not a foreground wait:
 
 ```bash
-timeout <CI_WAIT_TIMEOUT> gh pr checks <number> --watch --interval 30
+timeout "${CI_WAIT_TIMEOUT:-30m}" gh pr checks <number> --watch --interval 30
 ```
 
-`CI_WAIT_TIMEOUT` defaults to `30 min`. When the background command exits, read
+`CI_WAIT_TIMEOUT` defaults to `30m` for `timeout(1)` (30 min). When the background command exits, read
 `statusCheckRollup` again and continue with the new normalized result. If it times out,
 report the pending checks and ask. If no checks have failed after pending checks settle,
 report that CI is green and exit without creating jobs or writing a CI round comment.
@@ -103,7 +103,8 @@ Classify failure evidence as exactly one of the following:
 
 ## Rounds and Step 8: GitHub write-back
 
-Treat the initial fix attempt as round 1. Send its `real` jobs through Steps 5 and 6. If
+Treat the initial fix attempt as round 1. Send its `real` jobs one at a time through the
+serial fix-worker flow in Steps 5 and 6. If
 the gate passes, Step 7 pushes the branch. After each push, wait for and re-read CI, then
 repeat the evidence collection and triage for another round as needed. Run at most
 `CI_FIX_MAX_ROUNDS` rounds (default `2`). If checks remain red after that limit, stop and

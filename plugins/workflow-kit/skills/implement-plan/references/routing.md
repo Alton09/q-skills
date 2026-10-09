@@ -25,7 +25,8 @@ Version 1 schema, with the shipped model ids:
       "deep":     ["codex:gpt-5.6-sol",   "claude:opus"]
     },
     "gateVerify": ["codex:gpt-5.6-luna", "claude:sonnet"],
-    "review":     ["pi:opencode-go/grok-4.6", "claude:opus"]
+    "review":     ["pi:opencode-go/grok-4.6", "claude:opus"],
+    "prFix":      ["codex:gpt-5.6-terra", "claude:sonnet"]
   }
 }
 ```
@@ -33,17 +34,24 @@ Version 1 schema, with the shipped model ids:
 - Locations: user file `~/.claude/workflow-kit.json`; project file
   `<repo>/.claude/workflow-kit.json`. The project file overrides the user file.
 - Override is at list level, never inside a list. Each of `routing.phase.light`,
-  `routing.phase.standard`, `routing.phase.deep`, `routing.gateVerify`, and `routing.review`
+  `routing.phase.standard`, `routing.phase.deep`, `routing.gateVerify`, `routing.review`, and `routing.prFix`
   that the project file defines replaces the user value; lists it omits still come from the
   user file. `minBudgetPercent` and each `minBudgetPercentByRole.<role>` key replace the same
   way.
 - Targets use the `executor:model` syntax from `references/executors.md`; the executor is
   `claude`, `pi`, or `codex`. An unprefixed target means `claude:<id>`.
-- Valid role keys for `minBudgetPercentByRole` are `phase`, `gateVerify`, and `review`.
+- Valid role keys for `minBudgetPercentByRole` are `phase`, `gateVerify`, `review`, and `prFix`.
 - Threshold for a role: `minBudgetPercentByRole[role]`, else `minBudgetPercent`, else the
   shipped defaults: 15 for every role, 25 for `review`. Review needs the headroom: one
   full-diff Codex review took 22% of a Plus 5-hour window (measured 2026-09-18).
 - Fix workers use the list of the phase tier they fix. Escalation is not in the file.
+- `prFix` is the role for the `address-pr` skill's fix workers (it calls the router with
+  `--role prFix`). It has no tier. Resolution order: project `routing.prFix`, user
+  `routing.prFix`, project `routing.phase.standard`, user `routing.phase.standard`. A dedicated
+  `prFix` list in either file beats a `phase.standard` list in either file. On fallback to
+  `phase.standard` the router adds the warning `no routing.prFix list; using
+  routing.phase.standard`. Its threshold key is `minBudgetPercentByRole.prFix`, else
+  `minBudgetPercent`, else 15.
 
 ## Precedence
 
@@ -67,16 +75,16 @@ each; they may see the same snapshot and all pick the same target.
 **How.** One call per spawn:
 
 ```bash
-<skill-dir>/scripts/route-target.sh --role phase|gateVerify|review [--tier light|standard|deep] \
+<skill-dir>/scripts/route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep] \
   [--exclude-executor <claude|pi|codex>]... \
   --project-dir <run-root> [--user-config <file>] [--quota-json <file>]
 ```
 
 `<run-root>` is the repo root the run started from, resolved once at startup. Always pass it.
 
-- `--role` is `phase`, `gateVerify`, or `review`. Fix workers use `--role phase` with the
+- `--role` is `phase`, `gateVerify`, `review`, or `prFix`. Fix workers use `--role phase` with the
   tier of the work they fix.
-- `--tier` is required with `--role phase` and rejected for the other roles.
+- `--tier` is required with `--role phase` and rejected for the other roles, `prFix` included.
 - `--exclude-executor` removes every target of that executor before evaluation; repeat the
   flag for more than one. On the `review` call, pass `--exclude-executor codex` whenever any
   phase or fix spawn record in this run used a `codex:*` target, so routing cannot produce a

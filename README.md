@@ -14,6 +14,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 |-------|---------|-------------|
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
 | implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix, then a draft PR opened via the project's `/create-pr` |
+| address-pr | `/workflow-kit:address-pr` | Address PR comments, fix CI, update a PR with main, or resolve conflicts on an open pull request |
 
 #### Composable Skills
 
@@ -160,7 +161,8 @@ local quota and uses the first target in the role's list that still has budget:
       "deep":     ["codex:gpt-5.6-sol",   "claude:opus"]
     },
     "gateVerify": ["codex:gpt-5.6-luna", "claude:sonnet"],
-    "review":     ["pi:opencode-go/grok-4.6", "claude:opus"]
+    "review":     ["pi:opencode-go/grok-4.6", "claude:opus"],
+    "prFix":     ["codex:gpt-5.6-terra", "claude:sonnet"]
   }
 }
 ```
@@ -173,6 +175,9 @@ defaults; with no file, nothing changes. Routing needs `quota-axi` and `jq` on `
 `quota-axi` it falls back safely to the first target in each list. Escalation stays on
 `claude:opus`. The run report shows why each target was chosen. Full rules:
 `plugins/workflow-kit/skills/implement-plan/references/routing.md`.
+
+Fix workers use `routing.prFix`, falling back to `routing.phase.standard` when no
+`prFix` list is configured.
 
 ## Updating
 
@@ -194,10 +199,15 @@ After installation, skills are available as slash commands:
 ```
 /workflow-kit:feature-plan      # Plan a feature
 /workflow-kit:implement-plan    # Execute a plan
+/workflow-kit:address-pr 123    # Address PR comments (comment mode)
+/workflow-kit:address-pr 123 --ci # Fix actionable CI failures (CI mode)
+/workflow-kit:address-pr 123 --sync # Update the PR with its base branch (sync mode)
 /dev-toolkit:pr-review          # Review a GitHub PR
 /dev-toolkit:pr-retro           # Post-merge retrospective on PR comments, CI, and linked sessions
 /dev-toolkit:notify-me          # Send macOS notification
 ```
+
+Use `--worker` when launched by a tech lead, and `--worktree <path>` to select the PR worktree explicitly.
 
 ## Project Structure
 
@@ -212,6 +222,7 @@ q-skills/
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
+        address-pr/           # PR comment, CI, and branch sync skill
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)

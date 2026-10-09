@@ -81,9 +81,9 @@ Follow exactly one mode reference. Each mode produces zero or more fix jobs with
 {id, kind: comments|ci|conflict|verify, files, payload}
 ```
 
-- Default comment mode: [references/comment-mode.md](references/comment-mode.md).
-- `--ci` mode: [references/ci-mode.md](references/ci-mode.md).
-- `--sync` mode: [references/sync-mode.md](references/sync-mode.md).
+- Default comment mode: `references/comment-mode.md`.
+- `--ci` mode: `references/ci-mode.md`.
+- `--sync` mode: `references/sync-mode.md`.
 
 ### Step 5: Fix workers
 

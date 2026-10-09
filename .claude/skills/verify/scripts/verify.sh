@@ -87,7 +87,8 @@ def skill_dir(path):
 
 # Citations are usually backticked: `references/x.md` § "Heading". Allow the
 # closing backtick so the section part is still captured and checked.
-pattern = re.compile(r"(references/[^\s`*)]+\.md)`?(?:\s+§\s*(?:\"([^\"]+)\"|`([^`]+)`))?")
+# An optional `../<skill-name>/` prefix cites a sibling skill's references.
+pattern = re.compile(r"(?:\.\./([a-z0-9-]+)/)?(references/[^\s`*)]+\.md)`?(?:\s+§\s*(?:\"([^\"]+)\"|`([^`]+)`))?")
 heading = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 errors = []
 for raw in dict.fromkeys(changed):
@@ -98,11 +99,12 @@ for raw in dict.fromkeys(changed):
     for lineno, line in enumerate(path.read_text().splitlines(), 1):
         for match in pattern.finditer(line):
             citation = match.group(0)
-            target = root / match.group(1)
+            base = root.parent / match.group(1) if match.group(1) else root
+            target = base / match.group(2)
             if not target.is_file():
                 errors.append(f"{path}:{lineno}: {citation}")
                 continue
-            requested = match.group(2) or match.group(3)
+            requested = match.group(3) or match.group(4)
             if requested:
                 headings = [m.group(1) for m in map(heading.match, target.read_text().splitlines()) if m]
                 if requested not in headings:

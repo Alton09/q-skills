@@ -79,7 +79,9 @@ action when `submittedAt` is after the newest marked round-summary comment's
 human-or-allowlisted-bot author rule to review summaries.
 
 If no thread or review summary needs action, report that there is nothing to address and
-exit the mode. Do not start workers, push, reply to threads, or post a round-summary comment.
+follow `SKILL.md` § "Early exits": skip Steps 5–8, release the lock, and run Step 9's
+report, including `address-pr: done #<number> no-push` under `--worker`. Do not start
+workers, push, reply to threads, or post a round-summary comment.
 
 Classify every actionable thread or review body as exactly one of:
 

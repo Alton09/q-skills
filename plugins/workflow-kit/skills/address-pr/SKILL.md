@@ -92,6 +92,12 @@ Follow exactly one mode reference. Each mode produces zero or more fix jobs with
 - `--ci` mode: `references/ci-mode.md`.
 - `--sync` mode: `references/sync-mode.md`.
 
+### Early exits
+
+If a mode reports that there is nothing to do, CI is already green, or the branch is
+already up to date, skip Steps 5–8. Release the lock, then run Step 9's report. In a
+`--worker` run, the report must still end with `address-pr: done #<number> no-push`.
+
 ### Step 5: Fix workers
 
 Run fix jobs one at a time in the PR worktree. Each worker may stage and commit its assigned

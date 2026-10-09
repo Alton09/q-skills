@@ -16,8 +16,9 @@ git fetch origin <baseRefName>
 git merge-base --is-ancestor origin/<baseRefName> HEAD
 ```
 
-If the ancestor check succeeds, report `already up to date` and exit the sync
-mode. Otherwise, run:
+If the ancestor check succeeds, report `already up to date` and follow `SKILL.md` §
+"Early exits": skip Steps 5–8, release the lock, and run Step 9's report, including
+`address-pr: done #<number> no-push` under `--worker`. Otherwise, run:
 
 ```bash
 git merge --no-edit origin/<baseRefName>

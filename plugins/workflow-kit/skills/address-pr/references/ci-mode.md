@@ -50,7 +50,9 @@ timeout "${CI_WAIT_TIMEOUT:-30m}" gh pr checks <number> --watch --interval 30
 `CI_WAIT_TIMEOUT` defaults to `30m` for `timeout(1)` (30 min). When the background command exits, read
 `statusCheckRollup` again and continue with the new normalized result. If it times out,
 report the pending checks and ask. If no checks have failed after pending checks settle,
-report that CI is green and exit without creating jobs or writing a CI round comment.
+report that CI is green and follow `SKILL.md` § "Early exits": skip Steps 5–8, release
+the lock, and run Step 9's report, including `address-pr: done #<number> no-push` under
+`--worker`. Do not create jobs or write a CI round comment.
 
 ## Step 4: Collect evidence and triage failures
 

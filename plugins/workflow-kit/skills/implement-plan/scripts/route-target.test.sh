@@ -318,3 +318,83 @@ printf '#!/usr/bin/env bash\necho "error: unsupported provider: foo"\n' >"$stub_
 out=$(PATH="$stub_dir:$PATH" "$script" --role phase --tier standard --user-config "$tmp/user.json" --project-dir "$tmp/empty")
 expect .quota '"unavailable"'
 pass
+
+# --- prFix role ---------------------------------------------------------------------------
+cat >"$tmp/user-prfix.json" <<'JSON'
+{"version": 1, "routing": {"prFix": ["codex:gpt-5.6-terra", "claude:sonnet"], "phase": {"standard": ["claude:haiku"]}}}
+JSON
+
+# 18. User prFix list picks its first usable target.
+n=18
+out=$("$script" --role prFix --user-config "$tmp/user-prfix.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"codex:gpt-5.6-terra"'
+expect .source '"user"'
+expect .warnings '[]'
+pass
+
+# 19. No prFix anywhere -> phase.standard fallback with the warning.
+n=19
+run --role prFix --quota-json "$tmp/quota.json"
+expect .target '"codex:gpt-5.6-terra"'
+expect .source '"user"'
+expect .warnings '["no routing.prFix list; using routing.phase.standard"]'
+pass
+
+# 20. Project prFix overrides user prFix.
+n=20
+cat >"$tmp/proj/.claude/workflow-kit.json" <<'JSON'
+{"version": 1, "routing": {"prFix": ["claude:opus"]}}
+JSON
+out=$("$script" --role prFix --user-config "$tmp/user-prfix.json" --project-dir "$tmp/proj" --quota-json "$tmp/quota.json")
+expect .target '"claude:opus"'
+expect .source '"project"'
+pass
+
+# 21. User prFix beats project phase.standard.
+n=21
+cat >"$tmp/proj/.claude/workflow-kit.json" <<'JSON'
+{"version": 1, "routing": {"phase": {"standard": ["claude:opus"]}}}
+JSON
+out=$("$script" --role prFix --user-config "$tmp/user-prfix.json" --project-dir "$tmp/proj" --quota-json "$tmp/quota.json")
+expect .target '"codex:gpt-5.6-terra"'
+expect .source '"user"'
+expect .warnings '[]'
+pass
+
+# 22. --role prFix --tier standard -> exit 2.
+n=22
+"$script" --role prFix --tier standard --user-config "$tmp/user-prfix.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json" >"$tmp/o22" 2>"$tmp/e22"
+verify_rc=$?
+[ "$verify_rc" -eq 2 ] || fail "exit $verify_rc, expected 2"
+[ ! -s "$tmp/o22" ] || fail "stdout should be empty on a usage error"
+[ -s "$tmp/e22" ] || fail "expected a message on stderr"
+pass
+
+# 23. routing.prFix set to a string -> source invalid.
+n=23
+printf '{"version": 1, "routing": {"prFix": "claude:sonnet"}}' >"$tmp/bad-prfix.json"
+out=$("$script" --role prFix --user-config "$tmp/bad-prfix.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .source '"invalid"'
+expect .target null
+expect_true '.warnings[0] | contains("routing.prFix is not an array of strings")'
+pass
+
+# 24. minBudgetPercentByRole.prFix is applied: codex at 20% skipped with threshold 30.
+n=24
+quota_variant codex20b codex 20
+cat >"$tmp/prfix-thr.json" <<'JSON'
+{"version": 1, "minBudgetPercentByRole": {"prFix": 30}, "routing": {"prFix": ["codex:gpt-5.6-terra", "claude:sonnet"]}}
+JSON
+out=$("$script" --role prFix --user-config "$tmp/prfix-thr.json" --project-dir "$tmp/empty" --quota-json "$tmp/codex20b.json")
+expect .target '"claude:sonnet"'
+expect .skipped '[{"target":"codex:gpt-5.6-terra","why":"codex 20% < 30%"}]'
+pass
+
+# 25. No config at all -> prFix gives target null, source none, exit 0.
+n=25
+out=$("$script" --role prFix --user-config "$tmp/missing.json" --project-dir "$tmp/empty")
+verify_rc=$?
+[ "$verify_rc" -eq 0 ] || fail "exit $verify_rc"
+expect .target null
+expect .source '"none"'
+pass

@@ -1,11 +1,10 @@
 # Comment Mode
 
-Use this reference for the default mode in `SKILL.md` Step 4. This mode produces
-zero or more `fix job` values with the shape
-`{id, kind: comments|ci|conflict|verify, files, payload}` and does its GitHub
-write-back in Step 8.
+Use this reference for the default mode in `SKILL.md` Step 4. It produces `kind: comments`
+fix jobs (`SKILL.md` § "Fix jobs") and does its GitHub write-back in Step 8. Markers are
+defined in `SKILL.md` § "Markers".
 
-## Step 4: Fetch
+## Step 4a: Fetch
 
 Fetch the PR data with `gh api graphql`. Use one query, initially with
 `$threadCursor: null`, and request these exact fields:
@@ -23,11 +22,11 @@ query CommentMode($owner: String!, $repo: String!, $number: Int!, $threadCursor:
           path
           line
           diffSide
-          comments(first: 50) {
+          comments(last: 100) {
             nodes {
               id
               databaseId
-              author { login }
+              author { login __typename }
               body
               createdAt
               url
@@ -37,7 +36,7 @@ query CommentMode($owner: String!, $repo: String!, $number: Int!, $threadCursor:
         }
       }
       reviews(last: 50) {
-        nodes { id author { login } state body submittedAt }
+        nodes { id url author { login __typename } state body submittedAt }
       }
       comments(last: 100) {
         nodes { body createdAt }
@@ -47,43 +46,38 @@ query CommentMode($owner: String!, $repo: String!, $number: Int!, $threadCursor:
 }
 ```
 
-If `reviewThreads.pageInfo.hasNextPage` is true, repeat the query with
-`$threadCursor` set to `endCursor` and continue until it is false. Retain the
-reviews and PR comments from the first response; append every page of thread
-nodes. Write the raw GraphQL result(s) to the session scratchpad, not to the
+`comments(last: 100)` on a thread returns the newest comments, so the last node is the
+thread's last comment even on a long thread. If `reviewThreads.pageInfo.hasNextPage` is
+true, repeat the query with `$threadCursor` set to `endCursor` and continue until it is
+false. Retain the reviews and PR comments from the first response; append every page of
+thread nodes. Write the raw GraphQL result(s) to the session scratchpad, not to the
 transcript. Use the scratchpad data for every later decision in this mode.
 
-The PR `comments` field finds the newest previous round-summary comment whose
-body contains `<!-- address-pr -->`. Its `createdAt` is the review-body cutoff.
-If no marked round-summary comment exists, this is the first run and there is no
-cutoff.
+The **review-summary cutoff** is the `createdAt` of the newest PR comment whose body
+contains `<!-- address-pr:comments -->`. Only comment-mode round summaries carry that
+marker, so CI and sync comments never move the cutoff. If no such comment exists, this is
+the first run and there is no cutoff.
 
-## Step 4: Needs action and triage
+## Step 4b: Needs action and triage
 
-The marker is `<!-- address-pr -->`. A review thread needs action only when all
-of the following are true:
+An author is a **bot** when GraphQL `author.__typename` is `Bot`. GraphQL returns a bot's
+login without the `[bot]` suffix, so the login alone cannot identify one. An author is
+**eligible** when it is not a bot, or when its `author.login` is in `PR_BOT_ALLOWLIST`.
+
+A review thread needs action only when all of the following are true:
 
 - It is unresolved.
-- Its last comment does not contain the marker.
-- The actionable comment's author is a human, or its GraphQL `author.login` is listed in
-  `PR_BOT_ALLOWLIST`. The default allowlist recognizes both login forms:
-  `copilot-pull-request-reviewer,copilot-pull-request-reviewer[bot],coderabbitai,coderabbitai[bot]`.
+- Its last comment does not contain `<!-- address-pr:` (this skill has not replied last).
+- Its last comment's author is eligible.
 
-Skip comments from bots not in that allowlist. A marked reply is the reliable
-record that this skill already handled the thread, even when the user's `gh`
-account is also the reviewer's account.
+A non-empty review summary `body` from `reviews(last: 50)` needs action when its author is
+eligible and its `submittedAt` is after the review-summary cutoff. On a first run, every
+eligible non-empty review summary needs action.
 
-Treat each non-empty review summary `body` from `reviews(last:50)` as needing
-action when `submittedAt` is after the newest marked round-summary comment's
-`createdAt`. On a first run, every such review body needs action. Apply the same
-human-or-allowlisted-bot author rule to review summaries.
+If nothing needs action, report that there is nothing to address and follow `SKILL.md`
+§ "Early exits".
 
-If no thread or review summary needs action, report that there is nothing to address and
-follow `SKILL.md` § "Early exits": skip Steps 5–8, release the lock, and run Step 9's
-report, including `address-pr: done #<number> no-push` under `--worker`. Do not start
-workers, push, reply to threads, or post a round-summary comment.
-
-Classify every actionable thread or review body as exactly one of:
+Classify every actionable thread or review summary as exactly one of:
 
 - `fix`: code must change.
 - `answer`: it is a question or is already addressed; reply only and make no
@@ -94,30 +88,31 @@ Classify every actionable thread or review body as exactly one of:
   out-of-scope request.
 - `ask-user`: the skill cannot settle the item.
 
-If this skill has already pushed back once on a thread and the reviewer comments
-again, classify it as `ask-user`. Never push back twice on one thread.
+If a thread already has a comment containing `<!-- address-pr:pushback -->` and the reviewer
+has commented after it, classify the thread as `ask-user`. Never push back twice on one
+thread: a second pushback is an argument the user must settle.
 
-Before any push, collect every `ask-user` item into one Ask tier question round,
-following `SKILL.md` § "Asking the user". Convert the answers into fixes or
-replies in this same round. In a `--worker` invocation, preserve the lock while
-waiting as that section requires.
+A review summary has no file path to group by and no thread to reply to. Classify it as
+`fix` only when its text names the files to change; otherwise a summary that asks for a
+change is `ask-user`.
 
-## Step 4: Fix jobs
+Before any push, collect every `ask-user` item into one question round, following
+`SKILL.md` § "Asking the user". Convert each answer into a `fix`, `answer`, or `pushback`
+item in this same round.
 
-Group `fix` items by file path and create one `kind: comments` fix job per
-group. Its `files` value contains that file, and its `payload` carries, for each
-thread, the thread `path`, `line`, `diffHunk`, full comment text, and thread
-`id`. Give the job a stable `id`. Do not create a fix job for `answer`,
-`pushback`, or `ask-user` items that resolve as replies.
+## Step 4c: Fix jobs
 
-Send these jobs through the serial fix-worker flow in `SKILL.md` Steps 5--7.
-Respect its router decisions and report each router `warnings` entry once in the
-terminal report; comment mode does not alter the Ask tier or GitHub push rules.
+Group `fix` items by file path and create one `kind: comments` fix job per group. Its
+`files` value contains that file, and its `payload` carries, for each thread, the thread
+`path`, `line`, `diffHunk`, full comment text, and thread `id`. A `fix` review summary joins
+the group of each file it names, with its body and review `url` in the payload. Do not
+create a fix job for `answer` or `pushback` items.
+
+Send these jobs through the serial fix-worker flow in `SKILL.md` Steps 5–7.
 
 ## Step 8: GitHub write-back
 
-Only after the successful push, reply to every handled thread using
-`addPullRequestReviewThreadReply`:
+Reply to every handled thread using `addPullRequestReviewThreadReply`:
 
 ```graphql
 mutation ReplyToThread($threadId: ID!, $body: String!) {
@@ -129,15 +124,26 @@ mutation ReplyToThread($threadId: ID!, $body: String!) {
 }
 ```
 
-For a fix, the reply text is `Fixed in <short sha>: <one line>`. For an answer,
-use the answer; for a pushback, use the specific pushback reason. End every
-reply with the marker on its own line:
+| Outcome | Reply text | Marker |
+| --- | --- | --- |
+| fix job `fixed` | `Fixed in <short sha>: <one line>` | `<!-- address-pr:fix -->` |
+| `answer` | the answer | `<!-- address-pr:answer -->` |
+| `pushback` | the specific pushback reason | `<!-- address-pr:pushback -->` |
+| fix job `failed` | no reply | — |
 
-```html
-<!-- address-pr -->
-```
+A thread whose fix job failed gets no reply, so its last comment stays unmarked and the next
+run picks it up again. Never post `Fixed in` for a failed job. A failed review summary is
+not retried, because this round's summary moves the cutoff past it; list it in the Step 9
+report as needing the user.
 
-Do not resolve any review thread; the reviewer resolves it. Then post one
-round-summary PR comment with `gh pr comment`. Include the count for each
-triage class, every `ask-user` item and its answer, and the marker. This summary
-is the marked round-summary comment used as the next run's review-body cutoff.
+Do not resolve any review thread; the reviewer resolves it. Then post one round-summary PR
+comment with `gh pr comment`. Include:
+
+- the count for each triage class;
+- every failed fix, with the worker's `note`;
+- every `ask-user` item and its answer;
+- each handled review summary, linked by its `url`, with its outcome (the fix SHA, the
+  answer, or the pushback reason), because review summaries cannot take a thread reply.
+
+End it with `<!-- address-pr:comments -->`. This comment sets the next run's review-summary
+cutoff.

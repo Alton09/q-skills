@@ -1,18 +1,11 @@
 # CI Mode
 
-Use this reference for `--ci` in Step 4. CI mode reads the PR's checks, identifies
-actionable failures, creates `ci` fix jobs where appropriate, and returns to the normal
-Step 5 through Step 8 flow. A fix job has this shape:
+Use this reference for `--ci` in `SKILL.md` Step 4. CI mode reads the PR's checks,
+identifies actionable failures, creates `kind: ci` fix jobs (`SKILL.md` § "Fix jobs"), and
+returns to the normal Step 5 through Step 8 flow. Every user decision below follows
+`SKILL.md` § "Asking the user"; leave the worktree unchanged while waiting.
 
-```text
-{id, kind: comments|ci|conflict|verify, files, payload}
-```
-
-For this mode, set `kind` to `ci`. Treat every user decision below as the Ask tier: follow
-the skill's standalone versus `--worker` asking behavior, do not guess, and leave the
-worktree unchanged while waiting.
-
-## Step 4: Read and normalize checks
+## Step 4a: Read and normalize checks
 
 Read checks with:
 
@@ -47,14 +40,14 @@ background Bash command, not a foreground wait:
 timeout "${CI_WAIT_TIMEOUT:-30m}" gh pr checks <number> --watch --interval 30
 ```
 
-`CI_WAIT_TIMEOUT` defaults to `30m` for `timeout(1)` (30 min). When the background command exits, read
-`statusCheckRollup` again and continue with the new normalized result. If it times out,
-report the pending checks and ask. If no checks have failed after pending checks settle,
-report that CI is green and follow `SKILL.md` § "Early exits": skip Steps 5–8, release
-the lock, and run Step 9's report, including `address-pr: done #<number> no-push` under
-`--worker`. Do not create jobs or write a CI round comment.
+When the background command exits, read `statusCheckRollup` again and continue with the
+new normalized result. If it timed out, report the pending checks and ask.
 
-## Step 4: Collect evidence and triage failures
+**Green rule:** when no check is `failed` (on the first read, or after any wait), report
+that CI is green and follow `SKILL.md` § "Early exits". Do not create jobs or post a CI
+comment.
+
+## Step 4b: Collect evidence and triage failures
 
 For each failed `CheckRun` whose `detailsUrl` is a GitHub Actions run, extract the run ID
 from that URL. Fetch its failed log and save the complete result in this invocation's
@@ -79,8 +72,8 @@ Classify failure evidence as exactly one of the following:
 - `infra` applies only to GitHub Actions: a lost runner, network timeout, cancellation, or
   rate limit. Run `gh run rerun <run-id> --failed` at most once for each run ID during this
   invocation. Record the run ID so the same run cannot be rerun again. Then wait for and
-  re-read checks as above; do not turn a second infra failure for that run into another
-  rerun.
+  re-read checks as in Step 4a; do not turn a second infra failure for that run into
+  another rerun.
 - `base-red` means the same check also fails on the base branch head. For Actions, inspect
   the matching workflow with:
 
@@ -106,20 +99,13 @@ Classify failure evidence as exactly one of the following:
 ## Rounds and Step 8: GitHub write-back
 
 Treat the initial fix attempt as round 1. Send its `real` jobs one at a time through the
-serial fix-worker flow in Steps 5 and 6. If
-the gate passes, Step 7 pushes the branch. After each push, wait for and re-read CI, then
-repeat the evidence collection and triage for another round as needed. Run at most
-`CI_FIX_MAX_ROUNDS` rounds (default `2`). If checks remain red after that limit, stop and
-ask; do not make another fix job or push.
+serial fix-worker flow in Steps 5 and 6. If the gate passes, Step 7 pushes the branch.
+After each push, wait for and re-read CI (Step 4a), then repeat Step 4b for another round
+as needed. Run at most `CI_FIX_MAX_ROUNDS` rounds (default `2`). If checks remain red after
+that limit, stop and ask; do not make another fix job or push.
 
-After each pushed round, perform Step 8 GitHub write-back: post exactly one PR comment for
-that round listing every check fixed, rerun, or left red, with its link. End the comment
-with the required marker:
-
-```html
-<!-- address-pr -->
-```
-
-Include checks left red because they are base-red, green locally, still pending after the
-wait, or exhausted the round limit. Preserve the normal terminal report, including each
-router `warnings` entry once.
+After each round that pushed a commit or reran a run, post exactly one PR comment for that
+round listing every check
+fixed, rerun, or left red, with its link. Include checks left red because they are
+base-red, green locally, still pending after the wait, had a failed fix job, or exhausted
+the round limit. End the comment with `<!-- address-pr:ci -->`.

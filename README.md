@@ -162,7 +162,7 @@ local quota and uses the first target in the role's list that still has budget:
     },
     "gateVerify": ["codex:gpt-5.6-luna", "claude:sonnet"],
     "review":     ["pi:opencode-go/grok-4.6", "claude:opus"],
-    "prFix":     ["codex:gpt-5.6-terra", "claude:sonnet"]
+    "prFix":      ["codex:gpt-5.6-terra", "claude:sonnet"]
   }
 }
 ```
@@ -176,7 +176,7 @@ defaults; with no file, nothing changes. Routing needs `quota-axi` and `jq` on `
 `claude:opus`. The run report shows why each target was chosen. Full rules:
 `plugins/workflow-kit/skills/implement-plan/references/routing.md`.
 
-Fix workers use `routing.prFix`, falling back to `routing.phase.standard` when no
+The address-pr fix workers use `routing.prFix`, falling back to `routing.phase.standard` when no
 `prFix` list is configured.
 
 ## Updating
@@ -207,7 +207,7 @@ After installation, skills are available as slash commands:
 /dev-toolkit:notify-me          # Send macOS notification
 ```
 
-Use `--worker` when launched by a tech lead, and `--worktree <path>` to select the PR worktree explicitly.
+Use `--worker` when another agent session launches the run in the background and answers its questions, and `--worktree <path>` to select the PR worktree explicitly.
 
 ## Project Structure
 

@@ -3,7 +3,7 @@
 # a local quota-axi read. Deterministic, read-only: spawns nothing, writes no files.
 #
 # Usage:
-#   route-target.sh --role phase|gateVerify|review [--tier light|standard|deep]
+#   route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep]
 #                   [--exclude-executor <claude|pi|codex>]...
 #                   [--project-dir <dir>] [--user-config <file>] [--quota-json <file>]
 #
@@ -18,7 +18,7 @@ QUOTA_PROVIDERS="claude codex cursor copilot grok kimi zai agy alibaba opencode-
 
 usage_error() {
   printf 'route-target.sh: %s\n' "$1" >&2
-  printf 'usage: route-target.sh --role phase|gateVerify|review [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
+  printf 'usage: route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
   exit 2
 }
 
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$role" in
-  phase|gateVerify|review) ;;
+  phase|gateVerify|review|prFix) ;;
   "") usage_error "--role is required" ;;
   *) usage_error "invalid --role: $role" ;;
 esac
@@ -106,7 +106,7 @@ validate_config() {
       | ($r.phase // {}) as $p
       | ([["routing.phase.light", $p.light], ["routing.phase.standard", $p.standard],
           ["routing.phase.deep", $p.deep], ["routing.gateVerify", $r.gateVerify],
-          ["routing.review", $r.review]] | map(select(.[1] != null))) as $ls
+          ["routing.review", $r.review], ["routing.prFix", $r.prFix]] | map(select(.[1] != null))) as $ls
       | first(
           ($ls[] | select((.[1] | type) != "array" or (.[1] | any(.[]; type != "string")))
             | "\(.[0]) is not an array of strings"),
@@ -172,6 +172,21 @@ if [ "$project_list" != null ]; then
 elif [ "$user_list" != null ]; then
   source=user
   list=$user_list
+elif [ "$role" = prFix ]; then
+  # No dedicated prFix list anywhere: fall back to phase.standard (project, then user).
+  std_filter='(.routing // {}) | (.phase // {}).standard'
+  project_std=$(jq -c "$std_filter" <<<"$project_cfg")
+  user_std=$(jq -c "$std_filter" <<<"$user_cfg")
+  if [ "$project_std" != null ]; then
+    source=project
+    list=$project_std
+  elif [ "$user_std" != null ]; then
+    source=user
+    list=$user_std
+  else
+    emit_null none "no routing list for $role"
+  fi
+  warn "no routing.prFix list; using routing.phase.standard"
 else
   emit_null none "no routing list for $role"
 fi

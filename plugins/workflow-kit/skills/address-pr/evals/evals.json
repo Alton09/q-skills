@@ -1,0 +1,23 @@
+{
+  "skill_name": "address-pr",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Address the review comments on PR 12. Fixture: two unresolved threads (one asks to rename a variable in src/app.py, one asks 'why not use a set here?'), one unresolved thread whose last comment ends with <!-- address-pr:answer -->, one thread from a non-allowlisted bot (author.__typename Bot), and a CI round comment ending with <!-- address-pr:ci -->.",
+      "expected_output": "Triage: the rename thread is fix, the set question is answer; the marked thread and the bot thread are skipped; the CI comment does not set a review-summary cutoff. One kind: comments fix job for src/app.py. After the push, the fix reply starts 'Fixed in <sha>' and ends with <!-- address-pr:fix -->, the answer reply ends with <!-- address-pr:answer -->, and one round summary ends with <!-- address-pr:comments -->.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "/workflow-kit:address-pr 12 --ci --worker. Fixture: statusCheckRollup has only CheckRun nodes, all COMPLETED with conclusion SUCCESS.",
+      "expected_output": "Green rule early exit: no fix jobs, no push, no PR comment, lock released, and the final reply ends with exactly 'address-pr: done #12 no-push'.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Update PR 12 with main. Fixture: origin/main is already an ancestor of the PR head.",
+      "expected_output": "Reports 'already up to date' and takes the early exit: no merge, no gate, no push, no PR comment, lock released.",
+      "files": []
+    }
+  ]
+}

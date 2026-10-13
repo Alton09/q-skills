@@ -40,6 +40,8 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
+With `--rules` only, record that phase worktree's HEAD as `<phase-start>` before spawning.
+
 **1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
 the phase's tasks as light, standard, or deep. If no explicit pin applies for that tier
 (`PHASE_MODEL_<TIER>` for the tier, or `PHASE_EXECUTOR`), call the router with
@@ -189,7 +191,8 @@ The worktree-ownership rule and the destructive-git prohibition in the handoff (
 identically to every executor — they are properties of the handoff, not the harness.
 
 **Single-phase layer (the common case — unchanged from sequential):**
-1. Spawn the phase agent in the integration worktree (background; 5b guard applies).
+1. With `--rules`, record the integration worktree HEAD as `<phase-start>` before spawning.
+   Spawn the phase agent in the integration worktree (background; 5b guard applies).
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
@@ -204,7 +207,8 @@ identically to every executor — they are properties of the handoff, not the ha
    ```
    git -C <integration> worktree add <integration>/../.wt/<phase-slug> -b <phase-branch>
    ```
-2. Spawn all phase agents concurrently (background), each pointed at its own child
+2. With `--rules`, record each child worktree HEAD as that phase's `<phase-start>` before
+   spawning. Spawn all phase agents concurrently (background), each pointed at its own child
    worktree, capped at `MAX_PARALLEL_AGENTS`. The 5b runaway guard applies per agent.
 3. When ALL agents in the group have returned, merge each child branch into integration
    in turn (each agent committed its work per 5a.2, so there is something to merge):

@@ -14,8 +14,8 @@ def error(message):
     raise SystemExit(2)
 
 
-def section(text, wanted):
-    """Return a level-two section, ignoring headings inside fenced code blocks."""
+def blank_fences(text):
+    """Blank fenced-code lines so examples cannot become rules."""
     lines, kept, fenced = text.splitlines(), [], False
     for line in lines:
         if re.match(r"^\s*(```|~~~)", line):
@@ -24,6 +24,12 @@ def section(text, wanted):
             kept.append(line)
         else:
             kept.append("")
+    return "\n".join(kept)
+
+
+def section(text, wanted):
+    """Return a level-two section, ignoring headings inside fenced code blocks."""
+    kept = blank_fences(text).splitlines()
     heading = re.compile(r"^##\s+(.+?)\s*$", re.I)
     start = None
     for index, line in enumerate(kept):
@@ -44,11 +50,14 @@ def section(text, wanted):
 def parse_rules(text, source, use_escalation):
     selected = section(text, "Escalation") if use_escalation else text
     if selected is None:
-        selected = text
+        selected = blank_fences(text)
     result = {"ask": [], "guardrails": [], "loosen": [], "warnings": []}
     current = None
     heading = re.compile(r"^###\s+(.+?)\s*$", re.I)
     for raw in selected.splitlines():
+        if re.match(r"^#{1,2}\s+", raw):
+            current = None
+            continue
         match = heading.match(raw)
         if match:
             current = match.group(1).strip().lower()
@@ -73,13 +82,11 @@ def parse_rules(text, source, use_escalation):
                 result["warnings"].append(f"{source}: malformed loosen bullet: {value}")
             else:
                 target = parts[0]
-                if target.startswith("`") and target.endswith("`") and len(target) > 2:
-                    target = target[1:-1]
-                    result["loosen"].append(("pattern", target, parts[1]))
-                elif "`" not in target:
-                    result["loosen"].append(("rule", target, parts[1]))
+                pattern = re.fullmatch(r"`([^`]+)`", target)
+                if pattern:
+                    result["loosen"].append(("pattern", pattern.group(1), parts[1]))
                 else:
-                    result["warnings"].append(f"{source}: malformed loosen bullet: {value}")
+                    result["loosen"].append(("rule", target, parts[1]))
         elif current is not None:
             result["warnings"].append(f"{source}: bullet under unknown heading: {value}")
     return result
@@ -91,7 +98,9 @@ def path_matches(pattern, path):
     if not pattern:
         return False
     if directory:
-        return path.startswith(pattern + "/")
+        if "/" not in pattern:
+            parts = path.split("/")
+            return any(fnmatch.fnmatchcase(part, pattern) for part in parts[:-1])
     if "/" not in pattern:
         return any(fnmatch.fnmatchcase(part, pattern) for part in path.split("/"))
     regex = ""
@@ -110,7 +119,8 @@ def path_matches(pattern, path):
         elif char == "?": regex += "[^/]"
         else: regex += re.escape(char)
         index += 1
-    return re.fullmatch(regex, path) is not None
+    suffix = r"(?:/.*)?" if directory else ""
+    return re.fullmatch(regex + suffix, path) is not None
 
 
 def load_file(path):
@@ -147,6 +157,8 @@ def merged(rule_paths, no_defaults):
             loosened.append(entry)
             if kind == "pattern":
                 guardrails[:] = [item for item in guardrails if item["pattern"] != target]
+            else:
+                ask[:] = [item for item in ask if item["rule"] != target]
         guardrails.extend({"pattern": pattern, "layer": name} for pattern in parsed["guardrails"])
     return {"layers": layers, "ask": ask, "guardrails": guardrails,
             "loosened": loosened, "warnings": warnings}

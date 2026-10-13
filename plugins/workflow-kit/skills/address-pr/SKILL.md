@@ -167,7 +167,7 @@ With `--rules`, after that fast-forward, record `round-start` with `git rev-pars
 Also save the PR's named paths for this round with:
 
 ```bash
-git diff --name-only origin/<baseRefName>...<round-start> > <scratch>/address-pr-named-paths
+git diff --name-only --no-renames origin/<baseRefName>...<round-start> > <scratch>/address-pr-named-paths
 ```
 
 These are the files the PR already touches; use this file as `--named` for every rules
@@ -219,9 +219,9 @@ Include a `decisions` list in every rules-enabled result. Treat `needs-decision`
 through [Asking the user](#asking-the-user), then re-run that job only after the answer.
 
 A job is `fixed` only when the worker returned `outcome: fixed` and its `commit` is an
-ancestor of the worktree `HEAD`. Treat anything else (including a missing or unparseable
-result, or a runaway-guard stop) as `failed`. Mode references say what a failed job means
-for write-back.
+ancestor of the worktree `HEAD`. Treat anything other than `fixed` or `needs-decision`
+(handled above), including a missing or unparseable result or a runaway-guard stop, as
+`failed`. Mode references say what a failed job means for write-back.
 
 ### Step 6: Gate verify
 
@@ -237,7 +237,7 @@ report and ask.
 Only with `--rules`, after the final green gate and before Step 7, run:
 
 ```bash
-git diff --name-only <round-start>..HEAD | <skill-dir>/../implement-plan/scripts/escalation-rules.py check --rules <path>... --changed - --named <scratch>/address-pr-named-paths
+git diff --name-only --no-renames <round-start>..HEAD | <skill-dir>/../implement-plan/scripts/escalation-rules.py check --rules <path>... --changed - --named <scratch>/address-pr-named-paths
 ```
 
 Use each `hits` entry as an Ask under
@@ -245,8 +245,11 @@ Use each `hits` entry as an Ask under
 an explicit human review-thread request asked for that change; record that exception as
 decide-and-tell. A bot-requested change is always an Ask. Keep the thread source with each
 fix job so this distinction is auditable. Route all Asks through [Asking the user](#asking-the-user)
-and do not push until they are answered. In `--sync` mode, skip this check: conflict paths
-are already in the PR diff and other merged paths come from the base branch.
+and do not push until they are answered. On approval, append the hit path to
+`<scratch>/address-pr-named-paths` so the repeated check does not ask again. On rejection,
+spawn a fix job that reverts the rejected edit, then repeat Step 6 and this rules check before
+Step 7. In `--sync` mode, skip this check: conflict paths are already in the PR diff and
+other merged paths come from the base branch.
 
 ### Step 7: Push
 

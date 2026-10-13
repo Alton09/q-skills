@@ -28,7 +28,7 @@ Use a gitignore-like subset. A pattern with no `/` except a trailing one matches
 
 Pass `--rules <path>` repeatedly, lowest layer first. The lead passes `Features/_project/escalation.md`, then `Features/<feature>/brief.md`. Shipped defaults are always the bottom layer when any `--rules` is present. With no `--rules`, no rule applies and the skill behaves as before this change.
 
-Layers add up. A later layer removes an earlier rule only through `### Loosen`, and only when the cited design note exists. A missing `--rules` file is an error: stop and report it; do not run without it.
+Layers add up. A later layer removes an exact earlier Ask rule or guardrail pattern only through `### Loosen`, and only when the cited design note exists; the merge result retains it in `loosened` as a record. A missing `--rules` file is an error: stop and report it; do not run without it.
 
 ## Defaults
 

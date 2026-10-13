@@ -122,3 +122,56 @@ pass
 # 12. Unknown subcommand is an error.
 n=12; out=$(python3 -I "$script" nonsense 2>&1); rc=$?
 [ "$rc" -eq 2 ] || fail "exit $rc"; pass
+
+# 13. Rootless directory patterns match nested directories.
+n=13; check 'mod/konsist/Rule.kt' '' "$tmp/project.md"
+expect 'len(x["hits"])' 1
+pass
+
+# 14. Rootless glob directory patterns match nested directories.
+cat >"$tmp/glob-directory.md" <<'EOF'
+### Guardrail paths
+- `*.egg-info/` — package metadata
+EOF
+n=14; check 'src/foo.egg-info/PKG-INFO' '' "$tmp/glob-directory.md"
+expect 'len(x["hits"])' 1
+pass
+
+# 15. A free-text loosen may contain backticks and removes the Ask rule.
+touch "$tmp/decision-note.md"
+cat >"$tmp/ask.md" <<'EOF'
+### Ask
+- A decision contradicts a `decisions.md`.
+EOF
+cat >"$tmp/ask-loosen.md" <<'EOF'
+### Loosen
+- A decision contradicts a `decisions.md`. — decision-note.md
+EOF
+n=15; run merge --no-defaults --rules "$tmp/ask.md" --rules "$tmp/ask-loosen.md"
+expect 'x["ask"]' '[]'
+expect 'x["loosened"][0]["rule"]' '"A decision contradicts a `decisions.md`."'
+pass
+
+# 16. Whole-file headings reset the active rule section.
+cat >"$tmp/headings.md" <<'EOF'
+### Ask
+- real rule
+## Notes
+- example rule
+EOF
+n=16; run merge --no-defaults --rules "$tmp/headings.md"
+expect 'x["ask"]' '[{"rule":"real rule","layer":"'"$tmp"'/headings.md"}]'
+pass
+
+# 17. Whole-file fenced examples do not contribute rules.
+cat >"$tmp/fenced.md" <<'EOF'
+### Ask
+- real rule
+```
+### Ask
+- example rule
+```
+EOF
+n=17; run merge --no-defaults --rules "$tmp/fenced.md"
+expect 'x["ask"]' '[{"rule":"real rule","layer":"'"$tmp"'/fenced.md"}]'
+pass

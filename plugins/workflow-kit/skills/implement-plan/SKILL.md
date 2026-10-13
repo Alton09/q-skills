@@ -259,12 +259,12 @@ silently.
 ### Rules check (`--rules` only)
 
 After a phase agent returns and before its gate-verify, apply
-`references/escalation-rules.md` § "Matching". Record `<phase-start>` as the commit on which
-the phase was spawned, then:
+`references/escalation-rules.md` § "Matching", using the `<phase-start>` recorded when the
+phase was spawned, then:
 
 1. Treat a returned `needs_decision` as an Ask.
 2. Run `scripts/escalation-rules.py check [--rules <path>]... --changed - --named
-   <scratch-named-file>` with `git diff --name-only <phase-start>..HEAD` from the phase's
+   <scratch-named-file>` with `git diff --name-only --no-renames <phase-start>..HEAD` from the phase's
    worktree on stdin. Treat every returned hit as an Ask. Exit 2 stops the run and is
    reported.
 3. Match every returned `decisions` item against the merged Ask rules. A match is an Ask;
@@ -285,10 +285,12 @@ Follow Step 7's **Which copy** and outside-repository rules. Ask per
 remove the callout when answered. In a parallel group, let sibling phases finish, but do
 not advance the layer until every Ask in it is answered.
 
-On the answer, re-delegate the same phase with the answer as a constraint. Follow the retry
-instructions below: first read the committed diff plus working changes, then continue and
-self-verify. This decision retry does not count against `SELF_VERIFY_LIMIT`. If the answer
-rejects a committed guardrail edit, explicitly tell the retry agent to revert that edit.
+On approval of a guardrail hit, append its path to the scratch `named` file. If the only Ask
+was an approved, already-committed guardrail hit, go straight to gate-verify. Otherwise,
+re-delegate the same phase with the answer as a constraint. Follow the retry instructions
+below: first read the committed diff plus working changes, then continue and self-verify.
+This decision retry does not count against `SELF_VERIFY_LIMIT`. If the answer rejects a
+committed guardrail edit, explicitly tell the retry agent to revert that edit.
 
 Verification is **two-tier**:
 

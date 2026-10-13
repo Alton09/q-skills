@@ -219,9 +219,10 @@ criteria that a build, unit test, or static check can settle.
 ## Step 4: Save the Plan
 
 If `--out` is present, save the plan there. It wins over `/save-plan` and the cwd fallback.
-Never run git in the plan's directory; the lead commits and pushes the plan.
+When saving through `--out`, feature-plan never runs git in the plan's directory; the lead
+commits and pushes the plan.
 
-Invoke `/save-plan` with the plan key and plan content.
+Otherwise, invoke `/save-plan` with the plan key and plan content.
 
 If `/save-plan` is not available, fall back to writing the plan to the working directory:
 

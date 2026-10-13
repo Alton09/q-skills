@@ -143,7 +143,8 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
    commit was made. With `--rules`, include the same plain-text rules block from
    `references/escalation-rules.md` § "Matching", with the plan-wide named paths, and record
    `<fix-start>` as the commit on which the worker was spawned.
-3. On return, with `--rules`, run SKILL.md Step 6's rules check on the fix commit range
+3. On return, with `--rules`, run SKILL.md Step 6's `git diff --name-only --no-renames`
+   rules check on the fix commit range
    `<fix-start>..HEAD` and handle every Ask before continuing. Then run the authoritative
    gate-verify (Step 6) on the integration worktree — one independent confirmation for the
    combined pass, exactly as for a phase. Do not run a gate per source. Without `--rules`,

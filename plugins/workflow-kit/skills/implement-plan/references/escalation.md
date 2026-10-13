@@ -52,7 +52,8 @@ below, read it as "the failed phase or group."
      With `--rules`, also carry the same plain-text rules block from
      `references/escalation-rules.md` § "Matching", including the plan-wide named paths.
    - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
-     self-verify) → gate-verify, same as a phase. The runaway guard (5b, extended budget)
+     self-verify) → Step 6 rules check on that attempt's commit range → gate-verify, same
+     as a phase. Run that check with `--rules` only. The runaway guard (5b, extended budget)
      applies to every escalation attempt.
 4. Outcome:
    - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the

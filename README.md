@@ -241,6 +241,9 @@ q-skills/
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
+          scripts/
+            escalation-rules.py      # Merge and check escalation-rule layers
+            escalation-rules.test.sh # Hermetic escalation-rule tests
         address-pr/           # PR comment, CI, and branch sync skill
     dev-toolkit/
       .claude-plugin/

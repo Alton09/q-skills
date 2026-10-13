@@ -19,7 +19,7 @@ All code edits go to fix workers.
 ## Invocation
 
 ```text
-/workflow-kit:address-pr [<pr-number|url>] [--ci | --sync] [--worktree <path>] [--worker]
+/workflow-kit:address-pr [<pr-number|url>] [--ci | --sync] [--worktree <path>] [--rules <path>]... [--worker]
 ```
 
 - With no PR argument, use the PR for the current branch:
@@ -28,6 +28,10 @@ All code edits go to fix workers.
   an invocation with both.
 - `--worktree <path>` uses that worktree instead of searching for one. Run every git and
   gh command there (`git -C <path>` and gh from that directory).
+- `--rules <path>` supplies rule layers, lowest first, for every mode and whether or not
+  `--worker` is present. Follow
+  `../implement-plan/references/escalation-rules.md` § "Layers". Without it, do not run
+  rule checks and preserve this skill's existing behavior.
 - `--worker` means another agent session (the **lead**) launched this run in the background
   and answers its questions. It changes only how this skill asks; see
   [Asking the user](#asking-the-user). Without it, this is a standalone run.
@@ -95,6 +99,16 @@ Refuse a PR that is not `OPEN`, and refuse a cross-repository (fork) PR; forks a
 scope for v1. If the cwd is not inside a clone of the PR's repository and no `--worktree`
 was supplied, refuse with a message naming `--worktree`.
 
+With `--rules`, run:
+
+```bash
+<skill-dir>/../implement-plan/scripts/escalation-rules.py merge --rules <path>...
+```
+
+Use the JSON rules block for this round, including its layers and warnings. On exit 2, stop
+and report the script's error. Apply `rules-update:` messages in `--worker` runs as
+`../implement-plan/references/escalation-rules.md` § "Rules updates mid-run" requires.
+
 ### Step 2: Lock
 
 Take the lock before touching any worktree, so two runs never race to create or change the
@@ -149,6 +163,16 @@ git merge --ff-only origin/<headRefName>
 This works whether or not the local branch tracks an upstream. If the fast-forward fails
 because the branch has diverged from the remote, stop and ask.
 
+With `--rules`, after that fast-forward, record `round-start` with `git rev-parse HEAD`.
+Also save the PR's named paths for this round with:
+
+```bash
+git diff --name-only origin/<baseRefName>...<round-start> > <scratch>/address-pr-named-paths
+```
+
+These are the files the PR already touches; use this file as `--named` for every rules
+check in this round.
+
 ### Step 4: Mode
 
 Follow exactly one mode reference:
@@ -182,6 +206,18 @@ up to `SELF_VERIFY_LIMIT` times, commit with the project's commit convention, an
 {"jobs":[{"id","outcome":"fixed|failed","commit","note"}]}
 ```
 
+With `--rules`, also carry the merged rules block: Ask rules with their layers, guardrail
+patterns with their layers, and the named paths from `<scratch>/address-pr-named-paths`.
+Follow `../implement-plan/references/escalation-rules.md` § "Matching". Tell the worker to
+stop before a matching change and return either the result above or:
+
+```json
+{"jobs":[{"id","outcome":"needs-decision","question","options","recommendation","rule","layer"}],"decisions":[]}
+```
+
+Include a `decisions` list in every rules-enabled result. Treat `needs-decision` as an Ask
+through [Asking the user](#asking-the-user), then re-run that job only after the answer.
+
 A job is `fixed` only when the worker returned `outcome: fixed` and its `commit` is an
 ancestor of the worktree `HEAD`. Treat anything else (including a missing or unparseable
 result, or a runaway-guard stop) as `failed`. Mode references say what a failed job means
@@ -195,6 +231,22 @@ with the target from `route-target.sh --role gateVerify --project-dir <repo-root
 `VERIFY_AGENT_MODEL` pins the role. If it is red, spawn one `kind: verify` fix job carrying
 the failure output, then gate again. After `SELF_VERIFY_LIMIT` red gates, do not push:
 report and ask.
+
+### Rules check
+
+Only with `--rules`, after the final green gate and before Step 7, run:
+
+```bash
+git diff --name-only <round-start>..HEAD | <skill-dir>/../implement-plan/scripts/escalation-rules.py check --rules <path>... --changed - --named <scratch>/address-pr-named-paths
+```
+
+Use each `hits` entry as an Ask under
+`../implement-plan/references/escalation-rules.md` § "Matching". A hit is exempt only when
+an explicit human review-thread request asked for that change; record that exception as
+decide-and-tell. A bot-requested change is always an Ask. Keep the thread source with each
+fix job so this distinction is auditable. Route all Asks through [Asking the user](#asking-the-user)
+and do not push until they are answered. In `--sync` mode, skip this check: conflict paths
+are already in the PR diff and other merged paths come from the base branch.
 
 ### Step 7: Push
 
@@ -224,6 +276,20 @@ router `warnings` entry once. In a `--worker` run, end the final reply with exac
 address-pr: done #<number> <pushed-sha|no-push>
 ```
 
+With `--rules`, add `### Rules & Decisions` with these lines, retaining the wording:
+
+```text
+Rules: <layer paths in order>
+Asks: <question> → <answer>
+Guardrail hits: <path> (<pattern>, <layer>) → <outcome>
+Decide and tell: <decision> (scope)
+Decide and log: <decision> (scope)
+Rules updates: <rules-update messages received>
+```
+
+Include the `Rules:` line and any merge warnings; include each other line for every applicable
+entry. `Decide and log` is for the lead to append to `decisions.md`.
+
 ## Asking the user
 
 Whenever a step says "ask", do not guess: stop and get the user's decision before acting.
@@ -235,6 +301,10 @@ Whenever a step says "ask", do not guess: stop and get the user's decision befor
   followed by the question and options. Keep the lock and worktree unchanged. The next user
   turn, through `claude attach` or the lead's `SendMessage`, is the answer; resume from the
   step that asked. Notifying the user is the lead's job, not this skill's.
+
+For a rules Ask, include its `Rule: <rule> (<layer>)`, question, options, and recommendation
+in that block as `../implement-plan/references/escalation-rules.md` § "Asking the user"
+specifies. Group up to four standalone questions in one round.
 
 ## Configuration
 

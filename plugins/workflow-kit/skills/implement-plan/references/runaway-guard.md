@@ -61,7 +61,11 @@ For all other workers:
    ```
    <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
    ```
-3. Wait for the user's decision before doing anything else with this phase.
+3. Without `--worker`, wait for the user's decision before doing anything else with this
+   phase. With `--worker`, after notifying, end the turn with the `needs input` block from
+   `references/escalation-rules.md` § "Asking the user", id `<plan-key>`, and options to
+   continue the stopped phase, skip to gate-verify, or stop the run. The answer selects the
+   next action.
 
 > **Note:** mid-flight repeated-call / no-progress detection is intentionally NOT claimed
 > here — there is no live per-call feed for a sub-agent. The wall-clock budget is what

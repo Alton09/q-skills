@@ -140,10 +140,14 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
    fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include
    the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
    and iterate while warm, bounded by `SELF_VERIFY_LIMIT`; commit on pass; report whether a
-   commit was made.
-3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
-   integration worktree — one independent confirmation for the combined pass, exactly as
-   for a phase. Do not run a gate per source.
+   commit was made. With `--rules`, include the same plain-text rules block from
+   `references/escalation-rules.md` § "Matching", with the plan-wide named paths, and record
+   `<fix-start>` as the commit on which the worker was spawned.
+3. On return, with `--rules`, run SKILL.md Step 6's rules check on the fix commit range
+   `<fix-start>..HEAD` and handle every Ask before continuing. Then run the authoritative
+   gate-verify (Step 6) on the integration worktree — one independent confirmation for the
+   combined pass, exactly as for a phase. Do not run a gate per source. Without `--rules`,
+   proceed directly to gate-verify as before.
 4. Gate fail → report the open result and stop this combined loop. If the fix committed,
    re-run enabled E2E on that `HEAD` before reporting, so the reported E2E result is not
    from before the commit. Do not use the Step 6 opus rescue for a Step 8 failure.

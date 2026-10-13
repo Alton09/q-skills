@@ -22,6 +22,13 @@ Turn a plan into working, verified, tested code. The main agent is the
 dedicated sub-agent, watches that sub-agent, delegates the authoritative gate-verify,
 and owns the pass/fail decision and task tracking.
 
+## Invocation
+
+`/workflow-kit:implement-plan <plan path> [--rules <path>]... [--worker]`
+
+Parse repeatable `--rules` paths in invocation order and the optional `--worker` flag.
+Use the plan filename stem as `<plan-key>`. With neither flag, follow the existing flow.
+
 ## Roles
 
 - **Orchestrator** (this agent, opus by default): pre-flight, worktree setup,
@@ -70,8 +77,8 @@ is present (`references/routing.md`).
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
 Before reading source files, writing code, or spawning any phase/implementation
-sub-agent, you MUST complete three pre-flight items in order (the Step 1 plan-parse prep
-agent is part of #1 and is allowed):
+sub-agent, parse the invocation flags, then complete three pre-flight items in order (the
+Step 1 plan-parse prep agent is part of #1 and is allowed):
 
 1. Plan path/content (Step 1)
 2. Orchestrator model check (Step 2) — opus default; confirm only for a non-Opus session;
@@ -86,8 +93,10 @@ manually migrate diffs — never acceptable. Sub-agents inherit the worktree
 path as their working directory, so the worktree MUST exist before any phase
 is delegated.
 
-If the user supplied a plan path as an argument, you have answered Step 1
-but you have NOT answered Steps 2 and 3. Ask them now.
+If the user supplied a plan path as an argument, Step 1 is answered but Steps 2 and 3
+are not. Without `--worker`, ask them now. With `--worker`, ask nothing: use the session
+model as described in Step 2 and always create the worktree through `/create-worktree` as
+described in Step 3.
 
 ## Step 1: Plan Selection
 
@@ -124,6 +133,15 @@ causes bad scheduling or worktree collisions.
 right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
 structure error, fix the parse or fall back to reading the plan directly before proceeding.
 
+With `--rules`, after the prep extract returns, run
+`scripts/escalation-rules.py merge [--rules <path>]...` and keep its JSON in the session
+scratchpad. Write the union of every phase's `**Files**:` list from the extract, one
+repo-relative path per line, to a scratch `named` file. Preserve the rules-file order. If
+either operation exits 2, stop and report the error. This activates the contract in
+`references/escalation-rules.md` § "Layers"; without `--rules`, do neither operation.
+In a `--rules --worker` run, apply incoming updates per
+`references/escalation-rules.md` § "Rules updates mid-run" and retain them for the report.
+
 When resuming a partially-complete plan, also diff the working-tree plan against committed
 state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
 are unreliable evidence of completed work — they may be someone's uncommitted edit, and are
@@ -138,19 +156,23 @@ model because the orchestrator holds cross-phase state, judges complexity, and s
 sub-agents, which is exactly the work Opus is best at.
 
 Only when the session model is not in the recommended family (for default `opus`, not an
-Opus model), confirm with the user (one line). They relaunch on it — you can't change it
-from here:
+Opus model) and `--worker` is absent, confirm with the user (one line). They relaunch on it
+— you can't change it from here:
 ```
 Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> family recommended. To use a
 different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
+
+With `--worker`, ask nothing and continue on the session model. If it is not Opus-family,
+record that fact in the final report.
 
 Do NOT ask which model implements each phase — that is decided automatically per phase
 in Step 5 by complexity classification. Store the running model for the final report.
 
 ## Step 3: Worktree Setup
 
-Ask: "Should I create a new worktree? (y/n, default: y)"
+With `--worker`, ask nothing and always call `/create-worktree`. Otherwise ask: "Should I
+create a new worktree? (y/n, default: y)"
 
 If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
 
@@ -229,8 +251,44 @@ directly. On a trip, stop the worker with its executor binding (`TaskStop`, proc
 kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
+With `--worker`, use that reference's post-notify `needs input` path instead of waiting
+silently.
 
 ## Step 6: Quality Verification
+
+### Rules check (`--rules` only)
+
+After a phase agent returns and before its gate-verify, apply
+`references/escalation-rules.md` § "Matching". Record `<phase-start>` as the commit on which
+the phase was spawned, then:
+
+1. Treat a returned `needs_decision` as an Ask.
+2. Run `scripts/escalation-rules.py check [--rules <path>]... --changed - --named
+   <scratch-named-file>` with `git diff --name-only <phase-start>..HEAD` from the phase's
+   worktree on stdin. Treat every returned hit as an Ask. Exit 2 stops the run and is
+   reported.
+3. Match every returned `decisions` item against the merged Ask rules. A match is an Ask;
+   retain unmatched items by tier for the report.
+
+Skip this entire check without `--rules`.
+
+### Ask handling
+
+For each Ask, write this callout directly under the phase heading in the plan file:
+
+```markdown
+> ⏸ **ASK**: <question> (rule: <rule>, layer: <layer>)
+```
+
+Follow Step 7's **Which copy** and outside-repository rules. Ask per
+`references/escalation-rules.md` § "Asking the user", using `<plan-key>` as the id, and
+remove the callout when answered. In a parallel group, let sibling phases finish, but do
+not advance the layer until every Ask in it is answered.
+
+On the answer, re-delegate the same phase with the answer as a constraint. Follow the retry
+instructions below: first read the committed diff plus working changes, then continue and
+self-verify. This decision retry does not count against `SELF_VERIFY_LIMIT`. If the answer
+rejects a committed guardrail edit, explicitly tell the retry agent to revert that edit.
 
 Verification is **two-tier**:
 
@@ -313,6 +371,8 @@ user's signal).
 
 → Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
 the user-wait steps: **`references/escalation.md`**.
+With `--worker`, that reference ends the turn after notification with the required
+`needs input` block instead of waiting silently.
 
 ## Step 7: Task Tracking
 
@@ -371,6 +431,8 @@ and E2E failures. Re-run E2E only after a fix commit. One cap, `REVIEW_MAX_ROUND
 the combined loop. The orchestrator never reads the raw diff or verbatim E2E failures.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
+With `--rules`, that procedure gives fix workers the rules block and runs this Step 6 rules
+check on each fix commit range before gate-verify.
 
 ## Step 9: Pull Request
 
@@ -433,6 +495,9 @@ figure was wrong by 13× in a real run; no number is better than a wrong one.
 
 Once all phases are checked off:
 
+The `### Rules & Decisions` block below is conditional: include it only with `--rules` and
+omit it entirely otherwise.
+
 ```markdown
 ## Implementation Report — <YYYY-MM-DD>
 
@@ -454,6 +519,14 @@ Once all phases are checked off:
 
 ### Verification Status
 ✓ All phases passed verification
+
+### Rules & Decisions
+- Rules: <layer paths in order; include merge warnings>
+- Asks: <question> → <answer> (<phase>)
+- Guardrail hits: <path> (<pattern>, <layer>) → <outcome>
+- Decide and tell: <decision> (<scope>, <phase>)
+- Decide and log: <decision> (<scope>, <phase>) — for the lead to append to `decisions.md`
+- Rules updates: <rules-update messages received>
 
 ### Review & Auto-fix
 - Reviewer: <REVIEW_MODEL> (<router reason | pinned>) on `<base>...HEAD` via <REVIEW_SKILL>
@@ -521,6 +594,10 @@ orchestrator cost row, PR URL or `PR skipped — <reason>`, and
 `Full report: <plan-file path>`. If `/create-pr` opened a PR
 but its returned body omits the report, also print `PR report omitted — /create-pr left the
 report out`. Do not print the full report to the terminal.
+
+With `--worker`, make the final line exactly
+`implement-plan: done <plan-key> <PR url | pr-skipped>`. After a hard stop, make the final
+line `implement-plan: stopped <plan-key> <phase>` instead.
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this

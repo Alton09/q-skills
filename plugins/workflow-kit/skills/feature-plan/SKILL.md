@@ -7,7 +7,8 @@ description: >
   "plan this feature", "plan this work", "break this into tasks", "help me plan", or any
   request involving planning, task decomposition, or organizing work into parallelizable steps
   — even if they don't say "plan" explicitly but are describing a multi-step change they want
-  broken down first before building.
+  broken down first before building. Also use it for "plan from this design note", "handoff plan",
+  or to plan for the tech lead without questions.
 ---
 
 # Feature Plan
@@ -15,10 +16,27 @@ description: >
 Create a structured implementation plan that breaks work into sequential phases with clear
 tasks and acceptance criteria checkboxes, then save it so the `implement-plan` skill can pick it up.
 
+## Invocation
+
+```
+/workflow-kit:feature-plan [--handoff <design-note-path | summary text>] [--context <path>]... [--rules <path>]... [--out <path>] [--worker]
+```
+
+- `--handoff`: Use handoff mode. The input is a design note file or a short summary.
+- `--context <path>`: Read extra files, for example the brief and `decisions.md`.
+- `--rules <path>`: Add rule layers, as described in
+  `../implement-plan/references/escalation-rules.md` § "Layers". Valid in both modes.
+- `--out <path>`: Save the plan there. It wins over `/save-plan` and the cwd fallback.
+- `--worker`: The lead launched this run. It changes only how this skill asks, as described in
+  `../implement-plan/references/escalation-rules.md` § "Asking the user".
+
 ## Step 1: Gather Context
 
-If the user already described the feature or bug in their message, proceed directly to research.
-Otherwise, ask:
+In handoff mode, ask no questions. Read the `--handoff` input and every `--context` file. If a
+fact is missing, decide it and record the decision as an assumption in the plan.
+
+Outside handoff mode, if the user already described the feature or bug in their message, proceed
+directly to research. Otherwise, ask:
 
 1. What needs to be built or changed?
 2. Any known modules, files, or tickets involved?
@@ -66,6 +84,11 @@ Use this structure:
 
 ## Context
 [What this plan accomplishes and why — 2–4 sentences]
+
+## Assumptions
+[Optional outside handoff mode; required in handoff mode. One bullet per decision the planner made
+that the input did not state.]
+- **A<n>** <decision>. Source: <design note | brief | decisions | codebase | default>.
 
 ## Architecture Diagram
 [Only include if the feature introduces non-trivial data flow, a new layer interaction,
@@ -133,6 +156,35 @@ Example:
 [Potential issues, edge cases, or things to watch out for]
 ```
 
+## Step 3b: Ask Check
+
+Run this step whenever `--rules` is present. Follow the shared rules contract in
+`../implement-plan/references/escalation-rules.md` § "Matching" and
+`../implement-plan/references/escalation-rules.md` § "Asking the user".
+
+1. Run `<skill-dir>/../implement-plan/scripts/escalation-rules.py merge` with the `--rules`
+   paths. On exit 2, stop and report the error.
+2. Match every assumption against the Ask rules. Name the matching rule and layer. A matched
+   assumption becomes a question, not an assumption.
+3. Write every path from the plan's `**Files**:` fields to a scratch file. Write every path the
+   handoff input names to another scratch file. Run
+   `<skill-dir>/../implement-plan/scripts/escalation-rules.py check` with the rule paths and
+   those files as `--changed` and `--named`. Treat every hit as an Ask: the plan would name a
+   guardrail path that the design did not, and naming it would let `implement-plan` edit it
+   without asking.
+
+If there are questions, first save the draft to its destination with this callout immediately
+under the title:
+
+```markdown
+> ⏸ **NEEDS INPUT**: <n> question(s) for the user
+```
+
+Ask all questions in one round with id `<plan-key>`, following
+`../implement-plan/references/escalation-rules.md` § "Asking the user". Fold each answer into
+the plan as an assumption with source `user (<date>)`, revise affected tasks, remove the callout,
+and save again.
+
 ## Writing a Good Architecture Diagram
 
 A Mermaid diagram earns its place when the dependency structure or data flow would take a
@@ -166,6 +218,9 @@ criteria that a build, unit test, or static check can settle.
 
 ## Step 4: Save the Plan
 
+If `--out` is present, save the plan there. It wins over `/save-plan` and the cwd fallback.
+Never run git in the plan's directory; the lead commits and pushes the plan.
+
 Invoke `/save-plan` with the plan key and plan content.
 
 If `/save-plan` is not available, fall back to writing the plan to the working directory:
@@ -182,3 +237,10 @@ After saving, tell the user:
 1. Where the plan was saved
 2. Brief summary: how many phases, how many tasks, rough breakdown of what each phase covers
 3. Any risks or open questions they should decide before implementing
+4. In handoff mode, how many assumptions the plan records and how many questions were asked
+
+With `--worker`, end the final reply with this line:
+
+```
+feature-plan: done <plan path>
+```

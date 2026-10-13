@@ -175,3 +175,12 @@ EOF
 n=17; run merge --no-defaults --rules "$tmp/fenced.md"
 expect 'x["ask"]' '[{"rule":"real rule","layer":"'"$tmp"'/fenced.md"}]'
 pass
+
+# 18. Root-anchored directory patterns do not match nested directories.
+cat >"$tmp/anchored-directory.md" <<'EOF'
+### Guardrail paths
+- `/konsist/` — root architecture
+EOF
+n=18; check 'mod/konsist/Rule.kt' '' "$tmp/anchored-directory.md"
+expect 'x["hits"]' '[]'
+pass

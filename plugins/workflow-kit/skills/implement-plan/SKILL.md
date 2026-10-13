@@ -262,13 +262,15 @@ After a phase agent returns and before its gate-verify, apply
 `references/escalation-rules.md` § "Matching", using the `<phase-start>` recorded when the
 phase was spawned, then:
 
-1. Treat a returned `needs_decision` as an Ask.
+1. Treat a returned `needs_decision` as an Ask unless it matches an Ask already answered for
+   this phase; record a matching repeat as decide-and-tell.
 2. Run `scripts/escalation-rules.py check [--rules <path>]... --changed - --named
    <scratch-named-file>` with `git diff --name-only --no-renames <phase-start>..HEAD` from the phase's
    worktree on stdin. Treat every returned hit as an Ask. Exit 2 stops the run and is
    reported.
-3. Match every returned `decisions` item against the merged Ask rules. A match is an Ask;
-   retain unmatched items by tier for the report.
+3. Match every returned `decisions` item against the merged Ask rules. Skip any decision that
+   matches an Ask already answered for this phase and record it as decide-and-tell. Otherwise,
+   a match is an Ask; retain unmatched items by tier for the report.
 
 Skip this entire check without `--rules`.
 
@@ -290,7 +292,8 @@ was an approved, already-committed guardrail hit, go straight to gate-verify. Ot
 re-delegate the same phase with the answer as a constraint. Follow the retry instructions
 below: first read the committed diff plus working changes, then continue and self-verify.
 This decision retry does not count against `SELF_VERIFY_LIMIT`. If the answer rejects a
-committed guardrail edit, explicitly tell the retry agent to revert that edit.
+committed guardrail edit, explicitly tell the retry agent to revert that edit. With `--rules`,
+run the Step 6 rules check on `<phase-start>..HEAD` before re-spawning gate-verify.
 
 Verification is **two-tier**:
 
@@ -351,8 +354,9 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
   same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary.
-  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b applies to retry
-  sub-agents too.)
+  With `--rules`, run the Step 6 rules check on `<phase-start>..HEAD` before re-spawning
+  gate-verify. Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b
+  applies to retry sub-agents too.)
 - A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
   the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
   intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate

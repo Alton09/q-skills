@@ -163,8 +163,8 @@ git merge --ff-only origin/<headRefName>
 This works whether or not the local branch tracks an upstream. If the fast-forward fails
 because the branch has diverged from the remote, stop and ask.
 
-With `--rules`, after that fast-forward, record `round-start` with `git rev-parse HEAD`.
-Also save the PR's named paths for this round with:
+With `--rules`, after that fast-forward, run `git fetch origin <baseRefName>`, then record
+`round-start` with `git rev-parse HEAD`. Also save the PR's named paths for this round with:
 
 ```bash
 git diff --name-only --no-renames origin/<baseRefName>...<round-start> > <scratch>/address-pr-named-paths

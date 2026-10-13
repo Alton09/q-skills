@@ -94,14 +94,15 @@ def parse_rules(text, source, use_escalation):
 
 def path_matches(pattern, path):
     directory = pattern.endswith("/")
+    anchored = pattern.startswith("/")
     pattern, path = pattern.strip("/"), path.strip("/")
     if not pattern:
         return False
     if directory:
-        if "/" not in pattern:
+        if not anchored and "/" not in pattern:
             parts = path.split("/")
             return any(fnmatch.fnmatchcase(part, pattern) for part in parts[:-1])
-    if "/" not in pattern:
+    if not anchored and "/" not in pattern:
         return any(fnmatch.fnmatchcase(part, pattern) for part in path.split("/"))
     regex = ""
     index = 0

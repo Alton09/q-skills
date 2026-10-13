@@ -167,7 +167,8 @@ Run this step whenever `--rules` is present. Follow the shared rules contract in
 2. Match every assumption against the Ask rules. Name the matching rule and layer. A matched
    assumption becomes a question, not an assumption.
 3. Write every path from the plan's `**Files**:` fields to a scratch file. Write every path the
-   handoff input names to another scratch file. Run
+   handoff input names, or outside handoff mode every path the user's request names, to another
+   scratch file. Run
    `<skill-dir>/../implement-plan/scripts/escalation-rules.py check` with the rule paths and
    those files as `--changed` and `--named`. Treat every hit as an Ask: the plan would name a
    guardrail path that the design did not, and naming it would let `implement-plan` edit it

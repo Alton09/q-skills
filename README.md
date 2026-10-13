@@ -33,6 +33,25 @@ See [`examples/android/`](examples/android/) for a working reference implementat
 Kotlin, Gradle KTS, Jetpack Compose, Hilt, and Clean Architecture. Copy and adapt those
 skills as a starting point for your own project.
 
+#### Lead inputs
+
+Pass repeatable `--rules <path>` arguments to layer escalation rules lowest-first; for example:
+
+```bash
+/workflow-kit:implement-plan Features/Search/plan.md \
+  --rules Features/_project/escalation.md \
+  --rules Features/Search/brief.md
+```
+
+With `--worker`, a run launched by a lead does not ask interactively. When it needs a decision,
+it ends with a `<skill>: needs input` block. Completed runs use their skill's `done` line (for
+example, `feature-plan: done <plan path>` or `implement-plan: done <plan-key> <PR url | pr-skipped>`);
+an implement-plan hard stop uses `implement-plan: stopped <plan-key> <phase>`. Feature planning
+also supports `--handoff <path-or-summary>` to plan from a design handoff, repeatable
+`--context <path>` inputs, and `--out <path>` for the plan destination. See
+[`escalation-rules.md`](plugins/workflow-kit/skills/implement-plan/references/escalation-rules.md)
+for the full rules format.
+
 ### dev-toolkit
 
 Standalone dev utilities that work independently of any planning pipeline.

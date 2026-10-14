@@ -19,16 +19,15 @@ tasks and acceptance criteria checkboxes, then save it so the `implement-plan` s
 ## Invocation
 
 ```
-/workflow-kit:feature-plan [--handoff <design-note-path | summary text>] [--context <path>]... [--rules <path>]... [--out <path>] [--worker]
+/workflow-kit:feature-plan [--handoff <design-note-path | summary text>] [--context <path>]... [--out <path>] [--worker]
 ```
 
 - `--handoff`: Use handoff mode. The input is a design note file or a short summary.
 - `--context <path>`: Read extra files, for example the brief and `decisions.md`.
-- `--rules <path>`: Add rule layers, as described in
-  `../implement-plan/references/escalation-rules.md` § "Layers". Valid in both modes.
 - `--out <path>`: Save the plan there. It wins over `/save-plan` and the cwd fallback.
 - `--worker`: The lead launched this run. It changes only how this skill asks, as described in
-  `../implement-plan/references/escalation-rules.md` § "Asking the user".
+  `../implement-plan/references/worker-mode.md` § "Asking the user". Handoff mode asks
+  nothing, so this changes only how a non-handoff run asks.
 
 ## Step 1: Gather Context
 
@@ -156,36 +155,6 @@ Example:
 [Potential issues, edge cases, or things to watch out for]
 ```
 
-## Step 3b: Ask Check
-
-Run this step whenever `--rules` is present. Follow the shared rules contract in
-`../implement-plan/references/escalation-rules.md` § "Matching" and
-`../implement-plan/references/escalation-rules.md` § "Asking the user".
-
-1. Run `<skill-dir>/../implement-plan/scripts/escalation-rules.py merge` with the `--rules`
-   paths. On exit 2, stop and report the error.
-2. Match every assumption against the Ask rules. Name the matching rule and layer. A matched
-   assumption becomes a question, not an assumption.
-3. Write every path from the plan's `**Files**:` fields to a scratch file. Write every path the
-   handoff input names, or outside handoff mode every path the user's request names, to another
-   scratch file. Run
-   `<skill-dir>/../implement-plan/scripts/escalation-rules.py check` with the rule paths and
-   those files as `--changed` and `--named`. Treat every hit as an Ask: the plan would name a
-   guardrail path that the design did not, and naming it would let `implement-plan` edit it
-   without asking.
-
-If there are questions, first save the draft to its destination with this callout immediately
-under the title:
-
-```markdown
-> ⏸ **NEEDS INPUT**: <n> question(s) for the user
-```
-
-Ask all questions in one round with id `<plan-key>`, following
-`../implement-plan/references/escalation-rules.md` § "Asking the user". Fold each answer into
-the plan as an assumption with source `user (<date>)`, revise affected tasks, remove the callout,
-and save again.
-
 ## Writing a Good Architecture Diagram
 
 A Mermaid diagram earns its place when the dependency structure or data flow would take a
@@ -239,7 +208,7 @@ After saving, tell the user:
 1. Where the plan was saved
 2. Brief summary: how many phases, how many tasks, rough breakdown of what each phase covers
 3. Any risks or open questions they should decide before implementing
-4. In handoff mode, how many assumptions the plan records and how many questions were asked
+4. In handoff mode, how many assumptions the plan records
 
 With `--worker`, end the final reply with this line:
 

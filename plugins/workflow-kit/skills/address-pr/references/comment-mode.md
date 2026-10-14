@@ -92,11 +92,6 @@ If a thread already has a comment containing `<!-- address-pr:pushback -->` and 
 has commented after it, classify the thread as `ask-user`. Never push back twice on one
 thread: a second pushback is an argument the user must settle.
 
-With `--rules`, use the merged rules block from `SKILL.md` Step 1 while triaging. A `fix`
-item that would change a guardrail path or matches an Ask rule stays `fix` when a human
-reviewer explicitly requested that change in the thread; retain that thread as the evidence
-for the later decide-and-tell exemption. When a bot requested it, classify it as `ask-user`.
-
 A review summary has no file path to group by and no thread to reply to. Classify it as
 `fix` only when its text names the files to change; otherwise a summary that asks for a
 change is `ask-user`.

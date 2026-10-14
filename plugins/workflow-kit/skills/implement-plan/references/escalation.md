@@ -49,12 +49,10 @@ below, read it as "the failed phase or group."
      from step 1 and an explicit instruction: *"diagnose the root cause from the prior
      attempts and errors BEFORE writing any fix; do not just re-run the same approach."*
      This is what makes the escalation more than a model bump.
-     With `--rules`, also carry the same plain-text rules block from
-     `references/escalation-rules.md` § "Matching", including the plan-wide named paths.
    - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
-     self-verify) → Step 6 rules check on that attempt's commit range → gate-verify, same
-     as a phase. Run that check with `--rules` only. The runaway guard (5b, extended budget)
-     applies to every escalation attempt.
+     self-verify) → gate-verify, same as a phase. The runaway guard (5b, extended budget)
+     applies to every escalation attempt. The rescue payload uses the phase return format,
+     including `unplanned_decisions`.
 4. Outcome:
    - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the
      phase/group (Step 7), and continue to the next phase/layer.
@@ -82,7 +80,7 @@ below, read it as "the failed phase or group."
    ```
 3. Without `--worker`, wait for user intervention — do NOT check off the phase or continue.
    With `--worker`, after notifying, end the turn with the `needs input` block from
-   `references/escalation-rules.md` § "Asking the user", id `<plan-key>`, and options to
+   `references/worker-mode.md` § "Asking the user", id `<plan-key>`, and options to
    retry from the failed phase or stop the run.
 4. User fixes the issue in the worktree and signals ready to retry. In a `--worker` run,
    the answer selecting retry is that signal.

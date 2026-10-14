@@ -40,8 +40,6 @@ batches of that size.
 
 For each phase (sequential or parallel), build its handoff:
 
-With `--rules` only, record that phase worktree's HEAD as `<phase-start>` before spawning.
-
 **1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
 the phase's tasks as light, standard, or deep. If no explicit pin applies for that tier
 (`PHASE_MODEL_<TIER>` for the tier, or `PHASE_EXECUTOR`), call the router with
@@ -101,12 +99,6 @@ everything the phase needs:
   each other's in-flight work — fine, they have no mutual dependency. Measured 2026-09-21
   (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan-file edits + carry-forward added
   12.2% / 17.9% of positive orchestrator context growth.
-- **With `--rules` only:** include the plain-text rules block defined by
-  `references/escalation-rules.md` § "Matching", including the merged Ask rules with their
-  layers, guardrail patterns, and the plan-wide named paths. Tell the worker to stop before
-  a change that matches an Ask rule or touches an unnamed guardrail path, commit its other
-  work, and return `needs_decision`. The block is plain text so every foreign executor
-  receives it unchanged. Without `--rules`, omit it and leave the payload unchanged.
 - Self-verify instruction: "After implementing, run /verify. If it fails, iterate to
   fix — up to <SELF_VERIFY_LIMIT, default 2> rounds — then stop regardless. Report your
   final /verify result (pass/fail) and any remaining errors verbatim."
@@ -123,12 +115,10 @@ everything the phase needs:
   specific edit you made."
 - Explicit boundaries: "implement ONLY this phase's tasks; do NOT edit the plan file,
   do NOT start other phases. Return a structured summary."
-- Required return format: files touched, what each does, decisions made, anything the
-  next phase needs, your final self-verify result (pass/fail + remaining errors), and
-  any tasks you could not complete. With `--rules`, also require
-  `needs_decision: {question, options, recommendation, rule, layer}|none` and `decisions`
-  as a list of `{decision, tier: tell|log, scope: project|feature}` per
-  `references/escalation-rules.md` § "Tiers". Without `--rules`, do not add these fields.
+- Required return format: files touched, what each does, decisions made,
+  `unplanned_decisions`: a list of `{decision, why}` for each choice the plan text did not
+  specify or that departs from it, or `none`, anything the next phase needs, your final
+  self-verify result (pass/fail + remaining errors), and any tasks you could not complete.
 
 **3. Foreign executors: name the required skills by path.** For any executor other than
 `claude`, add a block to the handoff that lists, by file path, the project skills the worker
@@ -191,8 +181,7 @@ The worktree-ownership rule and the destructive-git prohibition in the handoff (
 identically to every executor — they are properties of the handoff, not the harness.
 
 **Single-phase layer (the common case — unchanged from sequential):**
-1. With `--rules`, record the integration worktree HEAD as `<phase-start>` before spawning.
-   Spawn the phase agent in the integration worktree (background; 5b guard applies).
+1. Spawn the phase agent in the integration worktree (background; 5b guard applies).
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
@@ -207,8 +196,7 @@ identically to every executor — they are properties of the handoff, not the ha
    ```
    git -C <integration> worktree add <integration>/../.wt/<phase-slug> -b <phase-branch>
    ```
-2. With `--rules`, record each child worktree HEAD as that phase's `<phase-start>` before
-   spawning. Spawn all phase agents concurrently (background), each pointed at its own child
+2. Spawn all phase agents concurrently (background), each pointed at its own child
    worktree, capped at `MAX_PARALLEL_AGENTS`. The 5b runaway guard applies per agent.
 3. When ALL agents in the group have returned, merge each child branch into integration
    in turn (each agent committed its work per 5a.2, so there is something to merge):

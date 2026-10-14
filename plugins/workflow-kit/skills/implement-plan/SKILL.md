@@ -24,10 +24,10 @@ and owns the pass/fail decision and task tracking.
 
 ## Invocation
 
-`/workflow-kit:implement-plan <plan path> [--rules <path>]... [--worker]`
+`/workflow-kit:implement-plan <plan path> [--worker]`
 
-Parse repeatable `--rules` paths in invocation order and the optional `--worker` flag.
-Use the plan filename stem as `<plan-key>`. With neither flag, follow the existing flow.
+Parse the optional `--worker` flag. Use the plan filename stem as `<plan-key>`. Without
+`--worker`, follow the existing flow.
 
 ## Roles
 
@@ -132,15 +132,6 @@ causes bad scheduling or worktree collisions.
 **Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
 right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
 structure error, fix the parse or fall back to reading the plan directly before proceeding.
-
-With `--rules`, after the prep extract returns, run
-`scripts/escalation-rules.py merge [--rules <path>]...` and keep its JSON in the session
-scratchpad. Write the union of every phase's `**Files**:` list from the extract, one
-repo-relative path per line, to a scratch `named` file. Preserve the rules-file order. If
-either operation exits 2, stop and report the error. This activates the contract in
-`references/escalation-rules.md` § "Layers"; without `--rules`, do neither operation.
-In a `--rules --worker` run, apply incoming updates per
-`references/escalation-rules.md` § "Rules updates mid-run" and retain them for the report.
 
 When resuming a partially-complete plan, also diff the working-tree plan against committed
 state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
@@ -251,49 +242,10 @@ directly. On a trip, stop the worker with its executor binding (`TaskStop`, proc
 kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
-With `--worker`, use that reference's post-notify `needs input` path instead of waiting
-silently.
+With `--worker`, use `references/worker-mode.md` § "Asking the user" for the `needs input`
+block instead of waiting silently.
 
 ## Step 6: Quality Verification
-
-### Rules check (`--rules` only)
-
-After a phase agent returns and before its gate-verify, apply
-`references/escalation-rules.md` § "Matching", using the `<phase-start>` recorded when the
-phase was spawned, then:
-
-1. Treat a returned `needs_decision` as an Ask unless it matches an Ask already answered for
-   this phase; record a matching repeat as decide-and-tell.
-2. Run `scripts/escalation-rules.py check [--rules <path>]... --changed - --named
-   <scratch-named-file>` with `git diff --name-only --no-renames <phase-start>..HEAD` from the phase's
-   worktree on stdin. Treat every returned hit as an Ask. Exit 2 stops the run and is
-   reported.
-3. Match every returned `decisions` item against the merged Ask rules. Skip any decision that
-   matches an Ask already answered for this phase and record it as decide-and-tell. Otherwise,
-   a match is an Ask; retain unmatched items by tier for the report.
-
-Skip this entire check without `--rules`.
-
-### Ask handling
-
-For each Ask, write this callout directly under the phase heading in the plan file:
-
-```markdown
-> ⏸ **ASK**: <question> (rule: <rule>, layer: <layer>)
-```
-
-Follow Step 7's **Which copy** and outside-repository rules. Ask per
-`references/escalation-rules.md` § "Asking the user", using `<plan-key>` as the id, and
-remove the callout when answered. In a parallel group, let sibling phases finish, but do
-not advance the layer until every Ask in it is answered.
-
-On approval of a guardrail hit, append its path to the scratch `named` file. If the only Ask
-was an approved, already-committed guardrail hit, go straight to gate-verify. Otherwise,
-re-delegate the same phase with the answer as a constraint. Follow the retry instructions
-below: first read the committed diff plus working changes, then continue and self-verify.
-This decision retry does not count against `SELF_VERIFY_LIMIT`. If the answer rejects a
-committed guardrail edit, explicitly tell the retry agent to revert that edit. With `--rules`,
-run the Step 6 rules check on `<phase-start>..HEAD` before re-spawning gate-verify.
 
 Verification is **two-tier**:
 
@@ -354,9 +306,8 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
   same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary.
-  With `--rules`, run the Step 6 rules check on `<phase-start>..HEAD` before re-spawning
-  gate-verify. Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b
-  applies to retry sub-agents too.)
+  Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b applies to retry
+  sub-agents too.)
 - A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
   the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
   intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate
@@ -378,7 +329,8 @@ user's signal).
 → Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
 the user-wait steps: **`references/escalation.md`**.
 With `--worker`, that reference ends the turn after notification with the required
-`needs input` block instead of waiting silently.
+`needs input` block from `references/worker-mode.md` § "Asking the user" instead of waiting
+silently.
 
 ## Step 7: Task Tracking
 
@@ -437,8 +389,6 @@ and E2E failures. Re-run E2E only after a fix commit. One cap, `REVIEW_MAX_ROUND
 the combined loop. The orchestrator never reads the raw diff or verbatim E2E failures.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
-With `--rules`, that procedure gives fix workers the rules block and runs this Step 6 rules
-check on each fix commit range before gate-verify.
 
 ## Step 9: Pull Request
 
@@ -501,8 +451,9 @@ figure was wrong by 13× in a real run; no number is better than a wrong one.
 
 Once all phases are checked off:
 
-The `### Rules & Decisions` block below is conditional: include it only with `--rules` and
-omit it entirely otherwise.
+Fill `### Unplanned Decisions` from the workers' `unplanned_decisions` returns. Write `- None`
+when every list is empty. The user checks these at PR review instead of being asked during the
+run.
 
 ```markdown
 ## Implementation Report — <YYYY-MM-DD>
@@ -526,13 +477,8 @@ omit it entirely otherwise.
 ### Verification Status
 ✓ All phases passed verification
 
-### Rules & Decisions
-- Rules: <layer paths in order; include merge warnings>
-- Asks: <question> → <answer> (<phase>)
-- Guardrail hits: <path> (<pattern>, <layer>) → <outcome>
-- Decide and tell: <decision> (<scope>, <phase>)
-- Decide and log: <decision> (<scope>, <phase>) — for the lead to append to `decisions.md`
-- Rules updates: <rules-update messages received>
+### Unplanned Decisions
+- <decision> (<Phase N | rescue Phase N | review fix round N>) — <why>
 
 ### Review & Auto-fix
 - Reviewer: <REVIEW_MODEL> (<router reason | pinned>) on `<base>...HEAD` via <REVIEW_SKILL>
@@ -602,8 +548,9 @@ but its returned body omits the report, also print `PR report omitted — /creat
 report out`. Do not print the full report to the terminal.
 
 With `--worker`, make the final line exactly
-`implement-plan: done <plan-key> <PR url | pr-skipped>`. After a hard stop, make the final
-line `implement-plan: stopped <plan-key> <phase>` instead.
+`implement-plan: done <plan-key> <PR url | pr-skipped>`. `needs input` is a wait the run
+resumes from. Make `implement-plan: stopped <plan-key> <phase>` the final line only when the
+run ends at a hard stop, including when a `needs input` answer selects "stop the run".
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this

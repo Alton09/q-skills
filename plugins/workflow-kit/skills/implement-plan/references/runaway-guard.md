@@ -63,7 +63,7 @@ For all other workers:
    ```
 3. Without `--worker`, wait for the user's decision before doing anything else with this
    phase. With `--worker`, after notifying, end the turn with the `needs input` block from
-   `references/escalation-rules.md` § "Asking the user", id `<plan-key>`, and options to
+   `references/worker-mode.md` § "Asking the user", id `<plan-key>`, and options to
    continue the stopped phase, skip to gate-verify, or stop the run. The answer selects the
    next action.
 

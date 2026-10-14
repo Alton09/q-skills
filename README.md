@@ -35,22 +35,15 @@ skills as a starting point for your own project.
 
 #### Lead inputs
 
-Pass repeatable `--rules <path>` arguments to layer escalation rules lowest-first; for example:
-
-```bash
-/workflow-kit:implement-plan Features/Search/plan.md \
-  --rules Features/_project/escalation.md \
-  --rules Features/Search/brief.md
-```
-
-With `--worker`, a run launched by a lead does not ask interactively. When it needs a decision,
-it ends with a `<skill>: needs input` block. Completed runs use their skill's `done` line (for
+With `--worker`, a run launched by a lead does not ask interactively. An implement-plan run ends
+with `implement-plan: needs input` only when an exhausted escalation or a runaway-guard trip
+needs the user. See
+[`worker-mode.md`](plugins/workflow-kit/skills/implement-plan/references/worker-mode.md) for
+the block format. Completed runs use their skill's `done` line (for
 example, `feature-plan: done <plan path>` or `implement-plan: done <plan-key> <PR url | pr-skipped>`);
 an implement-plan hard stop uses `implement-plan: stopped <plan-key> <phase>`. Feature planning
 also supports `--handoff <path-or-summary>` to plan from a design handoff, repeatable
-`--context <path>` inputs, and `--out <path>` for the plan destination. See
-[`escalation-rules.md`](plugins/workflow-kit/skills/implement-plan/references/escalation-rules.md)
-for the full rules format.
+`--context <path>` inputs, and `--out <path>` for the plan destination.
 
 ### dev-toolkit
 
@@ -241,9 +234,6 @@ q-skills/
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
-          scripts/
-            escalation-rules.py      # Merge and check escalation-rule layers
-            escalation-rules.test.sh # Hermetic escalation-rule tests
         address-pr/           # PR comment, CI, and branch sync skill
     dev-toolkit/
       .claude-plugin/

@@ -56,16 +56,28 @@ Step 8; do not automatically re-run the stopped worker in that round.
 
 For all other workers:
 
-1. **Do NOT** check off the phase, run the gate-verify, or advance to the next phase.
+1. **Do NOT** check off the phase or advance to the next phase. Do not run the gate-verify
+   unless a completed worker hit the token ceiling and the user selects skip to gate-verify.
 2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
-   ```
-   <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
-   ```
+   - Without `--worker`:
+     ```
+     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
+     ```
+   - With `--worker`, use the matching worker options. For a wall-clock timeout:
+     ```
+     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit wall-clock timeout. Awaiting your call: continue the stopped phase or stop the run."
+     ```
+     For a token ceiling on a completed worker:
+     ```
+     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit token ceiling NNNk. Awaiting your call: continue the stopped phase, skip to gate-verify, or stop the run."
+     ```
 3. Without `--worker`, wait for the user's decision before doing anything else with this
    phase. With `--worker`, after notifying, end the turn with the `needs input` block from
-   `references/worker-mode.md` § "Asking the user", id `<plan-key>`, and options to
-   continue the stopped phase, skip to gate-verify, or stop the run. The answer selects the
-   next action.
+   `references/worker-mode.md` § "Asking the user", id `<plan-key>`. For a wall-clock
+   timeout, offer options to continue the stopped phase or stop the run. For a token ceiling
+   on a completed worker, also offer skip to gate-verify. Do not offer gate-verify after a
+   wall-clock trip: the worker was stopped and its partial work is not verified. The answer
+   selects the next action.
 
 > **Note:** mid-flight repeated-call / no-progress detection is intentionally NOT claimed
 > here — there is no live per-call feed for a sub-agent. The wall-clock budget is what

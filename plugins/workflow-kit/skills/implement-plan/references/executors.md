@@ -138,9 +138,10 @@ the `executor:model` address may come from the quota-aware router
   - `full-access` (opt-in): spawn device phases with `-s danger-full-access` in place of
     `workspace-write` and its `--add-dir` flags. Ask the user once per run before the first
     such spawn and record the answer in the report's E2E section; without a yes, fall back to
-    `reserved-device`. Every other codex spawn keeps `workspace-write`. The auto-mode
-    classifier may flag `danger-full-access`; surface the block to the user and never work
-    around it.
+    `reserved-device`. With `--worker`, do not ask: fall back to `reserved-device` and record
+    `full-access (user confirmed: no — worker run)` in the report. Every other codex spawn
+    keeps `workspace-write`. The auto-mode classifier may flag `danger-full-access`; surface
+    the block to the user and never work around it.
   - `off`: phase-execution.md 5a.2 routing applies unchanged (no reservation; a codex worker
     or gate cannot run device checks). A codex E2E worker cannot boot a device either.
 - **Model address syntax:** `codex:<model>`; pass the suffix as `-m <model>`. Phase tiers use `gpt-5.6-luna`,

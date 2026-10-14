@@ -35,13 +35,16 @@ skills as a starting point for your own project.
 
 #### Lead inputs
 
-With `--worker`, a run launched by a lead does not ask interactively. An implement-plan run ends
-with `implement-plan: needs input` only when an exhausted escalation or a runaway-guard trip
-needs the user. See
+With `--worker`, a run launched by a lead does not ask interactively. An implement-plan run
+requires a plan path; missing paths or inline content stop at pre-flight. A Codex
+`full-access` device request falls back to `reserved-device` without confirmation. The run
+pauses with `implement-plan: needs input` only when an exhausted escalation or a runaway-guard
+trip needs the user. See
 [`worker-mode.md`](plugins/workflow-kit/skills/implement-plan/references/worker-mode.md) for
 the block format. Completed runs use their skill's `done` line (for
 example, `feature-plan: done <plan path>` or `implement-plan: done <plan-key> <PR url | pr-skipped>`);
-an implement-plan hard stop uses `implement-plan: stopped <plan-key> <phase>`. Feature planning
+an implement-plan stop uses `implement-plan: stopped <plan-key> <phase | pre-flight | step-9>`.
+Feature planning
 also supports `--handoff <path-or-summary>` to plan from a design handoff, repeatable
 `--context <path>` inputs, and `--out <path>` for the plan destination.
 

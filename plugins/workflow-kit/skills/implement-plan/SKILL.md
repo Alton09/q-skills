@@ -26,8 +26,9 @@ and owns the pass/fail decision and task tracking.
 
 `/workflow-kit:implement-plan <plan path> [--worker]`
 
-Parse the optional `--worker` flag. Use the plan filename stem as `<plan-key>`. Without
-`--worker`, follow the existing flow.
+Parse the optional `--worker` flag. Use the plan filename stem as `<plan-key>`. With
+`--worker`, a plan path is required; inline markdown is not accepted. Without `--worker`,
+follow the existing flow.
 
 ## Roles
 
@@ -96,16 +97,17 @@ is delegated.
 If the user supplied a plan path as an argument, Step 1 is answered but Steps 2 and 3
 are not. Without `--worker`, ask them now. With `--worker`, ask nothing: use the session
 model as described in Step 2 and always create the worktree through `/create-worktree` as
-described in Step 3.
+described in Step 3. A `--worker` invocation with no plan path, or with inline markdown,
+does not enter Step 1: end with `implement-plan: stopped <unknown> pre-flight`.
 
 ## Step 1: Plan Selection
 
-Prompt user:
+Without `--worker`, prompt user:
 ```
 Plan file path (or paste markdown content):
 ```
 
-Accept either:
+Without `--worker`, accept either:
 - File path: `docs/plans/add-recipe-favorites.md`, `./my-plan.md`, etc.
 - Inline markdown: (user pastes plan content directly)
 
@@ -547,10 +549,13 @@ orchestrator cost row, PR URL or `PR skipped — <reason>`, and
 but its returned body omits the report, also print `PR report omitted — /create-pr left the
 report out`. Do not print the full report to the terminal.
 
-With `--worker`, make the final line exactly
-`implement-plan: done <plan-key> <PR url | pr-skipped>`. `needs input` is a wait the run
-resumes from. Make `implement-plan: stopped <plan-key> <phase>` the final line only when the
-run ends at a hard stop, including when a `needs input` answer selects "stop the run".
+With `--worker`, every terminal exit ends with either
+`implement-plan: done <plan-key> <PR url | pr-skipped>` or
+`implement-plan: stopped <plan-key> <phase>`. `needs input` pauses the run and resumes from
+that step. Use `pre-flight` for a plan structure error or `/create-worktree` failure before a
+phase, `step-9` for a Step 9 failure, and `<unknown> pre-flight` for missing or inline plan
+input. Use a phase name for a hard stop, including when a `needs input` answer selects "stop
+the run".
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this

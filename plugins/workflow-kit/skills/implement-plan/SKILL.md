@@ -22,6 +22,14 @@ Turn a plan into working, verified, tested code. The main agent is the
 dedicated sub-agent, watches that sub-agent, delegates the authoritative gate-verify,
 and owns the pass/fail decision and task tracking.
 
+## Invocation
+
+`/workflow-kit:implement-plan <plan path> [--worker]`
+
+Parse the optional `--worker` flag. Use the plan filename stem as `<plan-key>`. With
+`--worker`, a plan path is required; inline markdown is not accepted. Without `--worker`,
+follow the existing flow.
+
 ## Roles
 
 - **Orchestrator** (this agent, opus by default): pre-flight, worktree setup,
@@ -70,8 +78,8 @@ is present (`references/routing.md`).
 ## Step 0: Pre-Flight (MANDATORY before any implementation work)
 
 Before reading source files, writing code, or spawning any phase/implementation
-sub-agent, you MUST complete three pre-flight items in order (the Step 1 plan-parse prep
-agent is part of #1 and is allowed):
+sub-agent, parse the invocation flags, then complete three pre-flight items in order (the
+Step 1 plan-parse prep agent is part of #1 and is allowed):
 
 1. Plan path/content (Step 1)
 2. Orchestrator model check (Step 2) — opus default; confirm only for a non-Opus session;
@@ -86,17 +94,20 @@ manually migrate diffs — never acceptable. Sub-agents inherit the worktree
 path as their working directory, so the worktree MUST exist before any phase
 is delegated.
 
-If the user supplied a plan path as an argument, you have answered Step 1
-but you have NOT answered Steps 2 and 3. Ask them now.
+If the user supplied a plan path as an argument, Step 1 is answered but Steps 2 and 3
+are not. Without `--worker`, ask them now. With `--worker`, ask nothing: use the session
+model as described in Step 2 and always create the worktree through `/create-worktree` as
+described in Step 3. A `--worker` invocation with no plan path, or with inline markdown,
+does not enter Step 1: end with `implement-plan: stopped <unknown> pre-flight`.
 
 ## Step 1: Plan Selection
 
-Prompt user:
+Without `--worker`, prompt user:
 ```
 Plan file path (or paste markdown content):
 ```
 
-Accept either:
+Without `--worker`, accept either:
 - File path: `docs/plans/add-recipe-favorites.md`, `./my-plan.md`, etc.
 - Inline markdown: (user pastes plan content directly)
 
@@ -138,19 +149,23 @@ model because the orchestrator holds cross-phase state, judges complexity, and s
 sub-agents, which is exactly the work Opus is best at.
 
 Only when the session model is not in the recommended family (for default `opus`, not an
-Opus model), confirm with the user (one line). They relaunch on it — you can't change it
-from here:
+Opus model) and `--worker` is absent, confirm with the user (one line). They relaunch on it
+— you can't change it from here:
 ```
 Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> family recommended. To use a
 different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
+
+With `--worker`, ask nothing and continue on the session model. If it is not Opus-family,
+record that fact in the final report.
 
 Do NOT ask which model implements each phase — that is decided automatically per phase
 in Step 5 by complexity classification. Store the running model for the final report.
 
 ## Step 3: Worktree Setup
 
-Ask: "Should I create a new worktree? (y/n, default: y)"
+With `--worker`, ask nothing and always call `/create-worktree`. Otherwise ask: "Should I
+create a new worktree? (y/n, default: y)"
 
 If yes, call `/create-worktree` skill. Let the project implement worktree creation strategy (branch naming, isolation, etc.). Once the worktree is created, proceed directly to Step 4 — do NOT pause to confirm the worktree path with the user.
 
@@ -229,6 +244,8 @@ directly. On a trip, stop the worker with its executor binding (`TaskStop`, proc
 kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
+With `--worker`, use `references/worker-mode.md` § "Asking the user" for the `needs input`
+block instead of waiting silently.
 
 ## Step 6: Quality Verification
 
@@ -313,6 +330,9 @@ user's signal).
 
 → Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
 the user-wait steps: **`references/escalation.md`**.
+With `--worker`, that reference ends the turn after notification with the required
+`needs input` block from `references/worker-mode.md` § "Asking the user" instead of waiting
+silently.
 
 ## Step 7: Task Tracking
 
@@ -433,6 +453,10 @@ figure was wrong by 13× in a real run; no number is better than a wrong one.
 
 Once all phases are checked off:
 
+Fill `### Unplanned Decisions` from the workers' `unplanned_decisions` returns. Write `- None`
+when every list is empty. The user checks these at PR review instead of being asked during the
+run.
+
 ```markdown
 ## Implementation Report — <YYYY-MM-DD>
 
@@ -454,6 +478,9 @@ Once all phases are checked off:
 
 ### Verification Status
 ✓ All phases passed verification
+
+### Unplanned Decisions
+- <decision> (<Phase N | rescue Phase N | review fix round N>) — <why>
 
 ### Review & Auto-fix
 - Reviewer: <REVIEW_MODEL> (<router reason | pinned>) on `<base>...HEAD` via <REVIEW_SKILL>
@@ -521,6 +548,14 @@ orchestrator cost row, PR URL or `PR skipped — <reason>`, and
 `Full report: <plan-file path>`. If `/create-pr` opened a PR
 but its returned body omits the report, also print `PR report omitted — /create-pr left the
 report out`. Do not print the full report to the terminal.
+
+With `--worker`, every terminal exit ends with either
+`implement-plan: done <plan-key> <PR url | pr-skipped>` or
+`implement-plan: stopped <plan-key> <phase>`. `needs input` pauses the run and resumes from
+that step. Use `pre-flight` for a plan structure error or `/create-worktree` failure before a
+phase, `step-9` for a Step 9 failure, and `<unknown> pre-flight` for missing or inline plan
+input. Use a phase name for a hard stop, including when a `needs input` answer selects "stop
+the run".
 
 The run is complete. Follow-up questions, fixes (including below-threshold findings), and
 re-verification belong in a fresh session, which starts near zero context rather than at this

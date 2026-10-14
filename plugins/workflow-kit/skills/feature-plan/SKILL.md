@@ -7,7 +7,8 @@ description: >
   "plan this feature", "plan this work", "break this into tasks", "help me plan", or any
   request involving planning, task decomposition, or organizing work into parallelizable steps
   — even if they don't say "plan" explicitly but are describing a multi-step change they want
-  broken down first before building.
+  broken down first before building. Also use it for "plan from this design note", "handoff plan",
+  or to plan for the tech lead without questions.
 ---
 
 # Feature Plan
@@ -15,10 +16,26 @@ description: >
 Create a structured implementation plan that breaks work into sequential phases with clear
 tasks and acceptance criteria checkboxes, then save it so the `implement-plan` skill can pick it up.
 
+## Invocation
+
+```
+/workflow-kit:feature-plan [--handoff <design-note-path | summary text>] [--context <path>]... [--out <path>] [--worker]
+```
+
+- `--handoff`: Use handoff mode. The input is a design note file or a short summary.
+- `--context <path>`: Read extra files, for example the brief and `decisions.md`.
+- `--out <path>`: Save the plan there. It wins over `/save-plan` and the cwd fallback.
+- `--worker`: The lead launched this run. It changes only how this skill asks, as described in
+  `../implement-plan/references/worker-mode.md` § "Asking the user". Handoff mode asks
+  nothing, so this changes only how a non-handoff run asks.
+
 ## Step 1: Gather Context
 
-If the user already described the feature or bug in their message, proceed directly to research.
-Otherwise, ask:
+In handoff mode, ask no questions. Read the `--handoff` input and every `--context` file. If a
+fact is missing, decide it and record the decision as an assumption in the plan.
+
+Outside handoff mode, if the user already described the feature or bug in their message, proceed
+directly to research. Otherwise, ask:
 
 1. What needs to be built or changed?
 2. Any known modules, files, or tickets involved?
@@ -66,6 +83,11 @@ Use this structure:
 
 ## Context
 [What this plan accomplishes and why — 2–4 sentences]
+
+## Assumptions
+[Optional outside handoff mode; required in handoff mode. One bullet per decision the planner made
+that the input did not state.]
+- **A<n>** <decision>. Source: <design note | brief | decisions | codebase | default>.
 
 ## Architecture Diagram
 [Only include if the feature introduces non-trivial data flow, a new layer interaction,
@@ -166,7 +188,11 @@ criteria that a build, unit test, or static check can settle.
 
 ## Step 4: Save the Plan
 
-Invoke `/save-plan` with the plan key and plan content.
+If `--out` is present, save the plan there. It wins over `/save-plan` and the cwd fallback.
+When saving through `--out`, feature-plan never runs git in the plan's directory; the lead
+commits and pushes the plan.
+
+Otherwise, invoke `/save-plan` with the plan key and plan content.
 
 If `/save-plan` is not available, fall back to writing the plan to the working directory:
 
@@ -182,3 +208,10 @@ After saving, tell the user:
 1. Where the plan was saved
 2. Brief summary: how many phases, how many tasks, rough breakdown of what each phase covers
 3. Any risks or open questions they should decide before implementing
+4. In handoff mode, how many assumptions the plan records
+
+With `--worker`, end the final reply with this line:
+
+```
+feature-plan: done <plan path>
+```

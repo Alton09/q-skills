@@ -51,7 +51,8 @@ below, read it as "the failed phase or group."
      This is what makes the escalation more than a model bump.
    - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
      self-verify) → gate-verify, same as a phase. The runaway guard (5b, extended budget)
-     applies to every escalation attempt.
+     applies to every escalation attempt. The rescue payload uses the phase return format,
+     including `unplanned_decisions`.
 4. Outcome:
    - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the
      phase/group (Step 7), and continue to the next phase/layer.
@@ -77,6 +78,10 @@ below, read it as "the failed phase or group."
    ```
    /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and escalation halted. Error: <summary>"
    ```
-3. Wait for user intervention — do NOT check off the phase or continue.
-4. User fixes the issue in the worktree, signals ready to retry.
+3. Without `--worker`, wait for user intervention — do NOT check off the phase or continue.
+   With `--worker`, after notifying, end the turn with the `needs input` block from
+   `references/worker-mode.md` § "Asking the user", id `<plan-key>`, and options to
+   retry from the failed phase or stop the run.
+4. User fixes the issue in the worktree and signals ready to retry. In a `--worker` run,
+   the answer selecting retry is that signal.
 5. Skill resumes from the failed phase.

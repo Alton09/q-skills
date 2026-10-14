@@ -115,9 +115,10 @@ everything the phase needs:
   specific edit you made."
 - Explicit boundaries: "implement ONLY this phase's tasks; do NOT edit the plan file,
   do NOT start other phases. Return a structured summary."
-- Required return format: files touched, what each does, decisions made, anything the
-  next phase needs, your final self-verify result (pass/fail + remaining errors), and
-  any tasks you could not complete.
+- Required return format: files touched, what each does, decisions made,
+  `unplanned_decisions`: a list of `{decision, why}` for each choice the plan text did not
+  specify or that departs from it, or `none`, anything the next phase needs, your final
+  self-verify result (pass/fail + remaining errors), and any tasks you could not complete.
 
 **3. Foreign executors: name the required skills by path.** For any executor other than
 `claude`, add a block to the handoff that lists, by file path, the project skills the worker

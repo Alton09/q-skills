@@ -140,7 +140,8 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
    fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include
    the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
    and iterate while warm, bounded by `SELF_VERIFY_LIMIT`; commit on pass; report whether a
-   commit was made.
+   commit was made and `unplanned_decisions`: a list of `{decision, why}` for each choice the
+   plan text did not specify or that departs from it, or `none`.
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
    integration worktree — one independent confirmation for the combined pass, exactly as
    for a phase. Do not run a gate per source.

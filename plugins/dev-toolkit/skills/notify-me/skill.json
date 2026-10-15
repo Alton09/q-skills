@@ -1,7 +1,7 @@
 {
   "name": "notify-me",
   "version": "1.0.0",
-  "description": "Send macOS system notifications from Claude Code",
+  "description": "Send macOS and Linux system notifications from Claude Code",
   "triggers": ["notify-me", "notify", "send notification"],
   "executable": "notify-me.sh",
   "args": [
@@ -25,6 +25,6 @@
       "description": "Optional subtitle line"
     }
   ],
-  "platform": "darwin",
-  "dependencies": ["terminal-notifier"]
+  "platform": ["darwin", "linux"],
+  "dependencies": ["terminal-notifier (macOS)", "notify-send (Linux, libnotify)"]
 }

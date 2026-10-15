@@ -18,6 +18,12 @@
       "prompt": "Notify with a three-part notification: title 'Deployment', message 'Finished successfully', subtitle 'Production'",
       "expected_output": "Native macOS notification displays with all three parts: title, message, and subtitle",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "On Linux, send a notification that says 'Tests passed' with the title 'CI Pipeline' and subtitle 'main branch'",
+      "expected_output": "On Linux, notify-send runs with title 'CI Pipeline' and body 'main branch — Tests passed' (subtitle prepended to the message), and the message text is passed literally",
+      "files": []
     }
   ]
 }

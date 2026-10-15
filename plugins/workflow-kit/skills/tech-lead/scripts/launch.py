@@ -18,8 +18,8 @@ WORKER_PROTOCOL = """Worker protocol:
 Item file: {item_path}
 Repository: {repo_dir}
 Worktree: {worktree_path}
-Never edit the dossier directly; use {events_path} worker-event for every dossier update.
-Before ending with a needs input block, run `{events_path} worker-event --item {item_path} --line \"<first line>\" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
+Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
+Before ending with a needs input block, run `python3 {events_path} worker-event --item {item_path} --line \"<whole needs input block>\" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
 After the skill's final done or stopped line, run the same command with that line; if `push` is non-null, call PushNotification with it."""
 
 

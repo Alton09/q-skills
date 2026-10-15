@@ -3,6 +3,11 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 launch="$script_dir/launch.py"
+# Both helpers are also directly executable by documented worker/lead commands.
+[ -x "$launch" ]
+[ -x "$script_dir/events.py" ]
+"$launch" --help >/dev/null
+"$script_dir/events.py" --help >/dev/null
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -56,6 +61,10 @@ constant = next(
     if isinstance(target, ast.Name) and target.id == "WORKER_PROTOCOL"
 )
 match = re.search(r"^## Worker protocol\n.*?^```text\n(.*?)^```$", workers.read_text(encoding="utf-8"), re.MULTILINE | re.DOTALL)
+assert "use python3 {events_path} worker-event" in constant
+assert "`python3 {events_path} worker-event" in constant
+assert '--line "<whole needs input block>"' in constant
+assert "<first line>" not in constant
 assert match, "workers.md has no Worker protocol text block"
 assert match.group(1).rstrip("\n") == constant, "workers.md protocol differs from launch.py WORKER_PROTOCOL"
 PY

@@ -135,7 +135,7 @@ def parse_worker_line(line: str, data: dict[str, str | list[str]], repo: Path) -
         key, url = match.groups()
         branch, worktree, _body, unplanned = pr_details(url, repo)
         return {"stage": "pr", "status": "idle", "pr": url, "branch": branch, "worktree": worktree, "unplanned": str(unplanned)}, None, "impl-done", key
-    match = re.fullmatch(r"implement-plan: stopped (<?unknown>?|\S+) (phase|pre-flight|step-9)", first)
+    match = re.fullmatch(r"implement-plan: stopped (\S+) (.+)", first)
     if match:
         _key, phase = match.groups()
         return {"status": "stuck"}, "stuck", "stuck", phase
@@ -159,14 +159,24 @@ def parse_worker_line(line: str, data: dict[str, str | list[str]], repo: Path) -
 def worker_event(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.item).resolve()
     data, body, vault, feature = item_context(path)
-    first = args.line.splitlines()[0] if args.line.splitlines() else ""
-    # A paused event is fully idempotent: avoid timestamp/log churn on an idle-notice repeat.
-    needs = NEEDS_INPUT.search(args.line)
-    existing = data.get("notified", [])
-    if needs and isinstance(existing, list) and f"paused-{needs.group(2)}" in existing:
-        return {"item": str(path), "event": f"paused-{needs.group(2)}", "push": None, "synced": False}
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
     updates, event, log_event, detail = parse_worker_line(args.line, data, repo)
+    # State, rather than historical notification keys, identifies a repeated pause.
+    if updates.get("status") == "paused":
+        repeated = data.get("status") == "paused" and data.get("question") == updates["question"]
+    else:
+        # A new completion follows a running worker. Ignore the computed next round
+        # when comparing an already-applied completion with its resulting state.
+        repeated = all(data.get(key) == value for key, value in updates.items() if key != "round")
+    if repeated:
+        if event and event.startswith("fix-pushed-"):
+            event = f"fix-pushed-{data.get('round', '0')}"
+        return {"item": str(path), "event": event, "push": None, "synced": False}
+    # A changed question during the same pause must also be delivered.
+    if updates.get("status") == "paused" and data.get("status") == "paused":
+        notified = data.get("notified", [])
+        if isinstance(notified, list):
+            data["notified"] = [key for key in notified if key != event]
     note = None
     if log_event == "stuck":
         note = f"worker stuck: {detail}"

@@ -26,7 +26,9 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
    from `target` for `--model`.
 4. Run `launch.py command` with the item, kind, model, and required kind-specific arguments,
    then execute its returned `argv` without changing argument order. Record `worker`,
-   `sessionId`, `workerKind`, and `status: running`; sync the item. For an `implement` launch,
+   `sessionId`, `workerKind`, and `status: running`. Before syncing, remove `stuck` and all
+   `paused-*` keys from `notified`, preserving all other keys, and clear `question`. This
+   applies to relaunches too; sync the item. For an `implement` launch,
    notify `impl-started` through `events.py notify`; other launch kinds have no notification
    event. Subscribe using an empty `SendMessage` with `notify_when_idle: true` immediately
    after launch.
@@ -41,8 +43,8 @@ Worker protocol:
 Item file: {item_path}
 Repository: {repo_dir}
 Worktree: {worktree_path}
-Never edit the dossier directly; use {events_path} worker-event for every dossier update.
-Before ending with a needs input block, run `{events_path} worker-event --item {item_path} --line "<first line>" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
+Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
+Before ending with a needs input block, run `python3 {events_path} worker-event --item {item_path} --line "<whole needs input block>" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
 After the skill's final done or stopped line, run the same command with that line; if `push` is non-null, call PushNotification with it.
 ```
 
@@ -83,7 +85,9 @@ A `paused` worker is either an `implement-plan` worker stopped by its own guard 
 give the answer to the lead. Before forwarding a lead-held answer, run `events.py agents`.
 Send `SendMessage` only when that worker is `idle`; when it is `waiting`, the user must attach
 because `AskUserQuestion` owns the reply path. After a successful forward, set
-`status: running`, sync, and re-arm `notify_when_idle`. Do not send a notification merely for
+`status: running`, clear `question`, and remove `stuck` and all `paused-*` keys from
+`notified` while preserving other keys; sync and re-arm `notify_when_idle`. Apply the same
+state changes when reconciling a resume through `claude attach`. Do not send a notification merely for
 the resume; the earlier `paused-<id>` notification already carries the attach command.
 
 ## Permissions and trust

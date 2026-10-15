@@ -31,6 +31,18 @@ fail() { echo "FAIL case $n: $1" >&2; [ -n "$out" ] && echo "  output: $out" >&2
 pass() { echo "ok $n"; }
 expect() { actual=$(jq -c "$1" <<<"$out") || fail "not JSON"; [ "$actual" = "$2" ] || fail "$1 = $actual, expected $2"; }
 run() { out=$(python3 "$script" "$@"); rc=$?; [ "$rc" -eq 0 ] || fail "exit $rc"; }
+# Repeat completed events as the lead would, asserting no item/log/note churn.
+run_twice() {
+  run "$@"
+  local first_out=$out
+  cp "$item" "$tmp/item-before"
+  cp "$tmp/vault/Features/alpha/log.md" "$tmp/log-before"
+  run "$@"
+  expect .push null; expect .synced false
+  cmp -s "$item" "$tmp/item-before" || fail 'duplicate changed item or notes'
+  cmp -s "$tmp/vault/Features/alpha/log.md" "$tmp/log-before" || fail 'duplicate appended log'
+  out=$first_out
+}
 new_item() { local slug=$1 kind=${2:-implement}; cat >"$tmp/vault/Features/alpha/items/$slug.md" <<EOF
 ---
 slug: $slug
@@ -47,7 +59,7 @@ item=$(new_item plan)
 
 # 1. feature-plan done mapping.
 n=1
-run worker-event --item "$item" --line 'feature-plan: done plans/alpha.md' --no-sync
+run_twice worker-event --item "$item" --line 'feature-plan: done plans/alpha.md' --no-sync
 expect .event '"plan-done"'; expect .push '"[alpha] plan-done — plans/alpha.md"'
 expect .synced false
 grep -Fq 'stage: plan' "$item" || fail 'plan stage'; grep -Fq 'plan: plans/alpha.md' "$item" || fail 'plan path'
@@ -58,7 +70,7 @@ n=2
 item=$(new_item impl)
 export WORKTREE_FIXTURE="$tmp/wt-alpha"
 export GH_BODY='{"headRefName":"feat/alpha","body":"### Unplanned Decisions\n- chose one\n- chose two\n\n### Other\ntext"}'
-run worker-event --item "$item" --repo "$tmp/repo" --line 'implement-plan: done alpha https://example.invalid/pr/1' --no-sync
+run_twice worker-event --item "$item" --repo "$tmp/repo" --line 'implement-plan: done alpha https://example.invalid/pr/1' --no-sync
 expect .event null; expect .push null
 grep -Fq 'stage: pr' "$item" || fail 'pr stage'; grep -Fq 'worktree: '"$tmp/wt-alpha" "$item" || fail 'worktree'
 grep -Fq 'unplanned: 2' "$item" || fail 'unplanned two'
@@ -68,44 +80,47 @@ pass
 n=3
 item=$(new_item none)
 export GH_BODY='{"headRefName":"feat/alpha","body":"### Unplanned Decisions\n- None\n"}'
-run worker-event --item "$item" --repo "$tmp/repo" --line 'implement-plan: done alpha https://example.invalid/pr/2' --no-sync
+run_twice worker-event --item "$item" --repo "$tmp/repo" --line 'implement-plan: done alpha https://example.invalid/pr/2' --no-sync
 grep -Fq 'unplanned: 0' "$item" || fail 'unplanned none'
 pass
 
 # 4. pr-skipped maps to stuck and sends stuck.
 n=4
 item=$(new_item skipped)
-run worker-event --item "$item" --line 'implement-plan: done alpha pr-skipped' --no-sync
+run_twice worker-event --item "$item" --line 'implement-plan: done alpha pr-skipped' --no-sync
 expect .event '"stuck"'; grep -Fq 'status: stuck' "$item" || fail 'not stuck'
 pass
 
 # 5. stopped supports both documented unknown spellings.
 n=5
 item=$(new_item stopped)
-run worker-event --item "$item" --line 'implement-plan: stopped <unknown> pre-flight' --no-sync
+run_twice worker-event --item "$item" --line 'implement-plan: stopped <unknown> pre-flight' --no-sync
 expect .event '"stuck"'; grep -Fq 'pre-flight' "$item" || fail 'phase note'
 item=$(new_item stoppedliteral)
-run worker-event --item "$item" --line 'implement-plan: stopped unknown step-9' --no-sync
+run_twice worker-event --item "$item" --line 'implement-plan: stopped unknown step-9' --no-sync
 expect .event '"stuck"'
+item=$(new_item namedphase)
+run_twice worker-event --item "$item" --line 'implement-plan: stopped alpha Phase 2' --no-sync
+expect .event '"stuck"'; grep -Fq 'Phase 2' "$item" || fail 'named phase note'
 pass
 
 # 6. address-pr comments increments a round and notifies.
 n=6
 item=$(new_item comments comments)
-run worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
+run_twice worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
 expect .event '"fix-pushed-1"'; grep -Fq 'round: 1' "$item" || fail 'round'
 pass
 
 # 7. address-pr ci and sync are logged only; no-push records a note.
 n=7
 item=$(new_item ci ci)
-run worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
+run_twice worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
 expect .event null
 item=$(new_item sync sync)
-run worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
+run_twice worker-event --item "$item" --line 'address-pr: done #12 abcdef' --no-sync
 expect .event null
 item=$(new_item nopush comments)
-run worker-event --item "$item" --line 'address-pr: done #12 no-push' --no-sync
+run_twice worker-event --item "$item" --line 'address-pr: done #12 no-push' --no-sync
 expect .event null; grep -Fq 'without a push' "$item" || fail 'no-push note'
 pass
 
@@ -133,4 +148,37 @@ n=10
 export CLAUDE_AGENTS='[{"name":"alpha","status":"idle","state":"done","waitingFor":null}]'
 run agents
 expect '.byName.alpha.status' '"idle"'
+pass
+
+# 11. A changed question on the same paused PR is recorded and delivered.
+n=11
+item=$(new_item changedpause)
+block=$'address-pr: needs input #12\nQuestion: Keep the old API?'
+run worker-event --item "$item" --line "$block" --no-sync
+block=$'address-pr: needs input #12\nQuestion: Remove the old API?'
+run worker-event --item "$item" --line "$block" --no-sync
+expect '.push != null' true
+grep -Fq 'question: Remove the old API?' "$item" || fail 'stale question'
+run worker-event --item "$item" --line "$block" --no-sync
+expect .push null
+pass
+
+# 12. Follow workers.md resume/relaunch bookkeeping, then reuse the same pause ID.
+n=12
+python3 "$here/dossier.py" item set "$item" status=running question= 'notified=[]' >/dev/null
+run worker-event --item "$item" --line "$block" --no-sync
+expect '.push != null' true
+grep -Fq 'status: paused' "$item" || fail 'second pause not recorded'
+run worker-event --item "$item" --line "$block" --no-sync
+expect .push null
+pass
+
+# 13. A stuck event notifies again after relaunch, even with the same stop line.
+n=13
+item=$(new_item relaunched)
+run_twice worker-event --item "$item" --line 'implement-plan: stopped alpha Phase 2' --no-sync
+expect '.push != null' true
+python3 "$here/dossier.py" item set "$item" status=running question= 'notified=[]' >/dev/null
+run_twice worker-event --item "$item" --line 'implement-plan: stopped alpha Phase 2' --no-sync
+expect '.push != null' true
 pass

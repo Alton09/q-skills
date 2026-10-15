@@ -40,9 +40,11 @@ Compare the physical current directory with `git rev-parse --show-toplevel`; ref
 or mutate a dossier unless they are equal. Workers inherit this directory, so starting
 elsewhere would attach them to the wrong repository.
 
-Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Require the lead
-session to use permission mode `auto`. If `permissionMode` is not `auto`, explain that workers
-still launch in `auto` and cross-mode messages can stall, then stop before launching. Follow
+Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the lead
+session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers
+still launch in `auto` and cross-mode messages can stall. This check reads the configured
+default and cannot see the session's actual permission mode (including a CLI override);
+continue after the warning. Follow
 `references/workers.md` § "Permissions and trust" for the trust and allow-rule setup.
 
 Before each launch, apply `../implement-plan/references/routing.md` § "Orchestrator gate" via

@@ -182,3 +182,41 @@ python3 "$here/dossier.py" item set "$item" status=running question= 'notified=[
 run_twice worker-event --item "$item" --line 'implement-plan: stopped alpha Phase 2' --no-sync
 expect '.push != null' true
 pass
+
+# 14. last-reply retains the full pause block so the lead can recover an unrecorded pause.
+n=14
+block=$'implement-plan: needs input alpha\nQuestion: Keep the old API?\nOptions:\n1. Yes\n2. No'
+jq -nc --arg text "$block" '{type:"assistant",message:{content:[{type:"text",text:("Guard stopped work.\n" + $text)}]}}' >>"$HOME/.claude/projects/$slug/s1.jsonl"
+run last-reply --session s1 --cwd "$tmp/repo"
+expect .line "$(jq -nc --arg block "$block" '$block')"
+expect .reply "$(jq -nc --arg block "$block" '"Guard stopped work.\n" + $block')"
+recovered=$(jq -r .line <<<"$out")
+item=$(new_item recoveredpause)
+run_twice worker-event --item "$item" --line "$recovered" --no-sync
+expect .event '"paused-alpha"'; expect '.push != null' true
+grep -Fq 'status: paused' "$item" || fail 'pause not recovered'
+grep -Fq 'question: Keep the old API?' "$item" || fail 'question not recovered'
+pass
+
+# 15. A header-only repeat of a recorded pause does not write, sync, or notify.
+n=15
+cp "$item" "$tmp/item-before"
+cp "$tmp/vault/Features/alpha/log.md" "$tmp/log-before"
+run worker-event --item "$item" --line 'implement-plan: needs input alpha'
+expect .event '"paused-alpha"'; expect .push null; expect .synced false
+cmp -s "$item" "$tmp/item-before" || fail 'header repeat changed item'
+cmp -s "$tmp/vault/Features/alpha/log.md" "$tmp/log-before" || fail 'header repeat appended log'
+pass
+
+# 16. An unrecorded pause still requires its question before changing state.
+n=16
+item=$(new_item missingquestion)
+cp "$item" "$tmp/item-before"
+cp "$tmp/vault/Features/alpha/log.md" "$tmp/log-before"
+out=$(python3 "$script" worker-event --item "$item" --line 'implement-plan: needs input alpha' --no-sync 2>"$tmp/error")
+rc=$?
+[ "$rc" -eq 2 ] || fail "exit $rc, expected 2"
+grep -Fq 'needs input block has no Question: line' "$tmp/error" || fail 'missing question diagnostic'
+cmp -s "$item" "$tmp/item-before" || fail 'invalid header changed item'
+cmp -s "$tmp/vault/Features/alpha/log.md" "$tmp/log-before" || fail 'invalid header appended log'
+pass

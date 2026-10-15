@@ -160,6 +160,10 @@ def worker_event(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.item).resolve()
     data, body, vault, feature = item_context(path)
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+    # A truncated idle notice can repeat a pause already recorded by the worker.
+    needs = NEEDS_INPUT.fullmatch(args.line.strip())
+    if needs and data.get("status") == "paused":
+        return {"item": str(path), "event": f"paused-{needs.group(2)}", "push": None, "synced": False}
     updates, event, log_event, detail = parse_worker_line(args.line, data, repo)
     # State, rather than historical notification keys, identifies a repeated pause.
     if updates.get("status") == "paused":
@@ -235,9 +239,12 @@ def last_reply(args: argparse.Namespace) -> dict[str, Any]:
             continue
         if text:
             reply = text
-            for candidate in text.splitlines():
+            lines = text.splitlines()
+            for index, candidate in enumerate(lines):
                 if STATUS_LINE.fullmatch(candidate.strip()):
                     line = candidate.strip()
+                    if NEEDS_INPUT.fullmatch(line):
+                        line = "\n".join([line, *lines[index + 1:]])
     return {"reply": reply, "line": line}
 
 

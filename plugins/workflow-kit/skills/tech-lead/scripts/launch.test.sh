@@ -40,4 +40,24 @@ item_path="$vault_a/Features/alpha/items/implement.md"
 export item_path
 printf '%s' "$command" | check 'import os; x=json.load(sys.stdin); assert x["argv"][:2] == ["claude", "--bg"], x; assert "--worker" in x["prompt"] and os.path.abspath(os.environ["item_path"]) in x["prompt"], x; assert "--rules" not in x["prompt"], x'
 
+python3 - "$launch" "$script_dir/../references/workers.md" <<'PY'
+import ast
+import re
+import sys
+from pathlib import Path
+
+launch, workers = map(Path, sys.argv[1:])
+tree = ast.parse(launch.read_text(encoding="utf-8"))
+constant = next(
+    node.value.value
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    for target in node.targets
+    if isinstance(target, ast.Name) and target.id == "WORKER_PROTOCOL"
+)
+match = re.search(r"^## Worker protocol\n.*?^```text\n(.*?)^```$", workers.read_text(encoding="utf-8"), re.MULTILINE | re.DOTALL)
+assert match, "workers.md has no Worker protocol text block"
+assert match.group(1).rstrip("\n") == constant, "workers.md protocol differs from launch.py WORKER_PROTOCOL"
+PY
+
 printf 'launch.test.sh: pass\n'

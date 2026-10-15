@@ -1,0 +1,35 @@
+{
+  "skill_name": "tech-lead",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Resume the lead for checkout. Fixture: `payments` is an item with `status: paused`, worker `checkout-payments`, and the user answers the recorded question with 'Use the existing retry policy.' `events.py agents` reports that worker as `idle`.",
+      "expected_output": "Rehydrates the dossier, forwards the user's answer with SendMessage only after confirming the worker is idle, then sets the item status to `running`, syncs it, and re-arms the empty `notify_when_idle` subscription. It does not emit a new resume notification.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Resume the lead for checkout. Fixture: the same paused `payments` item and answer as before, but `events.py agents` reports worker `checkout-payments` as `waiting`.",
+      "expected_output": "Tells the user to run `claude attach checkout-payments` because AskUserQuestion owns the reply path. It sends no SendMessage, leaves the item paused, and does not sync a resumed state.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Start the `api-client` implementation item for feature mobile-sync. Fixture: `launch.py overlap` reports that another lead's `platform/auth-refresh` item is at stage `pr` and overlaps `src/api/client.py`.",
+      "expected_output": "Sets `api-client` to `status: blocked`, syncs the item, and identifies `platform/auth-refresh` as the blocker. It starts no worker and sends no notification; it only asks about ordering if both otherwise-ready items require a user choice.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Launch the next queued handoff-plan worker for analytics. Fixture: `launch.py capacity` returns `free: 0` and a queue containing the item.",
+      "expected_output": "Keeps the item at `status: queued`, syncs it, and tells the user that it is queued until capacity frees. It does not call the quota gate, start a worker, or send a notification.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Handle merge follow-up for PR 84 in feature checkout. Fixture: the merged PR body has a `### Unplanned Decisions` section with two reviewed decisions: adopt the repository-wide retry convention, and rename this feature's receipt label.",
+      "expected_output": "Records the item as merged then done and logs `phase-done`. It appends both surviving decisions with source `PR #84 unplanned`; it asks and emits a deduplicated `decision-<n>` notification only for the repository-wide retry convention's project-default scope, while logging the receipt-label decision at feature scope without asking.",
+      "files": []
+    }
+  ]
+}

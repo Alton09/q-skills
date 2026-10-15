@@ -183,3 +183,15 @@ python3 "$script" item set "$item" stage=nonsense >"$tmp/bad.out" 2>"$tmp/bad.er
 rc=$?
 [ "$rc" -eq 2 ] || fail "invalid stage exit $rc"
 pass
+
+# 11. The highest-precedence settings file supplies permissionMode.
+n=11
+printf '%s\n' '{"permissions":{"defaultMode":"default"}}' >"$HOME/.claude/settings.json"
+printf '%s\n' '{"permissions":{"defaultMode":"plan"}}' >"$tmp/project/.claude/settings.json"
+printf '%s\n' '{"permissions":{"defaultMode":"acceptEdits"}}' >"$tmp/project/.claude/settings.local.json"
+run checks --project-dir "$tmp/project"
+expect .permissionMode '"acceptEdits"'
+rm -f "$tmp/project/.claude/settings.local.json"
+run checks --project-dir "$tmp/project"
+expect .permissionMode '"plan"'
+pass

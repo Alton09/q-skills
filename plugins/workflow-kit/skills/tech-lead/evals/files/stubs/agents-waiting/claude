@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+printf '%s\n' '[{"name":"checkout-payments","status":"waiting","state":"running","waitingFor":"AskUserQuestion"}]'

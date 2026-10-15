@@ -1,0 +1,1 @@
+- 2026-09-01 [project] Use the shared retry policy in core/net for every HTTP client — one tuning point (design review)

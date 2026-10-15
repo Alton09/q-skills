@@ -17,21 +17,27 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
 2. Run `launch.py capacity --vault <vault> --project-dir <repo>`. When `free` is zero, set
    `status: queued`, sync the item, and tell the user it is queued; no notification event is
    sent. Reconsider queued items in the returned `queue` order when capacity frees.
-3. Run `../../implement-plan/scripts/route-target.sh --role orchestrator --project-dir <repo>`.
+3. Run `<skill-dir>/../implement-plan/scripts/route-target.sh --role orchestrator
+   --project-dir <repo>`.
    When `usable` is `false`, keep the item at `status: queued`, ask `Claude at <percent>%,
    resets <relative resetsAt>. Start now or wait?`, and notify `quota-blocked` with
    `events.py notify`. On approval, continue with the selected target. When `quota` is
-   `unavailable`, set `status: running` after launch, notify no event, and tell the user the
-   warning: routing is fail-safe and does not stop a run. Take the model id after `claude:`
-   from `target` for `--model`.
-4. Run `launch.py command` with the item, kind, model, and required kind-specific arguments,
-   then execute its returned `argv` without changing argument order. Record `worker`,
-   `sessionId`, `workerKind`, and `status: running`. Before syncing, remove `stuck` and all
-   `paused-*` keys from `notified`, preserving all other keys, and clear `question`. This
-   applies to relaunches too; sync the item. For an `implement` launch,
-   notify `impl-started` through `events.py notify`; other launch kinds have no notification
-   event. Subscribe using an empty `SendMessage` with `notify_when_idle: true` immediately
-   after launch.
+   `unavailable`, continue the launch, notify no event, and tell the user the warning: routing
+   is fail-safe and does not stop a run. Take the model id after `claude:` from `target` for
+   `--model`. When `target` is `null` (invalid config, a failed script, or output that is not
+   JSON), print its `warnings` or stderr once and use `--model opus`, the built-in orchestrator
+   default; this is not a quota block, so notify no event.
+4. Before launching, write `status: running` and `workerKind`, clear `question`, and remove
+   `stuck` and all `paused-*` keys from `notified` while preserving all other keys. This
+   applies to relaunches too. Do this first because a worker that stops quickly records its own
+   `stuck` or `paused-<id>`, and a later cleanup would erase it.
+5. Run `launch.py command` with the item, kind, model, the dev-toolkit `notify-me.sh` path as
+   `--notify-cmd` when it exists, and the required kind-specific arguments. Execute its
+   returned `argv` without changing argument order. If the launch fails, restore the item's
+   previous `status` and sync. Otherwise record only `worker` and `sessionId`, without
+   rewriting `status`, and sync the item. For an `implement` launch, notify `impl-started`
+   through `events.py notify`; other launch kinds have no notification event. Subscribe using
+   an empty `SendMessage` with `notify_when_idle: true` immediately after launch.
 
 ## Worker protocol
 
@@ -44,18 +50,22 @@ Item file: {item_path}
 Repository: {repo_dir}
 Worktree: {worktree_path}
 Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
-Before ending with a needs input block, run `python3 {events_path} worker-event --item {item_path} --line "<whole needs input block>" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
-After the skill's final done or stopped line, run the same command with that line; if `push` is non-null, call PushNotification with it.
+Before ending with a needs input block, pass the whole block on stdin through this quoted heredoc, so the shell never expands its text:
+python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'TECH_LEAD_EVENT'
+<whole needs input block>
+TECH_LEAD_EVENT
+After the skill's final done or stopped line, run the same command with that line as the heredoc body.
+After either command, if `push` is non-null, call PushNotification with it.
 ```
 
 ## Watch
 
 Treat an idle notice as the primary completion signal. Run `events.py worker-event --item <item>
---line <final-line>` for its final line; if the notice is truncated, first run
-`events.py last-reply --session <sessionId> --cwd <worktree>` and use its `line`. This is
-idempotent, which makes it safe when both worker and lead report the same final line. Act on
-the recorded event and item state, then re-arm the empty `SendMessage` subscription while the
-item remains active.
+--line-file -` for its final line, passing the line on stdin through a quoted heredoc; if the
+notice is truncated, first run `events.py last-reply --session <sessionId> --cwd <repo>` and
+use its `line`. This is idempotent, which makes it safe when both worker and lead report the
+same final line. Act on the recorded event and item state, then re-arm the empty `SendMessage`
+subscription while the item remains active.
 
 A live lead may also use `Monitor` loops for work that needs external observation. Use
 `events.py agents` only as a restarted lead's fallback, not as normal polling: the subscription
@@ -65,8 +75,9 @@ avoids missed completion while keeping the item file as the source of truth.
 
 For every active item, read the item and run `events.py agents`. Check its plan-file checkboxes,
 run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
-run `events.py last-reply --session <sessionId> --cwd <worktree>`. Reconcile the combinations
-as follows:
+run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the lead's
+repository root, so their transcripts live under that directory, not the worktree. Reconcile
+the combinations as follows:
 
 | Observed combination | Action |
 |---|---|

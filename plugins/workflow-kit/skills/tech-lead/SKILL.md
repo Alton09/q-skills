@@ -17,9 +17,11 @@ PR review boundaries; keep durable state in the dossier so another session can r
 
 `/workflow-kit:tech-lead [<feature>] [--from <master-plan>]`
 
-Run from the project repository root. Use `python3 scripts/dossier.py` for dossier commands,
-`python3 scripts/launch.py` for launch decisions, and `python3 scripts/events.py` for worker
-events.
+Run from the project repository root. `<skill-dir>` is this skill's directory (the one that
+holds this `SKILL.md`), not the working directory. Use `python3 <skill-dir>/scripts/dossier.py`
+for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisions, and
+`python3 <skill-dir>/scripts/events.py` for worker events. The short names below (`dossier.py`,
+`launch.py`, `events.py`) mean these paths.
 
 1. Run `dossier.py resolve-vault --project-dir <repo>`. If it returns `source: none`, ask once
    for the vault path and suggest setting `lead.vault` in `.claude/workflow-kit.json`; do not
@@ -47,8 +49,8 @@ default and cannot see the session's actual permission mode (including a CLI ove
 continue after the warning. Follow
 `references/workers.md` § "Permissions and trust" for the trust and allow-rule setup.
 
-Before each launch, apply `../implement-plan/references/routing.md` § "Orchestrator gate" via
-the launch procedure rather than inventing a model or quota rule.
+Before each launch, apply `<skill-dir>/../implement-plan/references/routing.md`
+§ "Orchestrator gate" via the launch procedure rather than inventing a model or quota rule.
 
 ## Rehydrate
 
@@ -154,7 +156,8 @@ Treat an `ok:false` conflict or error as a user-visible stop; never force-push. 
 `board.md` because the generated view must agree with the item files.
 
 Use only the event names and delivery policy in `references/dossier.md` § "Events". Find the
-highest installed dev-toolkit `notify-me.sh`, pass it as `--notify-cmd` to event commands, and
+highest installed dev-toolkit `notify-me.sh`, pass it as `--notify-cmd` to event commands and
+`launch.py command`, and
 call `PushNotification` only when `events.py` returns a non-null `push`. This gives desktop and
 away notifications one deduplicated source. If dev-toolkit is absent, say so once and continue
 with the available channel.

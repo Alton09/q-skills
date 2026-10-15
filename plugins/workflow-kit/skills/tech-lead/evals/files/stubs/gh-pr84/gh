@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# `gh pr view 84`: merged, with two reviewed unplanned decisions. Any other PR is open and mergeable.
+case " $* " in
+  *" 84 "*) printf '%s\n' '{"number":84,"state":"MERGED","mergeable":"UNKNOWN","headRefName":"feat/receipts","body":"## Summary\nReceipt labels.\n\n### Unplanned Decisions\n- Adopted the repository-wide retry convention for receipt fetches (suggested scope: project)\n- Renamed the receipt label to Order receipt (suggested scope: feature)\n"}' ;;
+  *) printf '%s\n' '{"state":"OPEN","mergeable":"MERGEABLE"}' ;;
+esac

@@ -26,11 +26,11 @@ decision.
 
 ## PR open (5)
 
-When the implementation final line is `impl-done`, let `worker-event` first
-write `stage: pr`, `status: idle`, `pr`, `branch`, `worktree`, `unplanned`, and
-`updated`; it also logs `impl-done`. Watch that PR's checks. A live lead arms a
-`Monitor` loop over `gh pr checks <n> --json name,bucket`, emitting only a
-terminal `pass`, `fail`, or `cancel` bucket.
+When the implementation final line is `implement-plan: done <key> <url>`, let
+`worker-event` first write `stage: pr`, `status: idle`, `pr`, `branch`,
+`worktree`, `unplanned`, and `updated`; it also logs `impl-done`. Watch that
+PR's checks. A live lead arms a `Monitor` loop over `gh pr checks <n> --json
+name,bucket`, emitting only a terminal `pass`, `fail`, or `cancel` bucket.
 
 On red, launch one `ci` worker and write `status: running`, `worker`,
 `sessionId`, `workerKind: ci`, and `updated`. Its completed final line restores

@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Any, Iterable, Sequence
 
@@ -19,8 +20,12 @@ Item file: {item_path}
 Repository: {repo_dir}
 Worktree: {worktree_path}
 Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
-Before ending with a needs input block, run `python3 {events_path} worker-event --item {item_path} --line \"<whole needs input block>\" --notify-cmd <notify-cmd>`; if `push` is non-null, call PushNotification with it.
-After the skill's final done or stopped line, run the same command with that line; if `push` is non-null, call PushNotification with it."""
+Before ending with a needs input block, pass the whole block on stdin through this quoted heredoc, so the shell never expands its text:
+python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'TECH_LEAD_EVENT'
+<whole needs input block>
+TECH_LEAD_EVENT
+After the skill's final done or stopped line, run the same command with that line as the heredoc body.
+After either command, if `push` is non-null, call PushNotification with it."""
 
 
 class UsageError(ValueError):
@@ -32,9 +37,11 @@ def as_list(value: str | list[str] | None) -> list[str]:
 
 
 def item_files(vault: Path) -> Iterable[Path]:
-    """Yield every item under sibling vaults rooted beside *vault*."""
-    root = vault.expanduser().resolve().parent
-    yield from sorted(root.glob("*-vault/Features/*/items/*.md"))
+    """Yield every item in *vault* and in the sibling `*-vault` directories beside it."""
+    vault = vault.expanduser().resolve()
+    pattern = "Features/*/items/*.md"
+    paths = set(vault.glob(pattern)) | set(vault.parent.glob(f"*-vault/{pattern}"))
+    yield from sorted(paths)
 
 
 def read_item(path: Path) -> dict[str, str | list[str]]:
@@ -167,7 +174,9 @@ def command(args: argparse.Namespace) -> dict[str, Any]:
         plan = item.get("plan")
         if not isinstance(plan, str) or not plan:
             raise UsageError("implement requires item plan")
-        invocation = ["/workflow-kit:implement-plan", absolute(plan, item_path.parent.parent), "--worker"]
+        # Item paths are vault-relative (references/dossier.md § "Item format").
+        vault = item_path.parent.parent.parent.parent
+        invocation = ["/workflow-kit:implement-plan", absolute(plan, vault), "--worker"]
     else:
         if not args.pr or not args.worktree:
             raise UsageError(f"{args.kind} requires --pr and --worktree")
@@ -177,7 +186,11 @@ def command(args: argparse.Namespace) -> dict[str, Any]:
         elif args.kind == "sync":
             invocation.append("--sync")
         invocation.extend(("--worktree", str(worktree), "--worker"))
-    prompt = " ".join(invocation) + "\n\n" + WORKER_PROTOCOL.format(item_path=item_path, repo_dir=repo, worktree_path=worktree, events_path=events)
+    notify_arg = f" --notify-cmd {shlex.quote(str(Path(args.notify_cmd).expanduser().resolve()))}" if args.notify_cmd else ""
+    prompt = " ".join(invocation) + "\n\n" + WORKER_PROTOCOL.format(
+        item_path=item_path, repo_dir=repo, worktree_path=worktree, events_path=events,
+        events_arg=shlex.quote(str(events)), item_arg=shlex.quote(str(item_path)), notify_arg=notify_arg,
+    )
     suffix = "" if args.kind == "implement" else f"-{args.kind}"
     name = f"{feature_name(item_path)}-{item_path.stem}{suffix}"
     argv = ["claude", "--bg", "--permission-mode", "auto", "--model", args.model, "-n", name, "--settings", '{"env":{"PR_RETRO_NUDGE":"0"}}', prompt]
@@ -192,7 +205,7 @@ def parser() -> argparse.ArgumentParser:
     over = sub.add_parser("overlap"); over.add_argument("--vault", required=True); over.add_argument("--item", required=True)
     cmd = sub.add_parser("command")
     cmd.add_argument("--item", required=True); cmd.add_argument("--kind", required=True, choices=("plan", "implement", "ci", "sync", "comments")); cmd.add_argument("--model", required=True); cmd.add_argument("--repo", required=True)
-    cmd.add_argument("--handoff"); cmd.add_argument("--context", action="append", default=[]); cmd.add_argument("--out"); cmd.add_argument("--pr"); cmd.add_argument("--worktree")
+    cmd.add_argument("--handoff"); cmd.add_argument("--context", action="append", default=[]); cmd.add_argument("--out"); cmd.add_argument("--pr"); cmd.add_argument("--worktree"); cmd.add_argument("--notify-cmd")
     return parser
 
 

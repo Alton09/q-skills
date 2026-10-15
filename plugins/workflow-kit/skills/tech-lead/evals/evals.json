@@ -3,33 +3,157 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Resume the lead for checkout. Fixture: `payments` is an item with `status: paused`, worker `checkout-payments`, and the user answers the recorded question with 'Use the existing retry policy.' `events.py agents` reports that worker as `idle`.",
-      "expected_output": "Rehydrates the dossier, forwards the user's answer with SendMessage only after confirming the worker is idle, then sets the item status to `running`, syncs it, and re-arms the empty `notify_when_idle` subscription. It does not emit a new resume notification.",
-      "files": []
+      "prompt": "Resume the lead for checkout. For the paused payments worker, my answer is 'Use the existing retry policy.' Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault; put evals/files/stubs/agents-idle first on PATH.",
+      "expected_output": "Rehydrates the checkout dossier, confirms checkout-payments is idle, forwards the answer with SendMessage, marks the item running, and re-arms the idle subscription without a resume notification.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault",
+        "evals/files/stubs/agents-idle/claude"
+      ],
+      "expectations": [
+        "events.py agents runs before any SendMessage to checkout-payments",
+        "Exactly one SendMessage to checkout-payments carries the text 'Use the existing retry policy.'",
+        "Features/checkout/items/payments.md ends with status: running and an empty question",
+        "payments.md notified no longer contains paused-payments and still contains impl-started",
+        "An empty SendMessage with notify_when_idle: true follows the forward",
+        "No events.py notify call and no PushNotification is made for the resume",
+        "Features/checkout/log.md gains a rehydrate entry"
+      ]
     },
     {
       "id": 2,
-      "prompt": "Resume the lead for checkout. Fixture: the same paused `payments` item and answer as before, but `events.py agents` reports worker `checkout-payments` as `waiting`.",
-      "expected_output": "Tells the user to run `claude attach checkout-payments` because AskUserQuestion owns the reply path. It sends no SendMessage, leaves the item paused, and does not sync a resumed state.",
-      "files": []
+      "prompt": "Resume the lead for checkout. For the paused payments worker, my answer is 'Use the existing retry policy.' Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault; put evals/files/stubs/agents-waiting first on PATH.",
+      "expected_output": "Sees checkout-payments is waiting, tells the user to run claude attach checkout-payments, and leaves the item paused without messaging the worker.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault",
+        "evals/files/stubs/agents-waiting/claude"
+      ],
+      "expectations": [
+        "The response contains the command `claude attach checkout-payments`",
+        "No SendMessage is sent to checkout-payments",
+        "Features/checkout/items/payments.md still has status: paused and the original question",
+        "payments.md notified still contains paused-payments"
+      ]
     },
     {
       "id": 3,
-      "prompt": "Start the `api-client` implementation item for feature mobile-sync. Fixture: `launch.py overlap` reports that another lead's `platform/auth-refresh` item is at stage `pr` and overlaps `src/api/client.py`.",
-      "expected_output": "Sets `api-client` to `status: blocked`, syncs the item, and identifies `platform/auth-refresh` as the blocker. It starts no worker and sends no notification; it only asks about ordering if both otherwise-ready items require a user choice.",
-      "files": []
+      "prompt": "Start implementing the api-client item for mobile-sync. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault.",
+      "expected_output": "launch.py overlap reports platform/auth-refresh (stage pr) sharing src/api/client.py, so api-client becomes blocked, the user is told which item blocks it, and no worker or notification starts.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault"
+      ],
+      "expectations": [
+        "launch.py overlap runs for Features/mobile-sync/items/api-client.md",
+        "Features/mobile-sync/items/api-client.md ends with status: blocked",
+        "The response names platform/auth-refresh (or the platform lead's auth-refresh item) and src/api/client.py",
+        "No `claude --bg` command runs",
+        "launch.py capacity and route-target.sh do not run",
+        "No events.py notify call and no PushNotification is made"
+      ]
     },
     {
       "id": 4,
-      "prompt": "Launch the next queued handoff-plan worker for analytics. Fixture: `launch.py capacity` returns `free: 0` and a queue containing the item.",
-      "expected_output": "Keeps the item at `status: queued`, syncs it, and tells the user that it is queued until capacity frees. It does not call the quota gate, start a worker, or send a notification.",
-      "files": []
+      "prompt": "Launch the queued events-schema handoff-plan worker for analytics. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault and maxWorkers to 1; platform/auth-refresh is already running.",
+      "expected_output": "launch.py capacity returns free 0, so the item stays queued and the user is told it waits for capacity; no quota gate, worker, or notification.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault"
+      ],
+      "expectations": [
+        "launch.py capacity runs and reports free: 0",
+        "Features/analytics/items/events-schema.md still has status: queued",
+        "The response says the item is queued until a worker slot frees",
+        "route-target.sh does not run",
+        "No `claude --bg` command runs",
+        "No events.py notify call and no PushNotification is made"
+      ]
     },
     {
       "id": 5,
-      "prompt": "Handle merge follow-up for PR 84 in feature checkout. Fixture: the merged PR body has a `### Unplanned Decisions` section with two reviewed decisions: adopt the repository-wide retry convention, and rename this feature's receipt label.",
-      "expected_output": "Records the item as merged then done and logs `phase-done`. It appends both surviving decisions with source `PR #84 unplanned`; it asks and emits a deduplicated `decision-<n>` notification only for the repository-wide retry convention's project-default scope, while logging the receipt-label decision at feature scope without asking.",
-      "files": []
+      "prompt": "PR 84 for checkout's receipts item is merged; do the follow-up. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault; put evals/files/stubs/gh-pr84 first on PATH.",
+      "expected_output": "Moves receipts through merged to done, logs phase-done, appends both unplanned decisions with source PR #84 unplanned, and asks about scope only for the project-scope retry decision.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault",
+        "evals/files/stubs/gh-pr84/gh"
+      ],
+      "expectations": [
+        "Features/checkout/items/receipts.md ends with stage: done and status: idle",
+        "Features/checkout/log.md gains a phase-done entry",
+        "A decisions.md line for the retry convention ends with (PR #84 unplanned)",
+        "Features/checkout/decisions.md gains a [feature] line for the receipt label rename ending with (PR #84 unplanned)",
+        "The user is asked 'For this feature or the whole project?' (or equivalent) only for the retry convention",
+        "receipts.md notified gains exactly one decision-<n> key",
+        "No ask or decision notification is made for the receipt label rename",
+        "gh pr view runs for platform/auth-refresh (PR 81) as part of the merge-time sync scan"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "/workflow-kit:tech-lead. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault.",
+      "expected_output": "Lists the four leads with their stage counts and stops.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault"
+      ],
+      "expectations": [
+        "dossier.py list runs without --match",
+        "The response names analytics, checkout, mobile-sync, and platform",
+        "The checkout entry shows 3 items: 1 design, 1 implement, 1 review",
+        "No item, log, or board file changes",
+        "No worker launches and no rehydrate briefing is printed"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "/workflow-kit:tech-lead chekout. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault.",
+      "expected_output": "Finds no exact match, offers checkout as the closest lead, and asks once whether to create chekout without creating it.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault"
+      ],
+      "expectations": [
+        "dossier.py list runs with --match chekout",
+        "The response suggests checkout as the closest match",
+        "The response asks once whether to create a new chekout lead",
+        "dossier.py init does not run and no Features/chekout directory exists"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "/workflow-kit:tech-lead loyalty --from evals/files/master-plan.md. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault.",
+      "expected_output": "Drafts a brief and one item per unfinished phase (earn, redeem) with their existing plan paths and redeem blocked by earn, then shows the draft and waits for approval before writing to the vault.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault",
+        "evals/files/master-plan.md"
+      ],
+      "expectations": [
+        "The draft contains exactly two items, for Phase 2 (earn) and Phase 3 (redeem); the done Phase 1 ledger is not an item",
+        "The earn item's plan is plans/loyalty-earn.md and the redeem item's plan is plans/loyalty-redeem.md",
+        "The redeem item's blockedBy names the earn item",
+        "The draft brief states the goal of earning and redeeming loyalty points at checkout",
+        "The response asks for approval before any vault write",
+        "No Features/loyalty directory exists and dossier.py init and sync do not run before approval"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Let's design checkout's receipt-export item. Setup: run from evals/files/project, whose .claude/workflow-kit.json sets lead.vault to evals/files/shop-vault.",
+      "expected_output": "Walks the six design-review checklist questions, flags the receipt-export item against existing decisions, records the answers, and waits for an explicit go without launching a plan worker.",
+      "files": [
+        "evals/files/project/.claude/workflow-kit.json",
+        "evals/files/shop-vault"
+      ],
+      "expectations": [
+        "The response covers all six questions from references/design-review.md § Checklist",
+        "Answers the user has given are recorded in a design note under Features/checkout/designs/ or in a decisions.md line",
+        "Unanswered questions are marked as unknown rather than guessed",
+        "The response asks for an explicit go before planning",
+        "No `claude --bg` command runs and receipt-export.md does not reach stage plan"
+      ]
     }
   ]
 }

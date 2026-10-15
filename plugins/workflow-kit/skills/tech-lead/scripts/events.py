@@ -92,10 +92,9 @@ def count_unplanned(body: str) -> int:
 
 
 def event_message(feature: str, event: str, detail: str, worker: str) -> str:
-    text = f"[{feature}] {event} — {detail}"
-    if event.startswith("paused-") and worker:
-        text += f"; claude attach {worker}"
-    return text[:199]
+    # Truncate the detail, never the attach command, to stay under 200 characters.
+    suffix = f"; claude attach {worker}" if event.startswith("paused-") and worker else ""
+    return f"[{feature}] {event} — {detail}"[:199 - len(suffix)] + suffix
 
 
 def deliver(data: dict[str, str | list[str]], event: str | None, message: str, notify_cmd: str | None) -> tuple[str | None, bool]:
@@ -156,7 +155,19 @@ def parse_worker_line(line: str, data: dict[str, str | list[str]], repo: Path) -
     raise UsageError(f"unrecognized worker final line: {first}")
 
 
+def read_line(args: argparse.Namespace) -> str:
+    """Return --line, or the --line-file text (`-` is stdin) without its trailing newline."""
+    if args.line is not None:
+        return args.line
+    try:
+        text = sys.stdin.read() if args.line_file == "-" else Path(args.line_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UsageError(str(exc)) from exc
+    return text.rstrip("\n")
+
+
 def worker_event(args: argparse.Namespace) -> dict[str, Any]:
+    args.line = read_line(args)
     path = Path(args.item).resolve()
     data, body, vault, feature = item_context(path)
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
@@ -272,7 +283,9 @@ def make_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     worker = sub.add_parser("worker-event")
     worker.add_argument("--item", required=True)
-    worker.add_argument("--line", required=True)
+    line = worker.add_mutually_exclusive_group(required=True)
+    line.add_argument("--line")
+    line.add_argument("--line-file", help="read the line or block from this file; `-` reads stdin")
     worker.add_argument("--repo")
     worker.add_argument("--notify-cmd")
     worker.add_argument("--no-sync", action="store_true")

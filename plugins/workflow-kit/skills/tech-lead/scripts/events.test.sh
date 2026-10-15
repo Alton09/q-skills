@@ -16,9 +16,15 @@ cat >"$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$GH_BODY"
 EOF
+# Stub only `git worktree list`; the sync case needs real git for everything else.
+REAL_GIT=$(command -v git)
+export REAL_GIT
 cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
-printf 'worktree %s\nbranch refs/heads/feat/alpha\n\n' "${WORKTREE_FIXTURE:-/tmp/worktree}"
+case " $* " in
+  *" worktree list "*) printf 'worktree %s\nbranch refs/heads/feat/alpha\n\n' "${WORKTREE_FIXTURE:-/tmp/worktree}" ;;
+  *) exec "$REAL_GIT" "$@" ;;
+esac
 EOF
 cat >"$tmp/bin/claude" <<'EOF'
 #!/usr/bin/env bash
@@ -219,4 +225,47 @@ rc=$?
 grep -Fq 'needs input block has no Question: line' "$tmp/error" || fail 'missing question diagnostic'
 cmp -s "$item" "$tmp/item-before" || fail 'invalid header changed item'
 cmp -s "$tmp/vault/Features/alpha/log.md" "$tmp/log-before" || fail 'invalid header appended log'
+pass
+
+# 17. --line-file - reads a heredoc block literally; shell syntax in the question never runs.
+n=17
+item=$(new_item heredoc)
+out=$(cd "$tmp" && python3 "$script" worker-event --item "$item" --line-file - --no-sync <<'TECH_LEAD_EVENT'
+address-pr: needs input #14
+Question: Keep `legacy()` and "$(touch pwned)"?
+Options:
+1. Yes
+TECH_LEAD_EVENT
+) || fail "heredoc exit $?"
+expect .event '"paused-#14"'
+[ ! -e "$tmp/pwned" ] || fail 'question text was executed'
+question=$(python3 "$here/dossier.py" item get "$item" | jq -r .item.question)
+[ "$question" = 'Keep `legacy()` and "$(touch pwned)"?' ] || fail "question not literal: $question"
+pass
+
+# 18. A long paused question is truncated before the attach command, which always survives.
+n=18
+item=$(new_item longpause)
+long=$(printf 'x%.0s' $(seq 1 300))
+run worker-event --item "$item" --line "$(printf 'address-pr: needs input #15\nQuestion: %s' "$long")" --no-sync
+expect '.push | endswith("; claude attach alpha-longpause")' true
+expect '.push | length < 200' true
+pass
+
+# 19. Without --no-sync, worker-event commits and pushes the item and log to the vault remote.
+n=19
+git init -q --bare --initial-branch=main "$tmp/vault-remote.git"
+git clone -q "$tmp/vault-remote.git" "$tmp/sync-vault" 2>/dev/null
+git -C "$tmp/sync-vault" config user.name "Events Test"
+git -C "$tmp/sync-vault" config user.email "events@example.invalid"
+mkdir -p "$tmp/sync-vault/Features/alpha/items"
+item="$tmp/sync-vault/Features/alpha/items/synced.md"
+printf '%s\n' '---' 'slug: synced' 'title: synced' 'stage: implement' 'status: running' 'workerKind: plan' 'notified: []' '---' >"$item"
+: >"$tmp/sync-vault/Features/alpha/log.md"
+git -C "$tmp/sync-vault" add -A && git -C "$tmp/sync-vault" commit -qm seed && git -C "$tmp/sync-vault" push -q -u origin main 2>/dev/null
+run worker-event --item "$item" --line 'feature-plan: done plans/synced.md'
+expect .synced.ok true
+git -C "$tmp/vault-remote.git" log -1 --format=%s main | grep -Fxq 'tech-lead: plan-done' || fail 'sync commit not pushed'
+git -C "$tmp/vault-remote.git" show main:Features/alpha/items/synced.md | grep -Fq 'status: idle' || fail 'item not pushed'
+git -C "$tmp/vault-remote.git" show main:Features/alpha/log.md | grep -Fq 'plan-done' || fail 'log not pushed'
 pass

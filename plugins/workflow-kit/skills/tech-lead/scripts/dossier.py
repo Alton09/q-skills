@@ -454,7 +454,8 @@ def checks(project_dir: Path) -> dict[str, Any]:
         allow = permissions.get("allow", [])
         if isinstance(allow, list):
             rules.extend(rule for rule in allow if isinstance(rule, str))
-        if permission_mode is None and isinstance(permissions.get("defaultMode"), str):
+        # settings_paths runs from lowest to highest precedence, so the last value wins.
+        if isinstance(permissions.get("defaultMode"), str):
             permission_mode = permissions["defaultMode"]
     allow_rule = any(rule in ("Bash(claude --bg *)", "Bash(claude --bg:*)") for rule in rules)
     trust = read_json(Path.home() / ".claude.json").get("projects", {})

@@ -398,3 +398,113 @@ verify_rc=$?
 expect .target null
 expect .source '"none"'
 pass
+
+# --- orchestrator role -----------------------------------------------------------------
+# 26. No config at all + Claude at 8% -> built-in claude:opus, source default, unusable.
+n=26
+quota_variant claude8 claude 8
+out=$("$script" --role orchestrator --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude8.json")
+verify_rc=$?
+[ "$verify_rc" -eq 0 ] || fail "exit $verify_rc"
+expect .target '"claude:opus"'
+expect .source '"default"'
+expect .percent 8
+expect .usable false
+expect .resetsAt '"2026-10-07T08:39:59.576614+00:00"'
+expect .skipped '[]'
+pass
+
+# 27. No config + Claude at 78% (threshold 10) -> usable true.
+n=27
+out=$("$script" --role orchestrator --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"claude:opus"'
+expect .source '"default"'
+expect .usable true
+expect_true '.resetsAt != null'
+pass
+
+# 28. --role orchestrator --tier light -> exit 2.
+n=28
+"$script" --role orchestrator --tier light --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json" >"$tmp/o28" 2>"$tmp/e28"
+verify_rc=$?
+[ "$verify_rc" -eq 2 ] || fail "exit $verify_rc, expected 2"
+[ ! -s "$tmp/o28" ] || fail "stdout should be empty on a usage error"
+pass
+
+# 29. Project list beats user list and the default.
+n=29
+cat >"$tmp/orch-user.json" <<'JSON'
+{"version": 1, "routing": {"orchestrator": ["claude:sonnet"]}}
+JSON
+cat >"$tmp/proj/.claude/workflow-kit.json" <<'JSON'
+{"version": 1, "routing": {"orchestrator": ["claude:haiku", "claude:opus"]}}
+JSON
+out=$("$script" --role orchestrator --user-config "$tmp/orch-user.json" --project-dir "$tmp/proj" --quota-json "$tmp/quota.json")
+expect .target '"claude:haiku"'
+expect .source '"project"'
+out=$("$script" --role orchestrator --user-config "$tmp/orch-user.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"claude:sonnet"'
+expect .source '"user"'
+rm "$tmp/proj/.claude/workflow-kit.json"
+pass
+
+# 30. A config without routing.orchestrator still gets the built-in list.
+n=30
+out=$("$script" --role orchestrator --user-config "$tmp/user.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"claude:opus"'
+expect .source '"default"'
+pass
+
+# 31. Non-claude orchestrator target -> invalid config.
+n=31
+cat >"$tmp/orch-bad.json" <<'JSON'
+{"version": 1, "routing": {"orchestrator": ["claude:opus", "codex:gpt-5.6-sol"]}}
+JSON
+out=$("$script" --role orchestrator --user-config "$tmp/orch-bad.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .source '"invalid"'
+expect .target null
+expect .usable null
+expect_true '.warnings[0] | contains("routing.orchestrator targets must be claude:*")'
+pass
+
+# 32. Threshold order: byRole, then minBudgetPercent, then built-in 10.
+n=32
+quota_variant claude12 claude 12
+out=$("$script" --role orchestrator --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude12.json")
+expect .usable true
+printf '{"version": 1, "minBudgetPercent": 20}' >"$tmp/orch-gen.json"
+out=$("$script" --role orchestrator --user-config "$tmp/orch-gen.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude12.json")
+expect .usable false
+printf '{"version": 1, "minBudgetPercent": 20, "minBudgetPercentByRole": {"orchestrator": 5}}' >"$tmp/orch-role.json"
+out=$("$script" --role orchestrator --user-config "$tmp/orch-role.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude12.json")
+expect .usable true
+pass
+
+# 33. usable null when quota is unavailable; resetsAt null for unknown state.
+n=33
+out=$("$script" --role orchestrator --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/nope.json")
+expect .quota '"unavailable"'
+expect .usable null
+expect .resetsAt null
+quota_variant claude-auth claude 50 through_reset auth_required
+out=$("$script" --role orchestrator --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude-auth.json")
+expect .usable false
+expect .resetsAt null
+pass
+
+# 34. Other roles gain usable/resetsAt: usable true with the limiting window's reset;
+# fallback target gives usable false; target null gives null.
+n=34
+run --role phase --tier standard --quota-json "$tmp/quota.json"
+expect .usable true
+expect .resetsAt '"2026-10-07T10:03:45.000Z"'
+run --role phase --tier standard --quota-json "$tmp/alllow.json"
+expect .usable false
+out=$("$script" --role phase --tier standard --user-config "$tmp/missing.json" --project-dir "$tmp/empty")
+expect .usable null
+expect .resetsAt null
+run --role review --quota-json "$tmp/quota.json"
+expect .target '"pi:opencode-go/grok-4.6"'
+expect .usable true
+expect .resetsAt null
+pass

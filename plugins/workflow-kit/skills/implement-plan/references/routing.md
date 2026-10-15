@@ -40,9 +40,10 @@ Version 1 schema, with the shipped model ids:
   way.
 - Targets use the `executor:model` syntax from `references/executors.md`; the executor is
   `claude`, `pi`, or `codex`. An unprefixed target means `claude:<id>`.
-- Valid role keys for `minBudgetPercentByRole` are `phase`, `gateVerify`, `review`, and `prFix`.
+- Valid role keys for `minBudgetPercentByRole` are `phase`, `gateVerify`, `review`, `prFix`, and
+  `orchestrator`.
 - Threshold for a role: `minBudgetPercentByRole[role]`, else `minBudgetPercent`, else the
-  shipped defaults: 15 for every role, 25 for `review`. Review needs the headroom: one
+  shipped defaults: 15 for every role, 25 for `review`, 10 for `orchestrator`. Review needs the headroom: one
   full-diff Codex review took 22% of a Plus 5-hour window (measured 2026-09-18).
 - Fix workers use the list of the phase tier they fix. Escalation is not in the file.
 - `prFix` is the role for the `address-pr` skill's fix workers (it calls the router with
@@ -75,16 +76,16 @@ each; they may see the same snapshot and all pick the same target.
 **How.** One call per spawn:
 
 ```bash
-<skill-dir>/scripts/route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep] \
+<skill-dir>/scripts/route-target.sh --role phase|gateVerify|review|prFix|orchestrator [--tier light|standard|deep] \
   [--exclude-executor <claude|pi|codex>]... \
   --project-dir <run-root> [--user-config <file>] [--quota-json <file>]
 ```
 
 `<run-root>` is the repo root the run started from, resolved once at startup. Always pass it.
 
-- `--role` is `phase`, `gateVerify`, `review`, or `prFix`. Fix workers use `--role phase` with the
+- `--role` is `phase`, `gateVerify`, `review`, `prFix`, or `orchestrator`. Fix workers use `--role phase` with the
   tier of the work they fix.
-- `--tier` is required with `--role phase` and rejected for the other roles, `prFix` included.
+- `--tier` is required with `--role phase` and rejected for the other roles, `prFix` and `orchestrator` included.
 - `--exclude-executor` removes every target of that executor before evaluation; repeat the
   flag for more than one. On the `review` call, pass `--exclude-executor codex` whenever any
   phase or fix spawn record in this run used a `codex:*` target, so routing cannot produce a
@@ -112,7 +113,7 @@ each; they may see the same snapshot and all pick the same target.
 {"target":"claude:sonnet","source":"user","quota":"ok","percent":85,
  "reason":"preferred codex:gpt-5.6-terra, skipped: codex 9% < 15%",
  "skipped":[{"target":"codex:gpt-5.6-terra","why":"codex 9% < 15%"}],
- "warnings":[]}
+ "warnings":[],"usable":true,"resetsAt":"2026-10-07T10:03:45.000Z"}
 ```
 
 | Field | Meaning |
@@ -124,6 +125,8 @@ each; they may see the same snapshot and all pick the same target.
 | `reason` | Text for the report parenthesis. First target wins: `<provider> <percent>%` (for example `opencode-go 54%`). Earlier target skipped: `preferred <first target>, skipped: <why of first skip>`. |
 | `skipped` | List of `{"target","why"}` for each target passed over. |
 | `warnings` | List of one-line strings. |
+| `usable` | `true` when the chosen target passed the budget rules. `false` when it was taken as the last-target fallback (all targets below budget) or as an unknown-state last target. `null` when `target` is null or quota is unavailable. |
+| `resetsAt` | For a known claude or codex target, the `resetsAt` of the window named first in the chosen entry's `limitingWindowIds`. `null` otherwise. |
 
 **Using the result.**
 
@@ -171,6 +174,27 @@ Per target, after `--exclude-executor` matches are removed:
   - `unknown`: percentage check alone.
 - **Selection.** Pick the first usable target. If nothing is usable, pick the last target
   and add the warning `all targets below budget; using last target <target>`.
+
+## Orchestrator gate
+
+`--role orchestrator` is for the tech-lead skill. It checks Claude quota before the lead
+launches a `claude --bg` worker. implement-plan never re-routes its own orchestrator: only the
+lead calls this role, once before each launch.
+
+- It takes no `--tier` (exit 2 if given).
+- List resolution: project `routing.orchestrator`, then user `routing.orchestrator`, then the
+  built-in `["claude:opus"]` with `source: "default"`. The built-in list also applies when no
+  config file exists at all. That is the one exception to the `target: null, source: none`
+  result for a missing config, and it applies to this role only.
+- Every target must be `claude:*`, because `claude --bg` runs only Claude models. A
+  `routing.orchestrator` entry with another executor makes the config invalid, with the warning
+  `routing.orchestrator targets must be claude:*`.
+- Threshold: `minBudgetPercentByRole.orchestrator`, then `minBudgetPercent`, then the built-in
+  10. The general `minBudgetPercent` comes before the built-in 10, as for every other role.
+- The lead reads `usable` and `resetsAt`. `usable: false` means the quota gate failed: the
+  lead does not launch and says, for example, "Claude at 8%, resets in 3h", using `percent`
+  and `resetsAt`. `usable: null` means quota could not be read; the lead treats that as not
+  blocked and notes it.
 
 ## Fail-safe
 

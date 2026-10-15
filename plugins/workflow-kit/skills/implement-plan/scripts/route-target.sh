@@ -3,7 +3,7 @@
 # a local quota-axi read. Deterministic, read-only: spawns nothing, writes no files.
 #
 # Usage:
-#   route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep]
+#   route-target.sh --role phase|gateVerify|review|prFix|orchestrator [--tier light|standard|deep]
 #                   [--exclude-executor <claude|pi|codex>]...
 #                   [--project-dir <dir>] [--user-config <file>] [--quota-json <file>]
 #
@@ -18,7 +18,7 @@ QUOTA_PROVIDERS="claude codex cursor copilot grok kimi zai agy alibaba opencode-
 
 usage_error() {
   printf 'route-target.sh: %s\n' "$1" >&2
-  printf 'usage: route-target.sh --role phase|gateVerify|review|prFix [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
+  printf 'usage: route-target.sh --role phase|gateVerify|review|prFix|orchestrator [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
   exit 2
 }
 
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$role" in
-  phase|gateVerify|review|prFix) ;;
+  phase|gateVerify|review|prFix|orchestrator) ;;
   "") usage_error "--role is required" ;;
   *) usage_error "invalid --role: $role" ;;
 esac
@@ -89,7 +89,7 @@ warn() {
 # emit_null <source> <reason>: caller must use its shipped default.
 emit_null() {
   jq -nc --arg source "$1" --arg reason "$2" --argjson warnings "$warnings" \
-    '{target:null, source:$source, quota:"ok", percent:null, reason:$reason, skipped:[], warnings:$warnings}'
+    '{target:null, source:$source, quota:"ok", percent:null, reason:$reason, skipped:[], warnings:$warnings, usable:null, resetsAt:null}'
   exit 0
 }
 
@@ -106,7 +106,8 @@ validate_config() {
       | ($r.phase // {}) as $p
       | ([["routing.phase.light", $p.light], ["routing.phase.standard", $p.standard],
           ["routing.phase.deep", $p.deep], ["routing.gateVerify", $r.gateVerify],
-          ["routing.review", $r.review], ["routing.prFix", $r.prFix]] | map(select(.[1] != null))) as $ls
+          ["routing.review", $r.review], ["routing.prFix", $r.prFix],
+          ["routing.orchestrator", $r.orchestrator]] | map(select(.[1] != null))) as $ls
       | first(
           ($ls[] | select((.[1] | type) != "array" or (.[1] | any(.[]; type != "string")))
             | "\(.[0]) is not an array of strings"),
@@ -114,6 +115,9 @@ validate_config() {
             | (if . == "" then "" else (split(":") | if length > 1 then .[0] else "claude" end) end) as $e
             | select(($e | IN("claude", "pi", "codex")) | not)
             | "\($n) names unknown executor \"\($e)\" in \"\(.)\""),
+          ($r.orchestrator // [] | select(type == "array")
+            | map(select(type == "string" and . != "" and (split(":") | length > 1 and .[0] != "claude")))
+            | select(length > 0) | "routing.orchestrator targets must be claude:*"),
           (select((.minBudgetPercent | num_or_null) | not) | "minBudgetPercent is not a number"),
           (select((.minBudgetPercentByRole // {}) | type != "object") | "minBudgetPercentByRole is not an object"),
           ((.minBudgetPercentByRole // {}) | select(type == "object" and any(.[]; type != "number"))
@@ -149,7 +153,10 @@ project_state=$config_state
 if [ "$user_state" = invalid ] || [ "$project_state" = invalid ]; then
   emit_null invalid "invalid routing config, using shipped default"
 fi
-[ "$user_state" = absent ] && [ "$project_state" = absent ] && emit_null none "no routing config"
+# The orchestrator role is the one exception: its built-in list applies with no config.
+if [ "$role" != orchestrator ]; then
+  [ "$user_state" = absent ] && [ "$project_state" = absent ] && emit_null none "no routing config"
+fi
 
 # Resolve the list for this call (project replaces user at list level) and thresholds.
 list_filter='(.routing // {}) | if $role == "phase" then (.phase // {})[$tier] else .[$role] end'
@@ -187,13 +194,16 @@ elif [ "$role" = prFix ]; then
     emit_null none "no routing list for $role"
   fi
   warn "no routing.prFix list; using routing.phase.standard"
+elif [ "$role" = orchestrator ]; then
+  source=default
+  list='["claude:opus"]'
 else
   emit_null none "no routing list for $role"
 fi
 
 threshold=$(jq -nc --arg role "$role" --argjson u "$user_cfg" --argjson p "$project_cfg" '
   (($u.minBudgetPercentByRole // {}) + ($p.minBudgetPercentByRole // {})) as $byRole
-  | $byRole[$role] // $p.minBudgetPercent // $u.minBudgetPercent // (if $role == "review" then 25 else 15 end)')
+  | $byRole[$role] // $p.minBudgetPercent // $u.minBudgetPercent // (if $role == "review" then 25 elif $role == "orchestrator" then 10 else 15 end)')
 
 # Normalise targets (unprefixed means claude:<id>), drop excluded executors, map providers.
 excludes_json=$(printf '%s\n' ${excludes[@]+"${excludes[@]}"} | jq -Rnc '[inputs | select(. != "")]')
@@ -208,7 +218,7 @@ targets=$(jq -c --argjson ex "$excludes_json" '
 
 if [ "$(jq 'length' <<<"$targets")" -eq 0 ]; then
   jq -nc --arg source "$source" --argjson warnings "$warnings" \
-    '{target:null, source:$source, quota:"ok", percent:null, reason:"no targets after exclusions", skipped:[], warnings:$warnings}'
+    '{target:null, source:$source, quota:"ok", percent:null, reason:"no targets after exclusions", skipped:[], warnings:$warnings, usable:null, resetsAt:null}'
   exit 0
 fi
 
@@ -280,7 +290,8 @@ if ! fetch_quota; then
   jq -nc --argjson targets "$targets" --arg source "$source" --argjson warnings "$warnings" '
     $targets[0] as $t
     | {target: $t.target, source: $source, quota: "unavailable", percent: null,
-       reason: "quota unavailable", skipped: [], warnings: $warnings}'
+       reason: "quota unavailable", skipped: [], warnings: $warnings,
+       usable: null, resetsAt: null}'
   exit 0
 fi
 
@@ -296,12 +307,15 @@ jq -nc --argjson targets "$targets" --argjson quota "$quota" --argjson threshold
         | (([$ea[] | select(.scope == "all_models")] | .[0]) // $ea[0]) as $e
         | if $e == null or ($e.effectivePercentRemaining | type) != "number"
           then {kind: "unknown", status: "no_availability"}
-          else {kind: "known", percent: $e.effectivePercentRemaining, runway: ($e.runway.status // "unknown")}
+          else (($e.limitingWindowIds // [])[0]) as $lw
+            | {kind: "known", percent: $e.effectivePercentRemaining, runway: ($e.runway.status // "unknown"),
+               resetsAt: (if $lw == null then null
+                          else (([$pr.windows[]? | select(.id == $lw) | .resetsAt] | .[0]) // null) end)}
           end
       else
         ([$pr.windows[]? | .percentRemaining | select(type == "number")]) as $w
         | if ($w | length) == 0 then {kind: "unknown", status: "no_windows"}
-          else {kind: "known", percent: ($w | min), runway: "unknown"}
+          else {kind: "known", percent: ($w | min), runway: "unknown", resetsAt: null}
           end
       end;
   def usable: .kind == "known" and .percent >= $threshold and .runway != "exhausted_now";
@@ -325,6 +339,9 @@ jq -nc --argjson targets "$targets" --argjson quota "$quota" --argjson threshold
               elif ($c.ev | usable) then "\($c.provider) \($c.ev.percent)%"
               else ($c.ev | why($c)) end),
      skipped: $skipped,
+     usable: ($c.ev | usable),
+     resetsAt: (if $c.ev.kind == "known" and ($c.executor == "claude" or $c.executor == "codex")
+                then ($c.ev.resetsAt // null) else null end),
      warnings: (
        $warnings
        + (if ($quota.schemaVersion // null) != 5 then ["quota-axi schemaVersion \($quota.schemaVersion // "missing") is not the expected 5"] else [] end)

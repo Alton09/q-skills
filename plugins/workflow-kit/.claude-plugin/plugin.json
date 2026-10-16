@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "name": "workflow-kit",
   "version": "2.4.0",
-  "description": "Claude Code plugin for structured implementation planning: plan, build, and rescue feature work"
+  "description": "Claude Code plugin for structured feature work: plan, build, rescue, and lead resumable feature delivery"
 }

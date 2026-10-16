@@ -15,6 +15,7 @@ Project-agnostic Claude Code plugins for the full feature lifecycle: structured 
 | feature-plan | `/workflow-kit:feature-plan` | Create structured implementation plans with phases, tasks, and acceptance criteria |
 | implement-plan | `/workflow-kit:implement-plan` | Execute a plan end-to-end with dependency-graph parallel phases, two-tier verification, an opus escalation rescue, and a post-plan review + auto-fix, then a draft PR opened via the project's `/create-pr` |
 | address-pr | `/workflow-kit:address-pr` | Address PR comments, fix CI, update a PR with main, or resolve conflicts on an open pull request |
+| tech-lead | `/workflow-kit:tech-lead [<feature>] [--from <master-plan>]` | Supervise one feature through design, delegated work, PR review, and follow-up with a resumable Obsidian dossier |
 
 #### Composable Skills
 
@@ -48,6 +49,35 @@ Feature planning
 also supports `--handoff <path-or-summary>` to plan from a design handoff, repeatable
 `--context <path>` inputs, and `--out <path>` for the plan destination.
 
+#### Tech lead
+
+Run `/workflow-kit:tech-lead [<feature>] [--from <master-plan>]` from the project repository
+root. The lead stores resumable state in `<vault>/Features/<feature>/`: `brief.md`, append-only
+`decisions.md` and `log.md`, generated `board.md`, item files under `items/`, and design and
+handoff-plan folders. Project-wide decisions live in `<vault>/Features/_project/decisions.md`.
+
+Configure the dossier and worker cap in `~/.claude/workflow-kit.json` or the project's
+`.claude/workflow-kit.json`; project `lead` keys override the user keys. The lead does not write
+this configuration itself.
+
+```json
+{
+  "lead": {
+    "maxWorkers": 2,
+    "vault": "/absolute/path/to/project-vault"
+  }
+}
+```
+
+Run the lead in `auto` permission mode. Trust the workspace and add the one-time
+`Bash(claude --bg *)` allow rule: worker commands begin with `claude --bg`, so wrapping them in
+`cd ... &&` prevents that rule from matching. The lead launches workers in `auto` too.
+
+Workers receive no rules, guardrail paths, or approval gates. Design review and the user's PR
+review are the checkpoints; implementation choices that survive review are recorded under
+`### Unplanned Decisions` in the PR body and then logged to the dossier after merge. When
+available, the optional dev-toolkit plugin supplies desktop notifications, PR review, and retro.
+
 ### dev-toolkit
 
 Standalone dev utilities that work independently of any planning pipeline.
@@ -58,7 +88,7 @@ Standalone dev utilities that work independently of any planning pipeline.
 |-------|---------|-------------|
 | pr-review | `/dev-toolkit:pr-review` | Project-aware GitHub PR review with focused, numbered findings |
 | pr-retro | `/dev-toolkit:pr-retro` | Post-merge retro: mine PR comments, CI and linked sessions for skill, harness and lint-rule improvements. |
-| notify-me | `/dev-toolkit:notify-me` | Send macOS system notifications during long-running tasks (macOS only) |
+| notify-me | `/dev-toolkit:notify-me` | Send macOS or Linux system notifications during long-running tasks |
 
 #### SessionStart Nudge Hook
 
@@ -177,7 +207,8 @@ local quota and uses the first target in the role's list that still has budget:
     },
     "gateVerify": ["codex:gpt-5.6-luna", "claude:sonnet"],
     "review":     ["pi:opencode-go/grok-4.6", "claude:opus"],
-    "prFix":      ["codex:gpt-5.6-terra", "claude:sonnet"]
+    "prFix":      ["codex:gpt-5.6-terra", "claude:sonnet"],
+    "orchestrator": ["claude:opus"]
   }
 }
 ```
@@ -193,6 +224,12 @@ defaults; with no file, nothing changes. Routing needs `quota-axi` and `jq` on `
 
 The address-pr fix workers use `routing.prFix`, falling back to `routing.phase.standard` when no
 `prFix` list is configured.
+
+`routing.orchestrator` is the tech-lead launch gate. It accepts only `claude:*` targets and
+defaults to `claude:opus`; its threshold is `minBudgetPercentByRole.orchestrator`, then
+`minBudgetPercent`, then 10%. Before each `claude --bg` launch, the lead reads the router's
+`usable` and `resetsAt` fields. A false `usable` queues the item and asks whether to wait or
+start despite the quota gate; unavailable quota is fail-safe and does not block the launch.
 
 ## Updating
 
@@ -217,9 +254,10 @@ After installation, skills are available as slash commands:
 /workflow-kit:address-pr 123    # Address PR comments (comment mode)
 /workflow-kit:address-pr 123 --ci # Fix actionable CI failures (CI mode)
 /workflow-kit:address-pr 123 --sync # Update the PR with its base branch (sync mode)
+/workflow-kit:tech-lead my-feature # Lead one feature through its resumable dossier
 /dev-toolkit:pr-review          # Review a GitHub PR
 /dev-toolkit:pr-retro           # Post-merge retrospective on PR comments, CI, and linked sessions
-/dev-toolkit:notify-me          # Send macOS notification
+/dev-toolkit:notify-me          # Send macOS or Linux notification
 ```
 
 Use `--worker` when another agent session launches the run in the background and answers its questions, and `--worktree <path>` to select the PR worktree explicitly.
@@ -238,13 +276,14 @@ q-skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)
         address-pr/           # PR comment, CI, and branch sync skill
+        tech-lead/            # Resumable feature supervision and background workers
     dev-toolkit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.0.0)
       skills/
         pr-review/            # GitHub PR review skill
         pr-retro/             # Post-merge retrospective skill
-        notify-me/            # macOS notification skill
+        notify-me/            # macOS and Linux notification skill
       hooks/
         hooks.json            # SessionStart hook for nudging unretro'd PRs
         pr-retro-nudge.sh     # Nudge script

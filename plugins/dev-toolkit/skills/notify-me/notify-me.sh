@@ -1,5 +1,5 @@
 #!/bin/bash
-# notify-me: Send macOS system notifications from Claude Code
+# notify-me: Send system notifications from Claude Code (macOS and Linux)
 
 set -e
 
@@ -20,14 +20,36 @@ if [[ -z "$message" ]]; then
     exit 1
 fi
 
-# Build terminal-notifier command
-cmd="terminal-notifier -message \"$message\" -title \"$title\""
-if [[ -n "$subtitle" ]]; then
-    cmd="$cmd -subtitle \"$subtitle\""
-fi
+# Build the backend command as an argument array so the text is passed literally
+os=$(uname -s)
+case "$os" in
+    Darwin)
+        if ! command -v terminal-notifier >/dev/null 2>&1; then
+            echo "Error: terminal-notifier not found. Install with: brew install terminal-notifier" >&2
+            exit 1
+        fi
+        cmd=(terminal-notifier -message "$message" -title "$title")
+        if [[ -n "$subtitle" ]]; then
+            cmd+=(-subtitle "$subtitle")
+        fi
+        ;;
+    Linux)
+        if ! command -v notify-send >/dev/null 2>&1; then
+            echo "Error: notify-send not found. Install with: sudo apt install libnotify-bin (Debian/Ubuntu) or the libnotify package (Fedora/Arch)" >&2
+            exit 1
+        fi
+        # notify-send has no subtitle, so fold it into the body
+        body="$message"
+        if [[ -n "$subtitle" ]]; then
+            body="$subtitle — $message"
+        fi
+        cmd=(notify-send "$title" "$body")
+        ;;
+    *)
+        echo "Error: unsupported OS '$os'. notify-me supports macOS (Darwin) and Linux." >&2
+        exit 1
+        ;;
+esac
 
 # Execute
-eval "$cmd" || {
-    echo "Error: terminal-notifier not found. Install with: brew install terminal-notifier"
-    exit 1
-}
+"${cmd[@]}"

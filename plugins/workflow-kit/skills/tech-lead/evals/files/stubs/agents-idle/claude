@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-printf '%s\n' '[{"name":"checkout-payments","status":"idle","state":"done","waitingFor":null}]'

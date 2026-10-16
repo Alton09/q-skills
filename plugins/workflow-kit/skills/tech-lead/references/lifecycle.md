@@ -93,9 +93,21 @@ Offer `/dev-toolkit:pr-retro <n>` after merge; recommend skipping it for a small
 PR (about fewer than 200 changed lines). The retro may propose brief updates,
 design-review checklist additions, and stable project decisions. Apply only
 changes the user approves through the dossier workflow, so the proposal does
-not silently change future work. It writes no item field unless an approved item
+not silently change future work. The lead runs the retro analysis and gets the
+approval itself. It writes no item field unless an approved item
 note is added (then `updated` changes); append `retro-ready` to `log.md` and do
 not notify it. Stable project decisions belong in the project `decisions.md`.
+
+The lead does not edit repository files for approved fixes (skill files, rules,
+harness config). It does not commit or open PRs for them. A headless Claude
+worker makes the edits and opens or updates the PR. The lead writes only the
+dossier: brief, decisions, and log.
+
+`launch.py command` has no `retro` kind. Start the worker with the same argv
+shape it returns for other kinds: `claude --bg --permission-mode auto --model
+<model> -n <feature>-retro-<pr> ...`. The prompt names the approved findings,
+the target repo and branch, and whether to open a new PR or update an existing
+one.
 
 ## Monitor loops
 

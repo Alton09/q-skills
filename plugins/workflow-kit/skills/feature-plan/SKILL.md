@@ -181,6 +181,9 @@ Write as if handing off to a capable engineer who hasn't seen the rest of the co
 - Define input/output contracts between tasks so sequential work integrates cleanly
 - Call out what NOT to change if there's risk of overlap with sibling tasks
 - Keep scope tight — one clear responsibility per task
+- Do not plan a guard test (Konsist, lint, ArchUnit) that only bans a dependency the same plan
+  removes. Once the dependency is gone, the compiler already rejects its imports, so the test
+  guards nothing
 
 Tag an acceptance criterion with a trailing `[e2e]` when only a running app can settle it.
 For example: `- [ ] Sample recipes still render after a cleared database [e2e]`. Do not tag

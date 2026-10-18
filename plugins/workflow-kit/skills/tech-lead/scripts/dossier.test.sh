@@ -42,9 +42,17 @@ printf '%s\n' "{\"lead\":{\"vault\":\"$tmp/config-vault\"}}" >"$tmp/project/.cla
 run config --project-dir "$tmp/project"
 expect .maxWorkers 5
 expect .vault "\"$tmp/config-vault\""
+expect .herdr true
 run resolve-vault --project-dir "$tmp/project"
 expect .source '"config"'
 expect .featuresDir "\"$tmp/config-vault/Features\""
+printf '%s\n' '{"lead":{"vault":"'"$tmp/config-vault"'","herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .herdr false
+printf '%s\n' '{"lead":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
+python3 "$script" config --project-dir "$tmp/project" >"$tmp/bad.out" 2>"$tmp/bad.err"
+rc=$?
+[ "$rc" -eq 2 ] || fail "invalid herdr exit $rc"
 pass
 
 # 2. init is byte-idempotent and adds each union attribute exactly once.

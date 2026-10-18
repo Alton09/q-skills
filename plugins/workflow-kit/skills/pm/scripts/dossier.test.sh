@@ -74,6 +74,10 @@ after=$(find "$vault" -type f -print0 | sort -z | xargs -0 sha256sum)
 [ "$before" = "$after" ] || fail "second init changed bytes"
 [ "$(grep -Fxc 'decisions.md merge=union' "$vault/.gitattributes")" -eq 1 ] || fail "decisions union line count"
 [ "$(grep -Fxc 'log.md merge=union' "$vault/.gitattributes")" -eq 1 ] || fail "log union line count"
+[ "$(grep -Fxc 'ignored.md merge=union' "$vault/.gitattributes")" -eq 1 ] || fail "ignored union line count"
+[ -d "$vault/Features/_project/items" ] || fail "project items directory missing"
+printf '# Log\n\n' >"$tmp/expected-log"
+cmp -s "$tmp/expected-log" "$vault/Features/_project/log.md" || fail "project log content"
 grep -Fq '## Architecture' "$vault/Features/alpha/brief.md" || fail "brief headings missing"
 pass
 
@@ -236,4 +240,57 @@ run config --project-dir "$tmp/project"
 expect .maxWorkers 6
 run checks --project-dir "$tmp/project"
 expect '.fixes | length' 1
+pass
+
+# 13. Both project names are reserved, with no partial initialization.
+n=13
+for reserved in project _project; do
+  python3 "$script" init --vault "$tmp/reserved" --feature "$reserved" >"$tmp/bad.out" 2>"$tmp/bad.err"
+  rc=$?
+  [ "$rc" -eq 2 ] || fail "reserved feature exit $rc"
+  [ ! -s "$tmp/bad.out" ] || fail "reserved feature printed success"
+  grep -Fq "reserved feature name: $reserved" "$tmp/bad.err" || fail "reserved feature error missing"
+done
+[ ! -e "$tmp/reserved" ] || fail "reserved feature created files"
+pass
+
+# 14. init-project needs no feature and preserves existing project files.
+n=14
+project_vault="$tmp/project-only"
+run init-project --vault "$project_vault"
+expect .ok true
+expect .projectDir "\"$project_vault/Features/_project\""
+expect '.created | length' 2
+[ -d "$project_vault/Features/_project/items" ] || fail "standalone items directory missing"
+printf '# Log\n\n' >"$tmp/expected-log"
+cmp -s "$tmp/expected-log" "$project_vault/Features/_project/log.md" || fail "project log template"
+printf '# Project decisions\n\n' >"$tmp/expected-decisions"
+cmp -s "$tmp/expected-decisions" "$project_vault/Features/_project/decisions.md" || fail "project decisions template"
+[ "$(find "$project_vault" -type f | wc -l)" -eq 3 ] || fail "unexpected project files"
+[ "$(find "$project_vault/Features" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] || fail "unexpected feature directory"
+printf '%s\n' '- existing project log' >>"$project_vault/Features/_project/log.md"
+printf '%s\n' '- existing decision' >>"$project_vault/Features/_project/decisions.md"
+before=$(find "$project_vault" -type f -print0 | sort -z | xargs -0 sha256sum)
+run init-project --vault "$project_vault"
+expect .created '[]'
+after=$(find "$project_vault" -type f -print0 | sort -z | xargs -0 sha256sum)
+[ "$before" = "$after" ] || fail "second init-project changed bytes"
+pass
+
+# 15. List counts standalone stages just like feature items, skipping invalid files.
+n=15
+run list --vault "$tmp/missing-vault"
+expect .features '[]'
+expect .project.items 0
+run item new --feature-dir "$vault/Features/_project" --slug fix-x --title 'Fix X' --set stage=implement
+run item new --feature-dir "$vault/Features/_project" --slug finished --title Finished --set stage=done
+printf 'invalid item\n' >"$vault/Features/_project/items/invalid.md"
+run list --vault "$vault" --match alpa
+expect '.features | map(.name)' '["alpha"]'
+expect '.features[0].items' 1
+expect .closest '["alpha"]'
+expect .project.items 2
+expect .project.stages.implement 1
+expect .project.stages.done 1
+expect '.project.stages | add' 2
 pass

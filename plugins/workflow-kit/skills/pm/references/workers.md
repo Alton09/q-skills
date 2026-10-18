@@ -11,7 +11,7 @@ native start would replace the background supervisor and require new watch, reco
 resume procedures.
 
 Enable the mirror only when the lead runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
-`PATH`. It is on by default when available; set `lead.herdr: false` in
+`PATH`. It is on by default when available; set `pm.herdr: false` in
 `.claude/workflow-kit.json` to disable it. Outside herdr, every mirror call is a silent no-op.
 Control a herdr session only from inside herdr, because outside it there is no target pane
 or socket to act on.
@@ -89,9 +89,9 @@ Repository: {repo_dir}
 Worktree: {worktree_path}
 Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
 Before ending with a needs input block, pass the whole block on stdin through this quoted heredoc, so the shell never expands its text:
-python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'TECH_LEAD_EVENT'
+python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'PM_EVENT'
 <whole needs input block>
-TECH_LEAD_EVENT
+PM_EVENT
 After the skill's final done or stopped line, run the same command with that line as the heredoc body.
 After either command, if `push` is non-null, call PushNotification with it.
 ```

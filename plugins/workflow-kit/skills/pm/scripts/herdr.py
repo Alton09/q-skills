@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Best-effort herdr mirrors for tech-lead workers."""
+"""Best-effort herdr mirrors for pm workers."""
 
 from __future__ import annotations
 

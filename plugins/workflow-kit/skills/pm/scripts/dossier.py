@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic storage and git operations for a tech-lead dossier."""
+"""Deterministic storage and git operations for a pm dossier."""
 
 from __future__ import annotations
 
@@ -45,22 +45,25 @@ def read_json(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def lead_config(project_dir: Path) -> dict[str, Any]:
-    """Merge user then project lead config, one key deep."""
+def pm_config(project_dir: Path) -> dict[str, Any]:
+    """Merge user then project pm config, one key deep."""
     merged: dict[str, Any] = {}
     for path in (
         Path.home() / ".claude" / "workflow-kit.json",
         project_dir / ".claude" / "workflow-kit.json",
     ):
-        lead = read_json(path).get("lead", {})
-        if isinstance(lead, dict):
-            merged.update(lead)
+        document = read_json(path)
+        pm = document.get("pm")
+        if not isinstance(pm, dict):
+            pm = document.get("lead", {})
+        if isinstance(pm, dict):
+            merged.update(pm)
     return merged
 
 
 def resolve_vault(project_dir: Path) -> dict[str, Any]:
     project_dir = project_dir.expanduser().resolve()
-    configured = lead_config(project_dir).get("vault")
+    configured = pm_config(project_dir).get("vault")
     source = "none"
     vault: Path | None = None
     if isinstance(configured, str) and configured.strip():
@@ -82,15 +85,15 @@ def resolve_vault(project_dir: Path) -> dict[str, Any]:
 
 
 def config(project_dir: Path) -> dict[str, Any]:
-    lead = lead_config(project_dir.expanduser().resolve())
-    max_workers = lead.get("maxWorkers", 2)
+    pm = pm_config(project_dir.expanduser().resolve())
+    max_workers = pm.get("maxWorkers", 2)
     if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
         max_workers = 2
-    herdr = lead.get("herdr", True)
+    herdr = pm.get("herdr", True)
     resolved = resolve_vault(project_dir)
     result = {"maxWorkers": max_workers, "vault": resolved["vault"], "herdr": herdr}
     if not isinstance(herdr, bool):
-        result.update(herdr=True, warnings=["lead.herdr must be a boolean; using true"])
+        result.update(herdr=True, warnings=["pm.herdr must be a boolean; using true"])
     return result
 
 
@@ -479,6 +482,13 @@ def checks(project_dir: Path) -> dict[str, Any]:
         fixes.append("run /permissions and allow Bash(claude --bg *)")
     if not trusted:
         fixes.append(f"open Claude Code in {project_dir.parent} and accept the trust dialog")
+    for path in (
+        Path.home() / ".claude" / "workflow-kit.json",
+        project_dir / ".claude" / "workflow-kit.json",
+    ):
+        document = read_json(path)
+        if "lead" in document and "pm" not in document:
+            fixes.append(f'rename "lead" to "pm" in {path}')
     return {"allowRule": allow_rule, "trusted": trusted, "permissionMode": permission_mode, "fixes": fixes}
 
 

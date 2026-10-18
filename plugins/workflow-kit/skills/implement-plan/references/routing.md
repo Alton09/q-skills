@@ -177,7 +177,7 @@ Per target, after `--exclude-executor` matches are removed:
 
 ## Orchestrator gate
 
-`--role orchestrator` is for the tech-lead skill. It checks Claude quota before the lead
+`--role orchestrator` is for the pm (project manager) skill. It checks Claude quota before the lead
 launches a `claude --bg` worker. implement-plan never re-routes its own orchestrator: only the
 lead calls this role, once before each launch.
 

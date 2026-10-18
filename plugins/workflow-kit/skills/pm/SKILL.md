@@ -1,21 +1,21 @@
 ---
-name: tech-lead
+name: pm
 description: |
-  Lead a feature from idea through design, delegated planning and implementation, PR review,
-  merge follow-up, and retro while keeping resumable state in an Obsidian dossier. Use this
-  whenever the user says "/tech-lead <feature>", "be the tech lead for", "start a lead",
-  "resume the lead", "rehydrate the lead", "show the board", or "what's the status of
-  <feature>". Also use it when supervising an existing tech-lead worker or feature dossier.
+  Project manager for one repository: track every feature and standalone item, find untracked PRs, branches, worktrees and sessions, and lead each item from idea through design, delegated planning and implementation, PR review, merge follow-up and retro, with resumable state in the project's Obsidian vault.
+  Use this whenever the user says "/pm", "project manager", "show the board",
+  "what's going on in the project", "what's the status of <feature>",
+  "/tech-lead <feature>", "be the tech lead for", "start a lead", "resume the lead",
+  or "rehydrate the lead".
 ---
 
-# Tech Lead
+# Project Manager
 
 Own one feature while delegating execution. Keep judgment with the user at idea, design, and
 PR review boundaries; keep durable state in the dossier so another session can resume safely.
 
 ## Invocation
 
-`/workflow-kit:tech-lead [<feature>] [--from <master-plan>]`
+`/workflow-kit:pm [<feature>] [--from <master-plan>]` (short form: `/pm`)
 
 Run from the project repository root. `<skill-dir>` is this skill's directory (the one that
 holds this `SKILL.md`), not the working directory. Use `python3 <skill-dir>/scripts/dossier.py`
@@ -25,7 +25,7 @@ for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisio
 `launch.py`, `events.py`, `herdr.py`) mean these paths.
 
 1. Run `dossier.py resolve-vault --project-dir <repo>`. If it returns `source: none`, ask once
-   for the vault path and suggest setting `lead.vault` in `.claude/workflow-kit.json`; do not
+   for the vault path and suggest setting `pm.vault` in `.claude/workflow-kit.json`; do not
    edit that config.
 2. With no feature, run `dossier.py list --vault <vault>`, show the leads and their stage
    counts, and stop.

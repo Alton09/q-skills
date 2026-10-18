@@ -34,11 +34,11 @@ configure_repo() {
   git -C "$1" config user.email "dossier@example.invalid"
 }
 
-# 1. User lead keys merge with project keys; project wins key conflicts.
+# 1. User pm keys merge with project keys; project wins key conflicts.
 n=1
 mkdir -p "$HOME/.claude" "$tmp/config-vault"
-printf '%s\n' '{"lead":{"maxWorkers":5,"vault":"/wrong"}}' >"$HOME/.claude/workflow-kit.json"
-printf '%s\n' "{\"lead\":{\"vault\":\"$tmp/config-vault\"}}" >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"maxWorkers":5,"vault":"/wrong"}}' >"$HOME/.claude/workflow-kit.json"
+printf '%s\n' "{\"pm\":{\"vault\":\"$tmp/config-vault\"}}" >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .maxWorkers 5
 expect .vault "\"$tmp/config-vault\""
@@ -47,21 +47,21 @@ expect 'has("warnings")' false
 run resolve-vault --project-dir "$tmp/project"
 expect .source '"config"'
 expect .featuresDir "\"$tmp/config-vault/Features\""
-printf '%s\n' '{"lead":{"vault":"'"$tmp/config-vault"'","herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"vault":"'"$tmp/config-vault"'","herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr false
 # User value is inherited unless the project overrides it.
-printf '%s\n' '{"lead":{"herdr":false}}' >"$HOME/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"herdr":false}}' >"$HOME/.claude/workflow-kit.json"
 printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr false
-printf '%s\n' '{"lead":{"herdr":true}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"herdr":true}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr true
-printf '%s\n' '{"lead":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr true
-expect .warnings '["lead.herdr must be a boolean; using true"]'
+expect .warnings '["pm.herdr must be a boolean; using true"]'
 pass
 
 # 2. init is byte-idempotent and adds each union attribute exactly once.
@@ -211,4 +211,29 @@ expect .permissionMode '"acceptEdits"'
 rm -f "$tmp/project/.claude/settings.local.json"
 run checks --project-dir "$tmp/project"
 expect .permissionMode '"plan"'
+pass
+
+# 12. Legacy config falls back per file, with rename fixes and pm precedence.
+n=12
+printf '%s\n' '{"lead":{"maxWorkers":3}}' >"$HOME/.claude/workflow-kit.json"
+printf '%s\n' '{"lead":{"maxWorkers":3}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .maxWorkers 3
+run checks --project-dir "$tmp/project"
+expect '.fixes | length' 2
+expect '.fixes[0]' "$(printf 'rename "lead" to "pm" in %s' "$HOME/.claude/workflow-kit.json" | jq -Rs .)"
+expect '.fixes[1]' "$(printf 'rename "lead" to "pm" in %s' "$tmp/project/.claude/workflow-kit.json" | jq -Rs .)"
+printf '%s\n' '{"pm":{"maxWorkers":4},"lead":{"maxWorkers":3}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .maxWorkers 4
+run checks --project-dir "$tmp/project"
+expect '.fixes | length' 1
+printf '%s\n' '{"pm":{},"lead":{"maxWorkers":6}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .maxWorkers 3
+printf '%s\n' '{"pm":null,"lead":{"maxWorkers":6}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .maxWorkers 6
+run checks --project-dir "$tmp/project"
+expect '.fixes | length' 1
 pass

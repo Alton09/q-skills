@@ -95,8 +95,8 @@ missing worker for attach); mirror runtime failures return JSON `warning` with e
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.
 - `config [--project-dir D]` → `{maxWorkers, vault, herdr}`. `herdr` is a boolean from
-  `lead.herdr`, default `true`; a non-boolean falls back to `true` and adds
-  `warnings: ["lead.herdr must be a boolean; using true"]`, with exit 0. The `warnings`
+  `pm.herdr`, default `true`; a non-boolean falls back to `true` and adds
+  `warnings: ["pm.herdr must be a boolean; using true"]`, with exit 0. The `warnings`
   key is absent when there is no warning.
 - `list --vault V [--match NAME]` → `{features}` and, when matching, `{match, closest}`.
   Each feature has `name`, total `items`, and `stages` counts.

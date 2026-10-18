@@ -103,7 +103,7 @@ done
 [ ! -e "$HERDR_TEST_LOG" ]
 
 # Project and user configuration can disable every action without invoking herdr.
-printf '%s\n' '{"lead":{"herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
 for action in available prepare attach ensure close; do
   arguments=("$action" --project-dir "$tmp/project")
   case "$action" in
@@ -118,9 +118,9 @@ printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x == {"available":True,"reason":None}, x'
 
 # Invalid config warnings survive both availability outcomes.
-printf '%s\n' '{"lead":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
-run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x["available"] and x["warnings"] == ["lead.herdr must be a boolean; using true"], x'
-env -u HERDR_ENV "$mirror" available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert not x["available"] and x["warnings"] == ["lead.herdr must be a boolean; using true"], x'
+printf '%s\n' '{"pm":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
+run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x["available"] and x["warnings"] == ["pm.herdr must be a boolean; using true"], x'
+env -u HERDR_ENV "$mirror" available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert not x["available"] and x["warnings"] == ["pm.herdr must be a boolean; using true"], x'
 printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 
 # First worker uses the root tab; reuse looks up its pane separately.

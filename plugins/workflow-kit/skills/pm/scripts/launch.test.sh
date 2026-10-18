@@ -26,7 +26,7 @@ item "$vault_a/Features/alpha/items/paused.md" implement paused
 item "$vault_b/Features/beta/items/other.md" pr running '["shared.py"]'
 item "$vault_b/Features/beta/items/done.md" done running '["shared.py"]'
 mkdir -p "$tmp/project/.claude"
-printf '%s\n' '{"lead":{"maxWorkers":3}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"pm":{"maxWorkers":3}}' >"$tmp/project/.claude/workflow-kit.json"
 
 capacity=$(python3 "$launch" capacity --vault "$vault_a" --project-dir "$tmp/project")
 printf '%s' "$capacity" | check 'x=json.load(sys.stdin); assert (x["running"], x["max"], x["free"], len(x["queue"])) == (2, 3, 1, 1), x'
@@ -41,9 +41,9 @@ capacity=$(python3 "$launch" capacity --vault "$tmp/notes" --project-dir "$tmp/p
 printf '%s' "$capacity" | check 'x=json.load(sys.stdin); assert x["running"] == 3, x'
 
 plan="$tmp/plan.md"
-printf '%s\n' '#### Task 4' '- **Module**: `plugins/workflow-kit/skills/tech-lead/`' '- **Files**: `scripts/launch.py`, `scripts/launch.test.sh`' >"$plan"
+printf '%s\n' '#### Task 4' '- **Module**: `plugins/workflow-kit/skills/pm/`' '- **Files**: `scripts/launch.py`, `scripts/launch.test.sh`' >"$plan"
 scope=$(python3 "$launch" plan-scope "$plan")
-printf '%s' "$scope" | check 'x=json.load(sys.stdin); assert "plugins/workflow-kit/skills/tech-lead/scripts/launch.py" in x["files"], x'
+printf '%s' "$scope" | check 'x=json.load(sys.stdin); assert "plugins/workflow-kit/skills/pm/scripts/launch.py" in x["files"], x'
 
 item "$vault_a/Features/alpha/items/implement.md" implement queued
 python3 "$script_dir/dossier.py" item set "$vault_a/Features/alpha/items/implement.md" "plan=$plan" >/dev/null
@@ -82,7 +82,7 @@ constant = next(
 match = re.search(r"^## Worker protocol\n.*?^```text\n(.*?)^```$", workers.read_text(encoding="utf-8"), re.MULTILINE | re.DOTALL)
 assert "use python3 {events_path} worker-event" in constant
 assert "python3 {events_arg} worker-event --item {item_arg}" in constant
-assert "--line-file -{notify_arg} <<'TECH_LEAD_EVENT'" in constant
+assert "--line-file -{notify_arg} <<'PM_EVENT'" in constant
 assert '--line "' not in constant
 assert "<notify-cmd>" not in constant
 assert "<first line>" not in constant

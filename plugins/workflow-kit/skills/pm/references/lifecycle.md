@@ -86,7 +86,8 @@ and write that item's `status: running`, `worker`, `sessionId`, `workerKind:
 sync`, and `updated`. When it finishes, `worker-event` writes `status: idle`,
 updates `updated`, and logs `synced`, with no notification. Suggest the next
 unblocked item across the project after this scan. Then run
-`scan.py scan --vault <vault> --project-dir <repo>` to refresh the inbox, present
+`scan.py scan --vault <vault> --project-dir <repo> --exclude-session <supervisor-name>`
+(omit `--exclude-session` when the supervisor name is unknown) to refresh the inbox, present
 its entries as in `references/project.md` § "Discovery and inbox", and run
 `dossier.py sync --vault <vault> -m "pm: after merge discovery" --board
 <vault>/Features/_project -- <vault>/Features/_project/inbox.md`, including any

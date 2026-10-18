@@ -119,16 +119,18 @@ missing worker for attach); mirror runtime failures return JSON `warning` with e
 - `item new --feature-dir D --slug S --title T [--set k=v]...`, `item get <file>`, and
   `item set <file> k=v... [--add k=v] [--note TEXT]` → `{file, item, body}`. `--set` may be
   repeated for `item new`; `--add` may be repeated for `item set`.
-- `board --feature-dir D` → `{ok, board, changed, items}`. It emits a table for every stage,
+- `board --feature-dir D` → `{ok, board, changed, items, warnings}`. It emits a table for every stage,
   in the stage order documented above, with Item, Status, PR, Worker, and Updated columns.
+  Malformed items are skipped and listed in `warnings`; well-formed board bytes are unchanged.
 - `board --project --vault V` → `{ok, board, changed, items, warnings}`. Writes
   `Features/_project/board.md`: per-label active/done counts, stage tables excluding `done`
   and `dropped`, and the generated inbox. Active means neither `done` nor `dropped`;
   `items` counts valid items, including completed and dropped ones; `warnings` lists skipped
   malformed items. Item cells use `[[Features/<dir>/items/<slug>\|<slug>]]`. `--project` and
   `--feature-dir` are mutually exclusive.
-- `sync --vault V -m MSG [--board D]... [--] [paths...]` → `{ok, committed, attempts}` on
-  success; failure has `ok:false` and either `conflict` or `error`. A rejected push is retried
+- `sync --vault V -m MSG [--board D]... [--] [paths...]` → `{ok, committed, attempts, warnings}` on
+  success; failure has `ok:false`, `warnings`, and either `conflict` or `error`.
+  `warnings` collects feature and project board warnings, including rebase recovery. A rejected push is retried
   up to three total attempts. Any `--board` also regenerates and stages the project board;
   `--board V/Features/_project` requests the project board only. Rebase recovery regenerates
   conflicting boards and keeps the local `_project/inbox.md`; other conflicts abort before

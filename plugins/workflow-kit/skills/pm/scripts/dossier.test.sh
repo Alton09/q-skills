@@ -368,15 +368,20 @@ pass
 
 # 17. Feature sync stages and pushes the project board, even with explicit paths.
 n=17
-mkdir -p "$clone_a/Features/malformed/items"
-printf 'not frontmatter\n' >"$clone_a/Features/malformed/items/broken.md"
+printf 'not frontmatter\n' >"$clone_a/Features/alpha/items/broken.md"
 run item new --feature-dir "$clone_a/Features/alpha" --slug synced --title Synced --set stage=pr
-run sync --vault "$clone_a" -m 'feature and project boards' --board "$clone_a/Features/alpha" -- Features/alpha/items/synced.md Features/malformed/items/broken.md
+run sync --vault "$clone_a" -m 'feature and project boards' --board "$clone_a/Features/alpha" -- Features/alpha/items/synced.md Features/alpha/items/broken.md
 expect .ok true
+expect '.warnings | length' 2
+expect '.warnings | all(contains("alpha/items/broken.md"))' true
 git -C "$clone_a" diff --exit-code HEAD -- Features/_project/board.md >/dev/null || fail "project board not committed"
 git --git-dir="$remote" show main:Features/_project/board.md >"$tmp/pushed-board" || fail "project board not pushed"
 cmp -s "$tmp/pushed-board" "$clone_a/Features/_project/board.md" || fail "pushed project board differs"
 grep -Fq '[[Features/alpha/items/synced\|synced]]' "$tmp/pushed-board" || fail "synced item missing"
+rm "$clone_a/Features/alpha/items/broken.md"
+run sync --vault "$clone_a" -m 'remove malformed fixture' --board "$clone_a/Features/alpha" -- Features/alpha/items/broken.md
+expect .ok true
+expect .warnings '[]'
 pass
 
 # 18. A project-only board request never regenerates the feature board.
@@ -437,7 +442,9 @@ pass
 
 # 21. Recovery aborts even when board regeneration raises unexpectedly.
 n=21
-PYTHONDONTWRITEBYTECODE=1 python3 - "$here" "$board_b" <<'PY' || fail "recovery error did not abort"
+recovery_repo="$tmp/recovery-error"
+mkdir -p "$recovery_repo/Features/_project"
+PYTHONDONTWRITEBYTECODE=1 python3 - "$here" "$recovery_repo" <<'PY' || fail "recovery error did not abort"
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -458,5 +465,37 @@ for conflict in ('Features/_project/board.md', 'Features/_project/inbox.md'):
             else:
                 raise AssertionError('expected regeneration error')
             git.assert_any_call(repo, 'rebase', '--abort')
+PY
+pass
+
+# 22. Recovery skips malformed feature items and returns both board warnings.
+n=22
+run item new --feature-dir "$recovery_repo/Features/alpha" --slug valid --title Valid
+printf 'not frontmatter\n' >"$recovery_repo/Features/alpha/items/broken.md"
+PYTHONDONTWRITEBYTECODE=1 python3 - "$here" "$recovery_repo" <<'PY' || fail "recovery warnings missing"
+from pathlib import Path
+import sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import dossier
+repo = Path(sys.argv[2])
+feature = repo / 'Features/alpha'
+with patch.object(dossier, 'conflict_paths', return_value=['Features/alpha/board.md']), \
+        patch.object(dossier, 'git') as git:
+    git.return_value.returncode = 0
+    ok, conflicts, warnings = dossier.continue_board_rebase(repo, [feature])
+    assert ok and not conflicts
+    assert len(warnings) == 2 and all('alpha/items/broken.md' in warning for warning in warnings), warnings
+    assert '[[items/valid]]' in (feature / 'board.md').read_text()
+    assert not any(call.args[1:] == ('rebase', '--abort') for call in git.call_args_list)
+# The sync result also includes warnings returned by recovery.
+with patch.object(dossier, 'commit_if_staged', return_value=False), \
+        patch.object(dossier, 'conflict_paths', return_value=['Features/alpha/board.md']), \
+        patch.object(dossier, 'continue_board_rebase', return_value=(True, [], warnings)), \
+        patch.object(dossier, 'git') as git:
+    from subprocess import CompletedProcess
+    git.side_effect = [CompletedProcess([], 0), CompletedProcess([], 1), CompletedProcess([], 0)]
+    result = dossier.sync(repo, 'recover boards', [], [])
+    assert result['ok'] and result['warnings'] == warnings, result
 PY
 pass

@@ -51,7 +51,8 @@ An unanswered entry stays in the inbox. Ignore also follows the user's triage ch
 
 Adoption rescans before creating the item. Pass the same repeatable `--exclude-session`
 names as the discovery scan; omit the option when no supervisor name is known. If the key is absent, report the error, refresh
-with `scan.py scan --vault <vault> --project-dir <repo>`, and present the current choices;
+with `scan.py scan --vault <vault> --project-dir <repo> --exclude-session <supervisor-name>`
+when the supervisor name is known, and present the current choices;
 do not substitute another entry. Adoption sets `origin: external`, `status: idle`, and the
 available PR, branch, worktree, and worker fields. A PR starts at `stage: pr`; other entries
 start at `stage: implement`. Continue the existing lifecycle from that stage.

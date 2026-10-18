@@ -122,8 +122,9 @@ def scan(vault: Path, project_dir: Path, exclude_sessions: Sequence[str] = ()) -
         if not any(directory.is_relative_to(root) for root in roots):
             continue
         row = {"session": name}
-        # A session in a worktree subdirectory inherits that worktree's branch.
-        containing = sorted((wt for wt in worktrees[1:] if directory.is_relative_to(Path(wt["worktree"]))),
+        # Inherit worktree branches, except the main checkout on the default branch.
+        containing = sorted((wt for index, wt in enumerate(worktrees) if (index or wt["branch"] != default)
+                             and directory.is_relative_to(Path(wt["worktree"]))),
                             key=lambda wt: len(wt["worktree"]), reverse=True)
         if containing:
             row["branch"] = containing[0]["branch"]

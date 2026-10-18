@@ -144,6 +144,15 @@ print(value if isinstance(value, str) else json.dumps(value))
     tracked_path.unlink()
     data['sessions'] = sessions
 
+    # Main-checkout sessions inherit a non-default branch and join its tracked PR.
+    worktrees = data['worktrees']
+    data['worktrees'] = worktrees.replace('branch refs/heads/main', 'branch refs/heads/tracked', 1)
+    data['sessions'] = [{'name': 'root-feature', 'cwd': str(repo / 'src')}]
+    entries = {entry['key']: entry for entry in command()['entries']}
+    assert 'session:root-feature' not in entries and 'pr:124' not in entries, entries
+    data['worktrees'] = worktrees
+    data['sessions'] = sessions
+
     # PR tracking accepts URLs, # forms, and bare numbers.
     for value in ('https://github.com/owner/repo/pull/123', '#123', '123'):
         dossier.item_new(tracked_path.parent.parent, 'matched', 'Matched', ['pr=' + value])

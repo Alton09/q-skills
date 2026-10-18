@@ -352,9 +352,14 @@ def list_features(vault: Path, match: str | None) -> dict[str, Any]:
 
 
 def board(feature_dir: Path) -> dict[str, Any]:
+    warnings: list[str] = []
     by_stage: dict[str, list[dict[str, str | list[str]]]] = {stage: [] for stage in STAGES}
     for path in sorted((feature_dir / "items").glob("*.md")):
-        data, _ = parse_item(path)
+        try:
+            data, _ = parse_item(path)
+        except UsageError as exc:
+            warnings.append(str(exc))
+            continue
         stage = data.get("stage", "idea")
         if isinstance(stage, str) and stage in by_stage:
             by_stage[stage].append(data)
@@ -370,7 +375,7 @@ def board(feature_dir: Path) -> dict[str, Any]:
     changed = not path.exists() or path.read_text(encoding="utf-8") != content
     if changed:
         path.write_text(content, encoding="utf-8")
-    return {"ok": True, "board": str(path.resolve()), "changed": changed, "items": sum(map(len, by_stage.values()))}
+    return {"ok": True, "board": str(path.resolve()), "changed": changed, "items": sum(map(len, by_stage.values())), "warnings": warnings}
 
 
 def project_board(vault: Path) -> dict[str, Any]:
@@ -446,32 +451,33 @@ def conflict_paths(repo: Path) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def continue_board_rebase(repo: Path, board_dirs: Sequence[Path]) -> tuple[bool, list[str]]:
+def continue_board_rebase(repo: Path, board_dirs: Sequence[Path]) -> tuple[bool, list[str], list[str]]:
     """Resolve generated board and project inbox conflicts and finish the rebase."""
     project_dir = repo / "Features" / PROJECT_DIR
     feature_dirs = [directory for directory in board_dirs if directory.resolve() != project_dir.resolve()]
     inbox_path = (project_dir / "inbox.md").resolve()
     board_paths = {(directory / "board.md").resolve() for directory in feature_dirs}
     board_paths.add((project_dir / "board.md").resolve())
+    warnings: list[str] = []
     completed = False
     try:
         while True:
             conflicts = conflict_paths(repo)
             if any((repo / path).resolve() not in board_paths | {inbox_path} for path in conflicts):
-                return False, conflicts
+                return False, conflicts, warnings
             if not conflicts:
                 completed = True
-                return True, []
+                return True, [], warnings
             for path in conflicts:
                 if (repo / path).resolve() == inbox_path:
                     # Stage 3 is the local commit being replayed, equivalent to --theirs.
                     local = git(repo, "show", f":3:{path}")
                     if local.returncode:
-                        return False, conflicts
+                        return False, conflicts, warnings
                     (repo / path).write_text(local.stdout, encoding="utf-8")
             for directory in feature_dirs:
-                board(directory)
-            project_board(repo)
+                warnings.extend(board(directory)["warnings"])
+            warnings.extend(project_board(repo)["warnings"])
             for absolute in sorted(board_paths | {(repo / path).resolve() for path in conflicts}):
                 if absolute.exists():
                     git(repo, "add", "--", os.path.relpath(absolute, repo))
@@ -480,58 +486,60 @@ def continue_board_rebase(repo: Path, board_dirs: Sequence[Path]) -> tuple[bool,
             continued = git(repo, "rebase", "--continue", env=env)
             if continued.returncode == 0:
                 completed = True
-                return True, []
+                return True, [], warnings
             next_conflicts = conflict_paths(repo)
             if not next_conflicts:
-                return False, ["rebase --continue failed"]
+                return False, ["rebase --continue failed"], warnings
     finally:
         if not completed:
             git(repo, "rebase", "--abort")
 
 
 def sync(vault: Path, message: str, board_dirs: Sequence[Path], paths: Sequence[str]) -> dict[str, Any]:
+    warnings: list[str] = []
     repo = vault.resolve()
     project_dir = repo / "Features" / PROJECT_DIR
     feature_dirs = [directory for directory in board_dirs if directory.resolve() != project_dir.resolve()]
     add_paths = list(paths) or ["."]
     added = git(repo, "add", "--", *add_paths)
     if added.returncode:
-        return {"ok": False, "error": (added.stderr or added.stdout).strip()}
+        return {"ok": False, "error": (added.stderr or added.stdout).strip(), "warnings": warnings}
     try:
         committed = commit_if_staged(repo, message)
     except RuntimeError as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": str(exc), "warnings": warnings}
     for attempt in range(1, 4):
         pulled = git(repo, "pull", "--rebase", "--autostash")
         if pulled.returncode:
             conflicts = conflict_paths(repo)
             if conflicts:
-                continued, unresolved = continue_board_rebase(repo, board_dirs)
+                continued, unresolved, recovery_warnings = continue_board_rebase(repo, board_dirs)
+                warnings.extend(recovery_warnings)
                 if not continued:
-                    return {"ok": False, "conflict": unresolved, "attempts": attempt}
+                    return {"ok": False, "conflict": unresolved, "attempts": attempt, "warnings": warnings}
             else:
-                return {"ok": False, "error": (pulled.stderr or pulled.stdout).strip(), "attempts": attempt}
+                return {"ok": False, "error": (pulled.stderr or pulled.stdout).strip(), "attempts": attempt, "warnings": warnings}
         for directory in feature_dirs:
-            board(directory)
+            warnings.extend(board(directory)["warnings"])
         if board_dirs:
-            project_board(repo)
+            warnings.extend(project_board(repo)["warnings"])
             relative_boards = [os.path.relpath(directory / "board.md", repo) for directory in feature_dirs]
             relative_boards.append(os.path.relpath(project_dir / "board.md", repo))
             added_boards = git(repo, "add", "--", *relative_boards)
             if added_boards.returncode:
-                return {"ok": False, "error": (added_boards.stderr or added_boards.stdout).strip(), "attempts": attempt}
+                return {"ok": False, "error": (added_boards.stderr or added_boards.stdout).strip(), "attempts": attempt, "warnings": warnings}
             try:
                 commit_if_staged(repo, f"{message} (board)")
             except RuntimeError as exc:
-                return {"ok": False, "error": str(exc), "attempts": attempt}
+                return {"ok": False, "error": str(exc), "attempts": attempt, "warnings": warnings}
         pushed = git(repo, "push")
         if pushed.returncode == 0:
-            return {"ok": True, "committed": committed, "attempts": attempt}
+            return {"ok": True, "committed": committed, "attempts": attempt, "warnings": warnings}
         output = f"{pushed.stdout}\n{pushed.stderr}".lower()
         rejected = "rejected" in output or "non-fast-forward" in output or "fetch first" in output
         if not rejected:
-            return {"ok": False, "error": (pushed.stderr or pushed.stdout).strip(), "attempts": attempt}
-    return {"ok": False, "error": "push rejected after 3 attempts", "attempts": 3}
+            return {"ok": False, "error": (pushed.stderr or pushed.stdout).strip(), "attempts": attempt, "warnings": warnings}
+    return {"ok": False, "error": "push rejected after 3 attempts", "attempts": 3, "warnings": warnings}
 
 
 def checks(project_dir: Path) -> dict[str, Any]:

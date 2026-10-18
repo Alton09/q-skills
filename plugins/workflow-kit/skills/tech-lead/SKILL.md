@@ -43,7 +43,9 @@ Compare the physical current directory with `git rev-parse --show-toplevel`; ref
 or mutate a dossier unless they are equal. Workers inherit this directory, so starting
 elsewhere would attach them to the wrong repository.
 
-Run `herdr.py available --project-dir <repo>` and tell the user once whether the mirror is on.
+Run `herdr.py available --project-dir <repo>` for an optional herdr view of workers
+(see `references/workers.md` § "Herdr mirror") and tell the user once whether it is on;
+on `skipped` or a `warning`, tell the user once and continue without the mirror.
 
 Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the lead
 session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers
@@ -117,6 +119,7 @@ Read and follow these procedures rather than duplicating them here:
 
 The user always reviews the PR and controls merge. These boundaries preserve the user's
 judgment while the lead handles routing, CI, comment rounds, bookkeeping, and follow-up.
+To drop an item, follow `references/lifecycle.md` § "Drop".
 
 ## Lead decisions
 

@@ -13,22 +13,25 @@ resume procedures.
 Enable the mirror only when the lead runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
 `PATH`. It is on by default when available; set `lead.herdr: false` in
 `.claude/workflow-kit.json` to disable it. Outside herdr, every mirror call is a silent no-op.
-Never control a herdr session from outside herdr.
+Control a herdr session only from inside herdr, because outside it there is no target pane
+or socket to act on.
 
 Use one workspace labeled with the feature name and one tab labeled with the item title.
 All workers for an item share that tab. A relaunch of another kind replaces the attach pane
-and names the agent with `agent_name(<worker>)`. The pane runs `command claude attach <worker>`.
-Keep the tab open until the item is `done` or `dropped`.
+and names the agent after the worker using `references/dossier.md` § "Worker names".
+The pane runs `command claude attach <worker>`. Keep the tab open until the item is `done`
+or dropped through `references/lifecycle.md` § "Drop". Tabs are found by item title and
+workspaces by feature name, so item titles must be unique within a feature, and two projects
+that share a feature name share one workspace.
 
 Never write herdr IDs to the dossier. Each call finds the workspace and tab by label, so a
-restarted lead can rebuild the view from item files alone. Never read herdr state as worker
-evidence: `events.py agents` and the item file remain the only worker inputs to reconcile.
+restarted lead can rebuild the view from item files alone. Use `events.py agents` and the
+item file as the authoritative inputs to reconcile: herdr status is screen-scraped, lags the
+worker, and can be wrong.
 
-Run `herdr.py prepare --item <item> --repo <repo>` before `launch.py command`. After a
-successful launch and recording the worker, run `herdr.py attach --item <item> --pane <pane>`
-with the returned pane, then subscribe with `SendMessage`. On reconcile, run
-`herdr.py ensure --item <item> --repo <repo>` for every active item with a worker. After
-`stage: done` or `stage: dropped`, run `herdr.py close --item <item>`.
+Find prepare/attach in `references/workers.md` § "Launch", ensure in
+`references/workers.md` § "Reconcile", and close in `references/lifecycle.md` § "After merge (8)"
+or `references/lifecycle.md` § "Drop".
 
 Treat `skipped: true` as a no-op; when prepare returns no pane, skip attach. A mirror failure
 returns `warning` in JSON; tell the user once and continue. Never let a mirror failure block

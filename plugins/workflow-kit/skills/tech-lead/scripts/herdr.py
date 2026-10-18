@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ import launch
 
 
 POLL_TIMEOUT = 3.0
+ATTACH_TIMEOUT = 10.0
 POLL_INTERVAL = 0.1
 
 
@@ -69,10 +71,11 @@ def agent_name(worker: str) -> str:
         name = "a-" + name
     if len(name) > 32:
         head, separator, kind = name.rpartition("-")
-        if separator and kind and len(kind) <= 29:
-            name = head[:31 - len(kind)] + "-" + kind
+        digest = hashlib.sha1(worker.encode()).hexdigest()[:6]
+        if separator and kind and len(kind) <= 23:
+            name = head[:24 - len(kind)] + "-" + digest + "-" + kind
         else:
-            name = name[:32]
+            name = name[:25] + "-" + digest
     return name
 
 
@@ -86,11 +89,14 @@ def tabs(workspace_id: str) -> list[dict[str, Any]]:
 
 
 def feature_titles(item_path: Path) -> set[str]:
-    return {
-        str(launch.read_item(path)["title"])
-        for path in launch.item_files(item_path.parents[3])
-        if path.parent == item_path.parent
-    }
+    titles = set()
+    for path in launch.item_files(item_path.parents[3]):
+        if path.parent == item_path.parent:
+            try:
+                titles.add(str(launch.read_item(path)["title"]))
+            except (OSError, ValueError, KeyError):
+                continue
+    return titles
 
 
 def process_info(pane: str) -> dict[str, Any]:
@@ -99,6 +105,19 @@ def process_info(pane: str) -> dict[str, Any]:
 
 def shell_free(info: dict[str, Any]) -> bool:
     return info["foreground_process_group_id"] == info["shell_pid"]
+
+
+def claude_client(process: dict[str, Any], kinds: tuple[str, ...]) -> bool:
+    command = shlex.split(process.get("cmdline", ""))
+    if command and command[0] == "command":
+        command = command[1:]
+    return len(command) > 1 and Path(command[0]).name == "claude" and command[1] in kinds
+
+
+def require_client(info: dict[str, Any], pane: str, kinds: tuple[str, ...]) -> None:
+    processes = info.get("foreground_processes", [])
+    if not processes or not all(claude_client(process, kinds) for process in processes):
+        raise MirrorError(f"pane {pane} is occupied by another process; leaving it untouched")
 
 
 def wait_for_shell(pane: str) -> dict[str, Any]:
@@ -111,15 +130,17 @@ def wait_for_shell(pane: str) -> dict[str, Any]:
 
 
 def free_pane(pane: str) -> None:
-    if shell_free(process_info(pane)):
+    info = process_info(pane)
+    if shell_free(info):
         return
+    require_client(info, pane, ("attach", "agents"))
     checked(["pane", "send-keys", pane, "ctrl+z"])
     info = wait_for_shell(pane)
     if shell_free(info):
         return
+    require_client(info, pane, ("attach", "agents"))
     for process in info.get("foreground_processes", []):
-        command = shlex.split(process.get("cmdline", ""))
-        if command and Path(command[0]).name == "claude" and len(command) > 1 and command[1] in ("attach", "agents"):
+        if claude_client(process, ("attach", "agents")):
             pid = int(process["pid"])
             if pid <= 1 or pid == info["shell_pid"]:
                 raise MirrorError("refusing to signal an invalid attach pid")
@@ -155,7 +176,7 @@ def attach(item_path: Path, pane: str) -> dict[str, Any]:
     if not isinstance(worker, str) or not worker:
         raise launch.UsageError("attach requires item worker")
     checked(["pane", "run", pane, "command claude attach " + shlex.quote(worker)])
-    deadline = time.monotonic() + POLL_TIMEOUT
+    deadline = time.monotonic() + ATTACH_TIMEOUT
     while True:
         result = run_herdr(["agent", "get", pane])
         if result.get("agent"):
@@ -175,7 +196,18 @@ def ensure(item_path: Path, repo: Path) -> dict[str, Any]:
     if not item.get("worker") or item.get("stage") in ("done", "dropped"):
         return {"ensured": False}
     workspace_id = workspace(item_path)
-    if workspace_id and any(row.get("label") == item["title"] for row in tabs(workspace_id)):
+    tab = next((row["tab_id"] for row in tabs(workspace_id) if row.get("label") == item["title"]), None) if workspace_id else None
+    if tab is not None:
+        panes = checked(["pane", "list", "--workspace", workspace_id])["panes"]
+        pane = next(row["pane_id"] for row in panes if row["tab_id"] == tab)
+        result = run_herdr(["agent", "get", pane])
+        if "warning" in result and result.get("code") != "agent_not_found":
+            raise MirrorError(result["warning"])
+        agent = result.get("agent")
+        name = agent_name(item["worker"])
+        if agent and agent.get("name") != name:
+            checked(["agent", "rename", pane, name])
+            return {"ensured": True}
         return {"ensured": False}
     result = prepare(item_path, repo)
     attach(item_path, result["pane"])
@@ -184,18 +216,28 @@ def ensure(item_path: Path, repo: Path) -> dict[str, Any]:
 
 def close(item_path: Path) -> dict[str, Any]:
     title = str(launch.read_item(item_path)["title"])
-    if title not in feature_titles(item_path):
-        return {"closed": False}
     workspace_id = workspace(item_path)
     if workspace_id is None:
         return {"closed": False}
     tab = next((row["tab_id"] for row in tabs(workspace_id) if row.get("label") == title), None)
     if tab is None:
         return {"closed": False}
+    panes = [row for row in checked(["pane", "list", "--workspace", workspace_id])["panes"] if row["tab_id"] == tab]
+    if not panes:
+        raise MirrorError(f"tab {tab} has no pane to check; leaving it untouched")
+    for row in panes:
+        info = process_info(row["pane_id"])
+        if not shell_free(info):
+            require_client(info, row["pane_id"], ("attach",))
+    titles = feature_titles(item_path)
     checked(["tab", "close", tab])
     # herdr closes the workspace automatically when its last tab closes.
-    if workspace(item_path) == workspace_id and not tabs(workspace_id):
-        checked(["workspace", "close", workspace_id])
+    if workspace(item_path) == workspace_id:
+        remaining = tabs(workspace_id)
+        if any(row.get("label") not in titles for row in remaining):
+            return {"closed": True, "workspace": workspace_id, "tab": tab}
+        if not remaining:
+            checked(["workspace", "close", workspace_id])
     return {"closed": True, "workspace": workspace_id, "tab": tab}
 
 
@@ -215,8 +257,8 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    args = parser().parse_args(argv)
     try:
-        args = parser().parse_args(argv)
         project_dir = Path(args.repo if hasattr(args, "repo") else args.project_dir).expanduser().resolve()
         result = available(project_dir)
         if not result["available"]:
@@ -227,10 +269,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif args.action == "attach": result = attach(item_path, args.pane)
             elif args.action == "ensure": result = ensure(item_path, project_dir)
             else: result = close(item_path)
-    except (launch.UsageError, dossier.UsageError) as exc:
-        print(f"herdr.py: {exc}", file=sys.stderr)
-        return 2
-    except (MirrorError, OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+    except Exception as exc:
         result = {"warning": str(exc) or "unexpected herdr response"}
     print(json.dumps(result, ensure_ascii=False))
     return 0

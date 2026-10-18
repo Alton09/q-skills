@@ -43,16 +43,25 @@ run config --project-dir "$tmp/project"
 expect .maxWorkers 5
 expect .vault "\"$tmp/config-vault\""
 expect .herdr true
+expect 'has("warnings")' false
 run resolve-vault --project-dir "$tmp/project"
 expect .source '"config"'
 expect .featuresDir "\"$tmp/config-vault/Features\""
 printf '%s\n' '{"lead":{"vault":"'"$tmp/config-vault"'","herdr":false}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr false
+# User value is inherited unless the project overrides it.
+printf '%s\n' '{"lead":{"herdr":false}}' >"$HOME/.claude/workflow-kit.json"
+printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .herdr false
+printf '%s\n' '{"lead":{"herdr":true}}' >"$tmp/project/.claude/workflow-kit.json"
+run config --project-dir "$tmp/project"
+expect .herdr true
 printf '%s\n' '{"lead":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
-python3 "$script" config --project-dir "$tmp/project" >"$tmp/bad.out" 2>"$tmp/bad.err"
-rc=$?
-[ "$rc" -eq 2 ] || fail "invalid herdr exit $rc"
+run config --project-dir "$tmp/project"
+expect .herdr true
+expect .warnings '["lead.herdr must be a boolean; using true"]'
 pass
 
 # 2. init is byte-idempotent and adds each union attribute exactly once.

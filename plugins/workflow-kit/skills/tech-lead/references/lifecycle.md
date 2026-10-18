@@ -88,7 +88,10 @@ sync`, and `updated`. When it finishes, `worker-event` writes `status: idle`,
 updates `updated`, and logs `synced`, with no notification. Suggest the next
 unblocked item after this scan.
 
-When dropping an item, set `stage: dropped`, sync, then run `herdr.py close --item <item>`.
+## Drop
+
+Drop an item to stop pursuing it while keeping its dossier history. Set `stage: dropped`
+and sync, then run `herdr.py close --item <item>` to remove its mirror tab.
 
 ## Retro (9)
 

@@ -35,7 +35,9 @@ or `references/lifecycle.md` § "Drop".
 
 Treat `skipped: true` as a no-op; when prepare returns no pane, skip attach. A mirror failure
 returns `warning` in JSON; tell the user once and continue. Never let a mirror failure block
-a launch, reconcile, or item write.
+a launch, reconcile, or item write. Usage errors write to stderr and exit 2; report the
+message once and continue the launch without the mirror. `herdr.py` closes only its item's
+tab, and closes a workspace only when no tabs are left.
 
 ## Launch
 

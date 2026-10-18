@@ -72,7 +72,8 @@ A worker is named `<feature>-<slug>`, plus `-<workerKind>` for every kind except
 `claude attach <name>`.
 `herdr.py` lowercases the worker name, replaces characters outside `[a-z0-9_-]` with
 `-`, ensures it starts with a letter, and caps it at 32 characters. Long names keep the
-kind suffix and get a short stable hash. The tab label is the item title.
+last hyphen-separated part (the kind suffix when there is one) when it is 23 characters
+or fewer, and get a 6-character stable hash. The tab label is the item title.
 
 ## Events
 
@@ -88,6 +89,8 @@ Log only in `log.md`, without a notification: `phase-done`, `ci-fixed`, `synced`
 
 Every successful command writes exactly one JSON object to stdout and exits 0. Invalid usage,
 unknown item keys, and invalid stages or statuses write an error to stderr and exit 2.
+`herdr.py` also uses stderr and exit 2 for usage errors (including malformed items or a
+missing worker for attach); mirror runtime failures return JSON `warning` with exit 0.
 
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.

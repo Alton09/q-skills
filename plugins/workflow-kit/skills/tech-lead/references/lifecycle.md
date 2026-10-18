@@ -90,8 +90,12 @@ unblocked item after this scan.
 
 ## Drop
 
-Drop an item to stop pursuing it while keeping its dossier history. Set `stage: dropped`
-and sync, then run `herdr.py close --item <item>` to remove its mirror tab.
+Drop an item to stop pursuing it while keeping its dossier history. Run `events.py agents`;
+if the item's worker is live, find its short id in `claude agents --json --all` and run
+`claude stop <short id>` before closing the tab, because a dropped item's worker would keep
+spending quota unmirrored. Set `stage: dropped` and `status: idle` with `dossier.py item set`,
+then sync through `dossier.py sync --board <feature-dir>` as in After merge (8). Run
+`herdr.py close --item <item>` to remove its mirror tab.
 
 ## Retro (9)
 

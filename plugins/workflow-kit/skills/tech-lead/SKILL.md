@@ -45,7 +45,9 @@ elsewhere would attach them to the wrong repository.
 
 Run `herdr.py available --project-dir <repo>` for an optional herdr view of workers
 (see `references/workers.md` § "Herdr mirror") and tell the user once whether it is on;
-on `skipped` or a `warning`, tell the user once and continue without the mirror.
+report any `warnings` once. On `skipped` or a `warning`, tell the user once and continue
+without the mirror. Report a herdr.py exit 2 stderr message once and continue; it never
+blocks a launch.
 
 Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the lead
 session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers

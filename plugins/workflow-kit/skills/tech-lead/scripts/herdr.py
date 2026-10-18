@@ -56,13 +56,19 @@ def checked(argv: list[str]) -> dict[str, Any]:
 
 
 def available(project_dir: Path) -> dict[str, Any]:
+    config = dossier.config(project_dir)
+    result = {"available": False, "reason": None}
+    if config.get("warnings"):
+        result["warnings"] = config["warnings"]
     if os.environ.get("HERDR_ENV") != "1":
-        return {"available": False, "reason": "HERDR_ENV is not 1"}
-    if shutil.which("herdr") is None:
-        return {"available": False, "reason": "herdr is not on PATH"}
-    if not dossier.config(project_dir)["herdr"]:
-        return {"available": False, "reason": "herdr is disabled in config"}
-    return {"available": True, "reason": None}
+        result["reason"] = "HERDR_ENV is not 1"
+    elif shutil.which("herdr") is None:
+        result["reason"] = "herdr is not on PATH"
+    elif not config["herdr"]:
+        result["reason"] = "herdr is disabled in config"
+    else:
+        result["available"] = True
+    return result
 
 
 def agent_name(worker: str) -> str:
@@ -88,17 +94,6 @@ def tabs(workspace_id: str) -> list[dict[str, Any]]:
     return checked(["tab", "list", "--workspace", workspace_id])["tabs"]
 
 
-def feature_titles(item_path: Path) -> set[str]:
-    titles = set()
-    for path in launch.item_files(item_path.parents[3]):
-        if path.parent == item_path.parent:
-            try:
-                titles.add(str(launch.read_item(path)["title"]))
-            except (OSError, ValueError, KeyError):
-                continue
-    return titles
-
-
 def process_info(pane: str) -> dict[str, Any]:
     return checked(["pane", "process-info", "--pane", pane])["process_info"]
 
@@ -107,11 +102,20 @@ def shell_free(info: dict[str, Any]) -> bool:
     return info["foreground_process_group_id"] == info["shell_pid"]
 
 
-def claude_client(process: dict[str, Any], kinds: tuple[str, ...]) -> bool:
+def claude_command(process: dict[str, Any]) -> list[str]:
     command = shlex.split(process.get("cmdline", ""))
     if command and command[0] == "command":
         command = command[1:]
-    return len(command) > 1 and Path(command[0]).name == "claude" and command[1] in kinds
+    if len(command) > 1 and Path(command[0]).name in ("node", "bun") and Path(command[1]).name in ("claude", "cli.js"):
+        return command[2:]
+    if command and Path(command[0]).name == "claude":
+        return command[1:]
+    return []
+
+
+def claude_client(process: dict[str, Any], kinds: tuple[str, ...]) -> bool:
+    command = claude_command(process)
+    return bool(command) and command[0] in kinds
 
 
 def require_client(info: dict[str, Any], pane: str, kinds: tuple[str, ...]) -> None:
@@ -200,6 +204,14 @@ def ensure(item_path: Path, repo: Path) -> dict[str, Any]:
     if tab is not None:
         panes = checked(["pane", "list", "--workspace", workspace_id])["panes"]
         pane = next(row["pane_id"] for row in panes if row["tab_id"] == tab)
+        info = process_info(pane)
+        processes = info.get("foreground_processes", [])
+        if shell_free(info) or not processes or not all(claude_command(process)[:2] == ["attach", item["worker"]] for process in processes):
+            if not shell_free(info):
+                require_client(info, pane, ("attach",))
+            free_pane(pane)
+            attach(item_path, pane)
+            return {"ensured": True}
         result = run_herdr(["agent", "get", pane])
         if "warning" in result and result.get("code") != "agent_not_found":
             raise MirrorError(result["warning"])
@@ -229,13 +241,10 @@ def close(item_path: Path) -> dict[str, Any]:
         info = process_info(row["pane_id"])
         if not shell_free(info):
             require_client(info, row["pane_id"], ("attach",))
-    titles = feature_titles(item_path)
     checked(["tab", "close", tab])
     # herdr closes the workspace automatically when its last tab closes.
     if workspace(item_path) == workspace_id:
         remaining = tabs(workspace_id)
-        if any(row.get("label") not in titles for row in remaining):
-            return {"closed": True, "workspace": workspace_id, "tab": tab}
         if not remaining:
             checked(["workspace", "close", workspace_id])
     return {"closed": True, "workspace": workspace_id, "tab": tab}
@@ -269,6 +278,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif args.action == "attach": result = attach(item_path, args.pane)
             elif args.action == "ensure": result = ensure(item_path, project_dir)
             else: result = close(item_path)
+    except (launch.UsageError, dossier.UsageError) as exc:
+        print(f"herdr.py: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         result = {"warning": str(exc) or "unexpected herdr response"}
     print(json.dumps(result, ensure_ascii=False))

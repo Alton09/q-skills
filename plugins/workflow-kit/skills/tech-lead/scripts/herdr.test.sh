@@ -65,7 +65,8 @@ elif command == ['pane', 'send-keys']:
     next(pane for pane in state['panes'] if pane['pane_id'] == args[2])['busy'] = False
 elif command == ['pane', 'run']:
     assert args[3].startswith('command claude attach '), args
-    next(pane for pane in state['panes'] if pane['pane_id'] == args[2])['busy'] = True
+    pane = next(pane for pane in state['panes'] if pane['pane_id'] == args[2])
+    pane.update(busy=True, cmdline=args[3])
 elif command == ['agent', 'get']:
     pane = next(pane for pane in state['panes'] if pane['pane_id'] == args[2])
     result = {'agent': {'agent': 'claude', 'pane_id': args[2], 'name':pane.get('name')}}
@@ -115,6 +116,12 @@ done
 [ ! -e "$HERDR_TEST_LOG" ]
 printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x == {"available":True,"reason":None}, x'
+
+# Invalid config warnings survive both availability outcomes.
+printf '%s\n' '{"lead":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
+run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x["available"] and x["warnings"] == ["lead.herdr must be a boolean; using true"], x'
+env -u HERDR_ENV "$mirror" available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert not x["available"] and x["warnings"] == ["lead.herdr must be a boolean; using true"], x'
+printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 
 # First worker uses the root tab; reuse looks up its pane separately.
 ls -aR "$tmp/Features/alpha" >"$tmp/feature-before"
@@ -253,30 +260,49 @@ with patch.object(herdr, 'ATTACH_TIMEOUT', 0), patch.object(herdr, 'run_herdr', 
         raise AssertionError('expected detection timeout')
 # Existing tabs repair a cleared or stale name without replacing the attach.
 for name in (None, 'old-worker', 'alpha-one-ci'):
-    with patch.object(herdr.launch, 'read_item', return_value={'title':'Item one', 'worker':'alpha-one-ci'}), patch.object(herdr, 'workspace', return_value='w1'), patch.object(herdr, 'tabs', return_value=[{'tab_id':'t1', 'label':'Item one'}]), patch.object(herdr, 'checked', return_value={'panes':[{'pane_id':'p1', 'tab_id':'t1'}]}) as checked, patch.object(herdr, 'run_herdr', return_value={'agent':{'name':name}}):
+    info = {'shell_pid':100, 'foreground_process_group_id':200, 'foreground_processes':[{'pid':200, 'cmdline':'node /npm/bin/claude attach alpha-one-ci'}]}
+    with patch.object(herdr, 'process_info', return_value=info), patch.object(herdr.launch, 'read_item', return_value={'title':'Item one', 'worker':'alpha-one-ci'}), patch.object(herdr, 'workspace', return_value='w1'), patch.object(herdr, 'tabs', return_value=[{'tab_id':'t1', 'label':'Item one'}]), patch.object(herdr, 'checked', return_value={'panes':[{'pane_id':'p1', 'tab_id':'t1'}]}) as checked, patch.object(herdr, 'run_herdr', return_value={'agent':{'name':name}}):
         assert herdr.ensure(herdr.Path('unused'), herdr.Path('.')) == {'ensured':name != 'alpha-one-ci'}
         assert (['agent', 'rename', 'p1', 'alpha-one-ci'] in [call.args[0] for call in checked.call_args_list]) == (name != 'alpha-one-ci')
+# A stale worker or exited attach is rebuilt in the existing pane.
+for command in ('claude attach alpha-one', 'node /npm/bin/claude attach alpha-one', None):
+    info = {'shell_pid':100, 'foreground_process_group_id':200 if command else 100, 'foreground_processes':[{'pid':200, 'cmdline':command}] if command else []}
+    free = {'shell_pid':100, 'foreground_process_group_id':100}
+    with patch.object(herdr.launch, 'read_item', return_value={'title':'Item one', 'worker':'alpha-one-ci'}), patch.object(herdr, 'workspace', return_value='w1'), patch.object(herdr, 'tabs', return_value=[{'tab_id':'t1', 'label':'Item one'}]), patch.object(herdr, 'checked', return_value={'panes':[{'pane_id':'p1', 'tab_id':'t1'}]}) as checked, patch.object(herdr, 'process_info', return_value=info), patch.object(herdr, 'wait_for_shell', return_value=free), patch.object(herdr, 'attach') as attach:
+        assert herdr.ensure(herdr.Path('unused'), herdr.Path('.')) == {'ensured':True}
+        attach.assert_called_once_with(herdr.Path('unused'), 'p1')
+        assert not any(call.args[0][:2] == ['agent', 'rename'] for call in checked.call_args_list)
+        assert (['pane', 'send-keys', 'p1', 'ctrl+z'] in [call.args[0] for call in checked.call_args_list]) == bool(command)
+# Native, node, and bun clients share the same subcommand gate.
+for command in ('claude attach old', 'node /npm/bin/claude attach old', 'bun /npm/cli.js agents'):
+    assert herdr.claude_client({'cmdline':command}, ('attach', 'agents'))
+for command in ('node other.js attach old', 'cli.js attach old', 'claude --bg old'):
+    assert not herdr.claude_client({'cmdline':command}, ('attach', 'agents'))
 # Signals target only attach/agents clients, including a stopped process.
 for state, expected in [('S', herdr.signal.SIGTERM), ('T', herdr.signal.SIGKILL)]:
-    busy = {'shell_pid':100, 'foreground_process_group_id':200, 'foreground_processes':[{'pid':200, 'cmdline':'claude attach old'}]}
+    busy = {'shell_pid':100, 'foreground_process_group_id':200, 'foreground_processes':[{'pid':200, 'cmdline':'node /npm/bin/claude attach old'}]}
     free = {'shell_pid':100, 'foreground_process_group_id':100}
     with patch.object(herdr, 'process_info', return_value=busy), patch.object(herdr, 'wait_for_shell', side_effect=[busy, free]), patch.object(herdr, 'checked'), patch.object(herdr.Path, 'read_text', return_value=f'200 (claude) {state} 100'), patch.object(herdr.os, 'kill') as kill:
         herdr.free_pane('p1')
         kill.assert_called_once_with(200, expected)
 # Foreign foreground processes get no keys, signals, or tab close; CLI returns warning/0.
 busy = {'shell_pid':100, 'foreground_process_group_id':200, 'foreground_processes':[{'pid':200, 'cmdline':'vim notes.md'}]}
-with patch.object(herdr, 'available', return_value={'available':True}), patch.object(herdr.launch, 'read_item', return_value={'title':'Item one'}), patch.object(herdr, 'workspace', return_value='w1'), patch.object(herdr, 'tabs', return_value=[{'tab_id':'t1', 'label':'Item one'}]), patch.object(herdr, 'checked', return_value={'panes':[{'pane_id':'p1', 'tab_id':'t1'}]}) as checked, patch.object(herdr, 'process_info', return_value=busy), patch.object(herdr.os, 'kill') as kill:
+with patch.object(herdr, 'available', return_value={'available':True}), patch.object(herdr.launch, 'read_item', return_value={'title':'Item one', 'worker':'alpha-one-ci'}), patch.object(herdr, 'workspace', return_value='w1'), patch.object(herdr, 'tabs', return_value=[{'tab_id':'t1', 'label':'Item one'}]), patch.object(herdr, 'checked', return_value={'panes':[{'pane_id':'p1', 'tab_id':'t1'}]}) as checked, patch.object(herdr, 'process_info', return_value=busy), patch.object(herdr.os, 'kill') as kill:
     import contextlib
     import io
     import json
-    for action in ('prepare', 'close'):
+    for action in ('prepare', 'ensure', 'close'):
         output = io.StringIO()
-        args = [action, '--item', 'unused'] + (['--repo', '.'] if action == 'prepare' else [])
+        args = [action, '--item', 'unused'] + (['--repo', '.'] if action in ('prepare', 'ensure') else [])
         with contextlib.redirect_stdout(output):
             assert herdr.main(args) == 0
         assert 'another process' in json.loads(output.getvalue())['warning']
     assert all(call.args[0][:2] == ['pane', 'list'] for call in checked.call_args_list)
     kill.assert_not_called()
+# Unexpected JSON row shapes stay warning/0.
+with patch.object(herdr, 'available', return_value={'available':True}), patch.object(herdr.launch, 'read_item', return_value={'title':'Item one'}), patch.object(herdr, 'checked', return_value={'workspaces':[None]}), contextlib.redirect_stdout(io.StringIO()) as output:
+    assert herdr.main(['prepare', '--item', 'unused', '--repo', '.']) == 0
+    assert 'warning' in json.loads(output.getvalue())
 # Malformed row shapes also keep the runtime warning contract.
 for exc in (IndexError('bad row'), AttributeError('bad row')):
     with patch.object(herdr, 'available', side_effect=exc), contextlib.redirect_stdout(io.StringIO()) as output:
@@ -284,23 +310,19 @@ for exc in (IndexError('bad row'), AttributeError('bad row')):
         assert json.loads(output.getvalue()) == {'warning':'bad row'}
 PY
 
-# Malformed item input remains a warning, including unreadable sibling tabs on close.
+# Usage errors write stderr and exit 2, with no success JSON.
 printf '%s\n' '---' 'not valid frontmatter' '---' >"$tmp/Features/alpha/items/bad.md"
-run prepare --item "$tmp/Features/alpha/items/bad.md" --repo "$tmp/project" | check 'x=json.load(sys.stdin); assert "warning" in x, x'
-run prepare --item "$item" --repo "$tmp/project" >/dev/null
-python3 - "$HERDR_TEST_STATE" <<'PY'
-import json
-import sys
-path = sys.argv[1]
-state = json.load(open(path))
-state['tabs'].append({'workspace_id':'w1', 'tab_id':'w1:bad', 'label':'Malformed sibling'})
-open(path, 'w').write(json.dumps(state))
-PY
-run close --item "$item" | check 'x=json.load(sys.stdin); assert x["closed"], x'
-python3 - "$HERDR_TEST_STATE" <<'PY'
-import json
-import sys
-state = json.load(open(sys.argv[1]))
-assert state['workspaces'] and [tab['label'] for tab in state['tabs']] == ['Malformed sibling'], state
-PY
+printf '%s\n' '---' 'title: No worker' 'stage: implement' '---' >"$tmp/Features/alpha/items/no-worker.md"
+for bad_item in bad no-worker missing; do
+  rc=0
+  run attach --item "$tmp/Features/alpha/items/$bad_item.md" --pane w1:p1 >"$tmp/bad.out" 2>"$tmp/bad.err" || rc=$?
+  [ "$rc" -eq 2 ]
+  [ ! -s "$tmp/bad.out" ]
+  case "$bad_item" in
+    bad) expected='invalid frontmatter line' ;;
+    no-worker) expected='attach requires item worker' ;;
+    missing) expected='No such file or directory' ;;
+  esac
+  rg -q "$expected" "$tmp/bad.err"
+done
 printf 'herdr.test.sh: pass\n'

@@ -50,8 +50,12 @@ python3 "$script_dir/dossier.py" item set "$vault_a/Features/alpha/items/impleme
 command=$(python3 "$launch" command --item "$vault_a/Features/alpha/items/implement.md" --kind implement --model opus --repo "$tmp/project")
 item_path="$vault_a/Features/alpha/items/implement.md"
 export item_path
-printf '%s' "$command" | check 'import os; x=json.load(sys.stdin); assert x["argv"][:2] == ["claude", "--bg"], x; assert "--worker" in x["prompt"] and os.path.abspath(os.environ["item_path"]) in x["prompt"], x; assert "--rules" not in x["prompt"], x'
+printf '%s' "$command" | check 'import os; x=json.load(sys.stdin); assert x["argv"][:4] == ["claude", "--bg", "--permission-mode", "auto"], x; assert json.loads(x["argv"][x["argv"].index("--settings") + 1])["env"] == {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}, x; assert "--worker" in x["prompt"] and os.path.abspath(os.environ["item_path"]) in x["prompt"], x; assert "--rules" not in x["prompt"], x'
 printf '%s' "$command" | check 'x=json.load(sys.stdin); assert "--notify-cmd" not in x["prompt"], x'
+
+# Herdr settings are fixed even when the calling shell has herdr variables.
+herdr_command=$(HERDR_ENV=1 HERDR_PANE_ID=lead-pane python3 "$launch" command --item "$item_path" --kind implement --model opus --repo "$tmp/project")
+printf '%s' "$herdr_command" | check 'import json,sys; x=json.load(sys.stdin); assert x["argv"][:4] == ["claude", "--bg", "--permission-mode", "auto"], x; assert json.loads(x["argv"][x["argv"].index("--settings") + 1])["env"] == {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}, x'
 
 # A relative item plan is vault-relative, and --notify-cmd fills the protocol command.
 python3 "$script_dir/dossier.py" item set "$item_path" "plan=Plans/relative.md" >/dev/null

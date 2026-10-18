@@ -4,6 +4,41 @@ Use this reference whenever launching, watching, reconciling, or resuming a back
 worker. Keep the item file authoritative: sessions and notices are signals that help the lead
 bring that state up to date.
 
+## Herdr mirror
+
+Mirror `claude --bg` workers through `claude attach` panes. Never use `herdr agent start`:
+native start would replace the background supervisor and require new watch, reconcile, and
+resume procedures.
+
+Enable the mirror only when the lead runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
+`PATH`. It is on by default when available; set `lead.herdr: false` in
+`.claude/workflow-kit.json` to disable it. Outside herdr, every mirror call is a silent no-op.
+Control a herdr session only from inside herdr, because outside it there is no target pane
+or socket to act on.
+
+Use one workspace labeled with the feature name and one tab labeled with the item title.
+All workers for an item share that tab. A relaunch of another kind replaces the attach pane
+and names the agent after the worker using `references/dossier.md` § "Worker names".
+The pane runs `command claude attach <worker>`. Keep the tab open until the item is `done`
+or dropped through `references/lifecycle.md` § "Drop". Tabs are found by item title and
+workspaces by feature name, so item titles must be unique within a feature, and two projects
+that share a feature name share one workspace.
+
+Never write herdr IDs to the dossier. Each call finds the workspace and tab by label, so a
+restarted lead can rebuild the view from item files alone. Use `events.py agents` and the
+item file as the authoritative inputs to reconcile: herdr status is screen-scraped, lags the
+worker, and can be wrong.
+
+Find prepare/attach in `references/workers.md` § "Launch", ensure in
+`references/workers.md` § "Reconcile", and close in `references/lifecycle.md` § "After merge (8)"
+or `references/lifecycle.md` § "Drop".
+
+Treat `skipped: true` as a no-op; when prepare returns no pane, skip attach. A mirror failure
+returns `warning` in JSON; tell the user once and continue. Never let a mirror failure block
+a launch, reconcile, or item write. Usage errors write to stderr and exit 2; report the
+message once and continue the launch without the mirror. `herdr.py` closes only its item's
+tab, and closes a workspace only when no tabs are left.
+
 ## Launch
 
 Evaluate gates in this order so a scarce worker slot is not spent on work that cannot proceed.
@@ -31,11 +66,14 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
    `stuck` and all `paused-*` keys from `notified` while preserving all other keys. This
    applies to relaunches too. Do this first because a worker that stops quickly records its own
    `stuck` or `paused-<id>`, and a later cleanup would erase it.
-5. Run `launch.py command` with the item, kind, model, the dev-toolkit `notify-me.sh` path as
+5. Run `herdr.py prepare --item <item> --repo <repo>` and keep its returned pane for attach.
+   Then run `launch.py command` with the item, kind, model, the dev-toolkit `notify-me.sh` path as
    `--notify-cmd` when it exists, and the required kind-specific arguments. Execute its
-   returned `argv` without changing argument order. If the launch fails, restore the item's
+   returned `argv` without changing argument order. Its `--settings` env sets `HERDR_ENV=0`
+   so the worker hook stays silent. If the launch fails, restore the item's
    previous `status` and sync. Otherwise record only `worker` and `sessionId`, without
-   rewriting `status`, and sync the item. For an `implement` launch, notify `impl-started`
+   rewriting `status`, and sync the item. If prepare returned a pane, run
+   `herdr.py attach --item <item> --pane <pane>`. For an `implement` launch, notify `impl-started`
    through `events.py notify`; other launch kinds have no notification event. Subscribe using
    an empty `SendMessage` with `notify_when_idle: true` immediately after launch.
 
@@ -76,13 +114,14 @@ avoids missed completion while keeping the item file as the source of truth.
 For every active item, read the item and run `events.py agents`. Check its plan-file checkboxes,
 run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
 run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the lead's
-repository root, so their transcripts live under that directory, not the worktree. Reconcile
-the combinations as follows:
+repository root, so their transcripts live under that directory, not the worktree. For every
+active item with a worker, run `herdr.py ensure --item <item> --repo <repo>` to rebuild a missing
+mirror; do not use its output as worker evidence. Reconcile the combinations as follows:
 
 | Observed combination | Action |
 |---|---|
 | Item is `running`; `agents` says its worker is `idle`; `last-reply.line` is a final line not yet recorded. | Run `events.py worker-event` with that line, then follow the resulting item event. |
-| `agents` reports `status: waiting`. | The worker used `AskUserQuestion`. Keep its item status unchanged, tell the user to run `claude attach <worker>`, and do not send it a message. |
+| `agents` reports `status: waiting`. | The worker used `AskUserQuestion`. Keep its item status unchanged, tell the user to open the item's herdr tab when available or run `claude attach <worker>`, and do not send it a message. |
 | The worker is absent from `agents`, but the item says `status: running`. | Set `status: stuck`, sync, notify `stuck`, and offer a relaunch rather than silently replacing the session. |
 | GitHub confirms the PR is merged. | Continue with the after-merge procedure in the lifecycle reference. |
 

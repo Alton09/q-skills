@@ -70,6 +70,10 @@ closing `---` is free-form Markdown.
 A worker is named `<feature>-<slug>`, plus `-<workerKind>` for every kind except
 `implement`. Examples are `kmp-ktor` and `kmp-ktor-ci`. Notifications use the same name in
 `claude attach <name>`.
+`herdr.py` lowercases the worker name, replaces characters outside `[a-z0-9_-]` with
+`-`, ensures it starts with a letter, and caps it at 32 characters. Long names keep the
+last hyphen-separated part (the kind suffix when there is one) when it is 23 characters
+or fewer, and get a 6-character stable hash. The tab label is the item title.
 
 ## Events
 
@@ -85,10 +89,15 @@ Log only in `log.md`, without a notification: `phase-done`, `ci-fixed`, `synced`
 
 Every successful command writes exactly one JSON object to stdout and exits 0. Invalid usage,
 unknown item keys, and invalid stages or statuses write an error to stderr and exit 2.
+`herdr.py` also uses stderr and exit 2 for usage errors (including malformed items or a
+missing worker for attach); mirror runtime failures return JSON `warning` with exit 0.
 
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.
-- `config [--project-dir D]` → `{maxWorkers, vault}`.
+- `config [--project-dir D]` → `{maxWorkers, vault, herdr}`. `herdr` is a boolean from
+  `lead.herdr`, default `true`; a non-boolean falls back to `true` and adds
+  `warnings: ["lead.herdr must be a boolean; using true"]`, with exit 0. The `warnings`
+  key is absent when there is no warning.
 - `list --vault V [--match NAME]` → `{features}` and, when matching, `{match, closest}`.
   Each feature has `name`, total `items`, and `stages` counts.
 - `init --vault V --feature F` → `{ok, featureDir, created}`.

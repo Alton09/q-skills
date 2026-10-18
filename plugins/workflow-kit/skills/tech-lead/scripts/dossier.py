@@ -86,8 +86,12 @@ def config(project_dir: Path) -> dict[str, Any]:
     max_workers = lead.get("maxWorkers", 2)
     if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
         max_workers = 2
+    herdr = lead.get("herdr", True)
     resolved = resolve_vault(project_dir)
-    return {"maxWorkers": max_workers, "vault": resolved["vault"]}
+    result = {"maxWorkers": max_workers, "vault": resolved["vault"], "herdr": herdr}
+    if not isinstance(herdr, bool):
+        result.update(herdr=True, warnings=["lead.herdr must be a boolean; using true"])
+    return result
 
 
 def split_list(text: str) -> list[str]:

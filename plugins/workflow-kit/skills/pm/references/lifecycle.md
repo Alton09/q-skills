@@ -5,7 +5,7 @@ source of truth: make item changes with `dossier.py item set`, regenerate and
 sync through `dossier.py sync --board <feature-dir>`, and never hand-edit the
 board. Read `references/dossier.md` § "Item format" before changing fields and
 `references/dossier.md` § "Events" before notifying, so recovery and a resumed
-lead see the same state.
+project manager see the same state.
 
 ## Implement (4)
 
@@ -21,7 +21,7 @@ paused`, `question`, `notified` (with `paused-<id>`), and `updated`, and logs th
 pause. Show the worker's options and recommendation from that block; the
 notification includes its attach command. On `stuck`, it writes `status: stuck`,
 adds `stuck` to `notified`, updates `updated`, and logs the reason. Notify
-`stuck`, then ask before any relaunch, since spending another worker is a lead
+`stuck`, then ask before any relaunch, since spending another worker is a project manager
 decision.
 
 ## PR open (5)
@@ -29,7 +29,7 @@ decision.
 When the implementation final line is `implement-plan: done <key> <url>`, let
 `worker-event` first write `stage: pr`, `status: idle`, `pr`, `branch`,
 `worktree`, `unplanned`, and `updated`; it also logs `impl-done`. Watch that
-PR's checks. A live lead arms a `Monitor` loop over `gh pr checks <n> --json
+PR's checks. A live project manager arms a `Monitor` loop over `gh pr checks <n> --json
 name,bucket`, emitting only a terminal `pass`, `fail`, or `cancel` bucket.
 
 On red, launch one `ci` worker and write `status: running`, `worker`,
@@ -40,7 +40,7 @@ a sub-agent and append its findings as an item note (therefore updating
 `updated`). Then add `pr-ready` to `notified`, update `updated`, and notify
 `pr-ready`. Include `, <unplanned> unplanned decisions` in that notification
 when `unplanned` is above `0`, and surface those decisions in the next briefing.
-The user, not the lead, performs stage-5 review.
+The user, not the project manager, performs stage-5 review.
 
 ## Review rounds (6)
 
@@ -49,7 +49,7 @@ than `reviewSeen` through a Monitor loop over `gh pr view <n> --json reviews`,
 on rehydrate, or when the user asks to address comments. Record the newest
 handled timestamp in `reviewSeen`, set `stage: review` and `status: running`,
 and write `worker`, `sessionId`, `workerKind: comments`, and `updated` before
-launching one comments worker. This prevents duplicate rounds when the lead is
+launching one comments worker. This prevents duplicate rounds when the project manager is
 restarted.
 
 On a completed comments worker, `worker-event` writes `status: idle`, increments
@@ -62,7 +62,7 @@ the question to the user.
 
 ## Merge (7)
 
-The user merges the PR. The lead records no merge command and does not alter
+The user merges the PR. The project manager records no merge command and does not alter
 the branch or remote for this step. Once the merged state is confirmed, continue
 with After merge.
 
@@ -75,18 +75,22 @@ Read `### Unplanned Decisions` from the merged PR body. Append every decision
 that survived review to the appropriate `decisions.md` using source `PR #<n>
 unplanned` and its suggested scope. Log a review reversal with source `user
 reversal`. Ask about scope only when the default is project scope; record that
-lead-side ask by adding `decision-<n>` to `notified`, updating `updated`, and
+project manager-side ask by adding `decision-<n>` to `notified`, updating `updated`, and
 notifying `decision-<n>`.
 
-Run the merge-time sync check across the whole vault root, not merely the
-current feature: enumerate every active item under every sibling
-`*-vault/Features/*/items/*.md`, including every lead, and select each item with
-an open `pr`. For each, run `gh pr view <pr> --json state,mergeable`. For every
-open `CONFLICTING` PR, subject to the global capacity, launch one `sync` worker
+Run the merge-time sync check across this vault only: enumerate active items
+under `<vault>/Features/*/items/*.md`, including `_project/items/`, and select
+each item with an open `pr`. Do not scan sibling vaults. For each, run
+`gh pr view <pr> --json state,mergeable`. For every open `CONFLICTING` PR, subject to the global capacity, launch one `sync` worker
 and write that item's `status: running`, `worker`, `sessionId`, `workerKind:
 sync`, and `updated`. When it finishes, `worker-event` writes `status: idle`,
 updates `updated`, and logs `synced`, with no notification. Suggest the next
-unblocked item after this scan.
+unblocked item across the project after this scan. Then run
+`scan.py scan --vault <vault> --project-dir <repo>` to refresh the inbox, present
+its entries as in `references/project.md` § "Discovery and inbox", and run
+`dossier.py sync --vault <vault> -m "pm: after merge discovery" --board
+<vault>/Features/_project -- <vault>/Features/_project/inbox.md`, including any
+other paths touched and `--board <feature-dir>` for each affected feature.
 
 ## Drop
 
@@ -103,14 +107,14 @@ Offer `/dev-toolkit:pr-retro <n>` after merge; recommend skipping it for a small
 PR (about fewer than 200 changed lines). The retro may propose brief updates,
 design-review checklist additions, and stable project decisions. Apply only
 changes the user approves through the dossier workflow, so the proposal does
-not silently change future work. The lead runs the retro analysis and gets the
+not silently change future work. The project manager runs the retro analysis and gets the
 approval itself. It writes no item field unless an approved item
 note is added (then `updated` changes); append `retro-ready` to `log.md` and do
 not notify it. Stable project decisions belong in the project `decisions.md`.
 
-The lead does not edit repository files for approved fixes (skill files, rules,
+The project manager does not edit repository files for approved fixes (skill files, rules,
 harness config). It does not commit or open PRs for them. A headless Claude
-worker makes the edits and opens or updates the PR. The lead writes only the
+worker makes the edits and opens or updates the PR. The project manager writes only the
 dossier: brief, decisions, and log.
 
 `launch.py command` has no `retro` kind. Start the worker with the same argv
@@ -128,6 +132,6 @@ rounds. Treat command failure, missing PR data, cancellation, and expiry as
 explicit states: log the observed detail without changing item fields, retry on
 the next re-arm or rehydrate, and do not emit an unsupported notification.
 Monitor loops are optional because rehydration repeats the same checks after a
-lead session closes.
+project manager session closes.
 
 Never merge a PR, force-push, or instruct a worker to do either.

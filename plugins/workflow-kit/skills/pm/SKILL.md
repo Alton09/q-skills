@@ -10,8 +10,9 @@ description: |
 
 # Project Manager
 
-Own one feature while delegating execution. Keep judgment with the user at idea, design, and
-PR review boundaries; keep durable state in the dossier so another session can resume safely.
+Own one repository and supervise every feature and standalone item while delegating
+execution. Keep judgment with the user at idea, design, and PR review boundaries; keep durable
+state in the dossier so another session can resume safely.
 
 ## Invocation
 
@@ -20,18 +21,26 @@ PR review boundaries; keep durable state in the dossier so another session can r
 Run from the project repository root. `<skill-dir>` is this skill's directory (the one that
 holds this `SKILL.md`), not the working directory. Use `python3 <skill-dir>/scripts/dossier.py`
 for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisions,
-`python3 <skill-dir>/scripts/events.py` for worker events, and
-`python3 <skill-dir>/scripts/herdr.py` for the mirror. The short names below (`dossier.py`,
-`launch.py`, `events.py`, `herdr.py`) mean these paths.
+`python3 <skill-dir>/scripts/events.py` for worker events,
+`python3 <skill-dir>/scripts/herdr.py` for the mirror,
+`python3 <skill-dir>/scripts/lock.py` for the supervisor lock, and
+`python3 <skill-dir>/scripts/scan.py` for discovery. The short names below (`dossier.py`,
+`launch.py`, `events.py`, `herdr.py`, `lock.py`, `scan.py`) mean these paths.
 
 1. Run `dossier.py resolve-vault --project-dir <repo>`. If it returns `source: none`, ask once
    for the vault path and suggest setting `pm.vault` in `.claude/workflow-kit.json`; do not
    edit that config.
-2. With no feature, run `dossier.py list --vault <vault>`, show the leads and their stage
-   counts, and stop.
-3. With a feature, run `dossier.py list --vault <vault> --match <feature>`. Rehydrate an exact
-   match. For an unknown feature, show `closest`, ask once whether to create it, and run
-   `dossier.py init --vault <vault> --feature <feature>` only after confirmation.
+2. With no feature, run **project mode** in `references/project.md` § "Project mode".
+3. With `<feature>`, run project mode first, then **focus mode**: read that feature's
+   `brief.md`, `decisions.md`, log, board, and all items in full, and continue with Stages 1–3
+   for it. Keep supervising the other features. Run
+   `dossier.py list --vault <vault> --match <feature>` to identify an exact match in `features`.
+   For an unknown feature or a request to start a new one, show `closest`, ask once whether
+   to create it, and run `dossier.py init --vault <vault> --feature <feature>` only after
+   confirmation.
+4. For `show the board` without the lock, run `dossier.py board --project --vault <vault>`
+   and print `<vault>/Features/_project/board.md`. This is a read-only answer apart from
+   regenerating that view: skip project mode, launch nothing, and reconcile nothing.
 
 Use the structure in `references/dossier.md` § "Layout", the initial documents in
 `references/dossier.md` § "File templates", and the JSON interface in
@@ -43,13 +52,19 @@ Compare the physical current directory with `git rev-parse --show-toplevel`; ref
 or mutate a dossier unless they are equal. Workers inherit this directory, so starting
 elsewhere would attach them to the wrong repository.
 
+Before any launch or reconcile, run `lock.py acquire --project-dir <repo>`. On `ok: false`,
+show `holder` (and `reason` when present), launch and reconcile nothing, and allow read-only
+answers. Offer `lock.py acquire --project-dir <repo> --force` as an ask decision; run it only
+with user confirmation. Follow `references/project.md` § "Lock" for ownership and recovery.
+When the user ends the session, run `lock.py release --project-dir <repo>`.
+
 Run `herdr.py available --project-dir <repo>` for an optional herdr view of workers
 (see `references/workers.md` § "Herdr mirror") and tell the user once whether it is on;
 report any `warnings` once. On `skipped` or a `warning`, tell the user once and continue
 without the mirror. Report a herdr.py exit 2 stderr message once and continue; it never
 blocks a launch.
 
-Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the lead
+Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the project manager
 session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers
 still launch in `auto` and cross-mode messages can stall. This check reads the configured
 default and cannot see the session's actual permission mode (including a CLI override);
@@ -61,23 +76,30 @@ Before each launch, apply `<skill-dir>/../implement-plan/references/routing.md`
 
 ## Rehydrate
 
-Read `<feature>/brief.md`, `<vault>/Features/_project/decisions.md`,
-`<feature>/decisions.md`, and the tail of `<feature>/log.md`. Read the generated board and every
-active item, using `references/dossier.md` § "Item format" for field meanings. Reconcile each
-active item exactly as `references/workers.md` § "Reconcile" specifies; an agent/session state
-is evidence, while the item file remains authoritative.
+Project mode reads `<vault>/Features/_project/board.md`, `_project/decisions.md`, every
+active item (stage other than `done` or `dropped`), and the tail of each feature's `log.md`
+plus `_project/log.md`. Use `references/dossier.md` § "Item format" for field meanings.
+Read a feature's `brief.md` and `decisions.md` only in focus mode or before acting on its item:
+answering a planner, judging a PR, or making after-merge decisions. While holding the lock,
+reconcile each active item exactly as `references/workers.md` § "Reconcile" specifies;
+agent/session state is evidence, while the item file remains authoritative. Refresh discovery
+on every rehydrate using `references/project.md` § "Discovery and inbox".
 
-Then print one compact briefing containing:
+Then print one compact briefing grouped by feature, with standalone items under `project`:
 
 - the board;
 - every paused item and its attach command, using the convention in
   `references/dossier.md` § "Worker names";
 - every PR at `pr-ready`, including its `unplanned` count and decisions when nonzero;
-- lead decisions made with decide-and-tell since the last log entry; and
-- the next unblocked item you suggest.
+- project manager decisions made with decide-and-tell since the last log entry;
+- the inbox and its triage choices; and
+- the next unblocked item you suggest across the whole project.
 
-Append a short rehydrate entry to `log.md`, regenerate the board, and sync. For live
-supervision, follow `references/workers.md` § "Watch" and the bounded behavior in
+Append a short rehydrate entry to `<vault>/Features/_project/log.md`. Run
+`dossier.py sync --vault <vault> -m "pm: rehydrate" --board <vault>/Features/_project --
+<vault>/Features/_project/log.md <vault>/Features/_project/inbox.md`, including any other
+paths touched during reconciliation and a `--board <feature-dir>` for each affected feature.
+For live supervision, follow `references/workers.md` § "Watch" and the bounded behavior in
 `references/lifecycle.md` § "Monitor loops"; normal polling is unnecessary because the idle
 subscription and item file preserve completion.
 
@@ -85,7 +107,7 @@ subscription and item file preserve completion.
 
 ### Idea and brainstorm (1)
 
-Keep this stage in the lead session with the user. Bring in the brief and both decision logs,
+Keep this stage in the project manager session with the user. Bring in the brief and both decision logs,
 and flag conflicts with approved decisions or active items. Do not automate or skip the
 conversation: the user owns what to build.
 
@@ -120,12 +142,12 @@ Read and follow these procedures rather than duplicating them here:
 - stage 9: `references/lifecycle.md` § "Retro (9)".
 
 The user always reviews the PR and controls merge. These boundaries preserve the user's
-judgment while the lead handles routing, CI, comment rounds, bookkeeping, and follow-up.
+judgment while the project manager handles routing, CI, comment rounds, bookkeeping, and follow-up.
 To drop an item, follow `references/lifecycle.md` § "Drop".
 
-## Lead decisions
+## Project manager decisions
 
-Apply decision tiers only to the lead's choices; never turn them into worker rules or approval
+Apply decision tiers only to the project manager's choices; never turn them into worker rules or approval
 gates.
 
 - Ask about a failed quota gate, ordering otherwise-ready overlapping items, and relaunching a
@@ -134,9 +156,9 @@ gates.
   rehydrate briefing so the user can reverse it.
 - Decide and log for small choices. Default conventions, architecture, tooling, and CI to
   project scope; default feature scope, design, and sequencing to feature scope. Promote a
-  project-scope decide-and-log choice to decide-and-tell because it affects other leads.
+  project-scope decide-and-log choice to decide-and-tell because it affects other project managers.
 
-When the user reverses a lead decision or an unplanned PR decision, log the reversal and ask,
+When the user reverses a project manager decision or an unplanned PR decision, log the reversal and ask,
 "For this feature or the whole project?" Later design reviews read both decision logs, so the
 answer improves future work without blocking current workers.
 
@@ -172,6 +194,7 @@ with the available channel.
 
 ## Never
 
+- Never launch or reconcile without holding the lock.
 - Never merge a PR or force-push.
 - Never skip stage 1 or the user's stage-5 PR review.
 - Never pass rules, guardrail paths, or approval gates to a worker; design and PR review are

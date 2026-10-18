@@ -1,7 +1,7 @@
 # Workers
 
 Use this reference whenever launching, watching, reconciling, or resuming a background
-worker. Keep the item file authoritative: sessions and notices are signals that help the lead
+worker. Keep the item file authoritative: sessions and notices are signals that help the project manager
 bring that state up to date.
 
 ## Herdr mirror
@@ -10,14 +10,15 @@ Mirror `claude --bg` workers through `claude attach` panes. Never use `herdr age
 native start would replace the background supervisor and require new watch, reconcile, and
 resume procedures.
 
-Enable the mirror only when the lead runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
+Enable the mirror only when the project manager runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
 `PATH`. It is on by default when available; set `pm.herdr: false` in
 `.claude/workflow-kit.json` to disable it. Outside herdr, every mirror call is a silent no-op.
 Control a herdr session only from inside herdr, because outside it there is no target pane
 or socket to act on.
 
 Use one workspace labeled with the feature name and one tab labeled with the item title.
-All workers for an item share that tab. A relaunch of another kind replaces the attach pane
+Standalone items use the `project` workspace. The project manager's own pane stays where
+the user runs it. All workers for an item share that tab. A relaunch of another kind replaces the attach pane
 and names the agent after the worker using `references/dossier.md` § "Worker names".
 The pane runs `command claude attach <worker>`. Keep the tab open until the item is `done`
 or dropped through `references/lifecycle.md` § "Drop". Tabs are found by item title and
@@ -25,7 +26,7 @@ workspaces by feature name, so item titles must be unique within a feature, and 
 that share a feature name share one workspace.
 
 Never write herdr IDs to the dossier. Each call finds the workspace and tab by label, so a
-restarted lead can rebuild the view from item files alone. Use `events.py agents` and the
+restarted project manager can rebuild the view from item files alone. Use `events.py agents` and the
 item file as the authoritative inputs to reconcile: herdr status is screen-scraped, lags the
 worker, and can be wrong.
 
@@ -101,19 +102,19 @@ After either command, if `push` is non-null, call PushNotification with it.
 Treat an idle notice as the primary completion signal. Run `events.py worker-event --item <item>
 --line-file -` for its final line, passing the line on stdin through a quoted heredoc; if the
 notice is truncated, first run `events.py last-reply --session <sessionId> --cwd <repo>` and
-use its `line`. This is idempotent, which makes it safe when both worker and lead report the
+use its `line`. This is idempotent, which makes it safe when both worker and project manager report the
 same final line. Act on the recorded event and item state, then re-arm the empty `SendMessage`
 subscription while the item remains active.
 
-A live lead may also use `Monitor` loops for work that needs external observation. Use
-`events.py agents` only as a restarted lead's fallback, not as normal polling: the subscription
+A live project manager may also use `Monitor` loops for work that needs external observation. Use
+`events.py agents` only as a restarted project manager's fallback, not as normal polling: the subscription
 avoids missed completion while keeping the item file as the source of truth.
 
 ## Reconcile
 
 For every active item, read the item and run `events.py agents`. Check its plan-file checkboxes,
 run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
-run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the lead's
+run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the project manager's
 repository root, so their transcripts live under that directory, not the worktree. For every
 active item with a worker, run `herdr.py ensure --item <item> --repo <repo>` to rebuild a missing
 mirror; do not use its output as worker evidence. Reconcile the combinations as follows:
@@ -132,7 +133,7 @@ evidence together before changing a stage.
 
 A `paused` worker is either an `implement-plan` worker stopped by its own guard or an
 `address-pr` worker waiting for a decision. The user can answer in `claude attach <worker>` or
-give the answer to the lead. Before forwarding a lead-held answer, run `events.py agents`.
+give the answer to the project manager. Before forwarding a project manager-held answer, run `events.py agents`.
 Send `SendMessage` only when that worker is `idle`; when it is `waiting`, the user must attach
 because `AskUserQuestion` owns the reply path. After a successful forward, set
 `status: running`, clear `question`, and remove `stuck` and all `paused-*` keys from
@@ -142,9 +143,9 @@ the resume; the earlier `paused-<id>` notification already carries the attach co
 
 ## Permissions and trust
 
-Run the lead from the repository root in permission mode `auto`, and ensure the workspace is
+Run the project manager from the repository root in permission mode `auto`, and ensure the workspace is
 trusted before launching. Add the one-time allow rule for `Bash(claude --bg *)`: the worker
 command begins with `claude --bg`, which is what the rule matches. Do not wrap the launch in
 `cd <repo> && claude --bg ...`; that changes the shell command shape and the allow rule denies
-it. The `launch.py command` result also supplies `--permission-mode auto`, so lead and worker
+it. The `launch.py command` result also supplies `--permission-mode auto`, so project manager and worker
 can exchange messages in the same mode.

@@ -70,6 +70,7 @@ closing `---` is free-form Markdown.
 A worker is named `<feature>-<slug>`, plus `-<workerKind>` for every kind except
 `implement`. Examples are `kmp-ktor` and `kmp-ktor-ci`. Notifications use the same name in
 `claude attach <name>`.
+The herdr agent name is `agent_name(<worker>)` and the tab label is the item title.
 
 ## Events
 
@@ -88,7 +89,8 @@ unknown item keys, and invalid stages or statuses write an error to stderr and e
 
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.
-- `config [--project-dir D]` → `{maxWorkers, vault}`.
+- `config [--project-dir D]` → `{maxWorkers, vault, herdr}`. `herdr` is a boolean from
+  `lead.herdr`, default `true`; a non-boolean is invalid usage (exit 2).
 - `list --vault V [--match NAME]` → `{features}` and, when matching, `{match, closest}`.
   Each feature has `name`, total `items`, and `stages` counts.
 - `init --vault V --feature F` → `{ok, featureDir, created}`.

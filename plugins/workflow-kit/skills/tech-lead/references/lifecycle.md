@@ -69,7 +69,8 @@ with After merge.
 ## After merge (8)
 
 Set `stage: merged`, then set `stage: done` and `status: idle`; each write sets
-`updated`. Log `phase-done` after the completed transition, with no notification.
+`updated`. Run `herdr.py close --item <item>` after `stage: done`.
+Log `phase-done` after the completed transition, with no notification.
 Read `### Unplanned Decisions` from the merged PR body. Append every decision
 that survived review to the appropriate `decisions.md` using source `PR #<n>
 unplanned` and its suggested scope. Log a review reversal with source `user
@@ -86,6 +87,8 @@ and write that item's `status: running`, `worker`, `sessionId`, `workerKind:
 sync`, and `updated`. When it finishes, `worker-event` writes `status: idle`,
 updates `updated`, and logs `synced`, with no notification. Suggest the next
 unblocked item after this scan.
+
+When dropping an item, set `stage: dropped`, sync, then run `herdr.py close --item <item>`.
 
 ## Retro (9)
 

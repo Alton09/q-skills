@@ -19,9 +19,10 @@ PR review boundaries; keep durable state in the dossier so another session can r
 
 Run from the project repository root. `<skill-dir>` is this skill's directory (the one that
 holds this `SKILL.md`), not the working directory. Use `python3 <skill-dir>/scripts/dossier.py`
-for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisions, and
-`python3 <skill-dir>/scripts/events.py` for worker events. The short names below (`dossier.py`,
-`launch.py`, `events.py`) mean these paths.
+for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisions,
+`python3 <skill-dir>/scripts/events.py` for worker events, and
+`python3 <skill-dir>/scripts/herdr.py` for the mirror. The short names below (`dossier.py`,
+`launch.py`, `events.py`, `herdr.py`) mean these paths.
 
 1. Run `dossier.py resolve-vault --project-dir <repo>`. If it returns `source: none`, ask once
    for the vault path and suggest setting `lead.vault` in `.claude/workflow-kit.json`; do not
@@ -41,6 +42,8 @@ Use the structure in `references/dossier.md` § "Layout", the initial documents 
 Compare the physical current directory with `git rev-parse --show-toplevel`; refuse to launch
 or mutate a dossier unless they are equal. Workers inherit this directory, so starting
 elsewhere would attach them to the wrong repository.
+
+Run `herdr.py available --project-dir <repo>` and tell the user once whether the mirror is on.
 
 Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the lead
 session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers

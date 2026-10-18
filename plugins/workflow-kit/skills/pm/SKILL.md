@@ -1,11 +1,7 @@
 ---
 name: pm
 description: |
-  Project manager for one repository: track every feature and standalone item, find untracked PRs, branches, worktrees and sessions, and lead each item from idea through design, delegated planning and implementation, PR review, merge follow-up and retro, with resumable state in the project's Obsidian vault.
-  Use this whenever the user says "/pm", "project manager", "show the board",
-  "what's going on in the project", "what's the status of <feature>",
-  "/tech-lead <feature>", "be the tech lead for", "start a lead", "resume the lead",
-  or "rehydrate the lead".
+  Project manager for one repository: track features and standalone items, discover untracked PRs, branches, worktrees and sessions, triage the inbox, and supervise work from idea through design, delegated planning and implementation, PR review, merge follow-up and retro with resumable Obsidian dossiers. Use for "/pm", "project manager", "show the board", "what's going on in the project", "what's the status of <feature>", supervising an existing worker or feature dossier, "untracked PRs/branches", "what's in the inbox", or "adopt this PR". Also use for legacy phrases "/tech-lead <feature>", "be the tech lead for", "tech lead for <feature>", "start a lead", "resume the lead", and "rehydrate the lead".
 ---
 
 # Project Manager
@@ -156,7 +152,7 @@ gates.
   rehydrate briefing so the user can reverse it.
 - Decide and log for small choices. Default conventions, architecture, tooling, and CI to
   project scope; default feature scope, design, and sequencing to feature scope. Promote a
-  project-scope decide-and-log choice to decide-and-tell because it affects other project managers.
+  project-scope decide-and-log choice to decide-and-tell because it affects other features.
 
 When the user reverses a project manager decision or an unplanned PR decision, log the reversal and ask,
 "For this feature or the whole project?" Later design reviews read both decision logs, so the

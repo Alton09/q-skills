@@ -374,6 +374,7 @@ def board(feature_dir: Path) -> dict[str, Any]:
 
 
 def project_board(vault: Path) -> dict[str, Any]:
+    warnings: list[str] = []
     root = vault / "Features"
     project_dir = root / PROJECT_DIR
     directories = [directory for directory in root.iterdir() if directory.is_dir()] if root.is_dir() else []
@@ -386,7 +387,11 @@ def project_board(vault: Path) -> dict[str, Any]:
         label = feature_label(directory.name)
         active = done = 0
         for path in sorted((directory / "items").glob("*.md")):
-            data, _ = parse_item(path)
+            try:
+                data, _ = parse_item(path)
+            except UsageError as exc:
+                warnings.append(str(exc))
+                continue
             stage = data.get("stage", "idea")
             if isinstance(stage, str) and stage in by_stage:
                 by_stage[stage].append((label, directory.name, data))
@@ -400,7 +405,7 @@ def project_board(vault: Path) -> dict[str, Any]:
         for label, directory, item in sorted(by_stage[stage], key=lambda row: (row[0], str(row[2].get("slug", "")))):
             slug = str(item.get("slug", ""))
             values = [str(item.get(key, "")).replace("|", "\\|") for key in ("status", "pr", "worker", "updated")]
-            lines.append(f"| {label} | [[Features/{directory}/items/{slug}|{slug}]] | {' | '.join(values)} |\n")
+            lines.append(f"| {label} | [[Features/{directory}/items/{slug}\\|{slug}]] | {' | '.join(values)} |\n")
     lines.extend(("\n", "## Inbox\n", "\n"))
     inbox = project_dir / "inbox.md"
     if inbox.exists():
@@ -413,7 +418,7 @@ def project_board(vault: Path) -> dict[str, Any]:
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-    return {"ok": True, "board": str(path.resolve()), "changed": changed, "items": sum(map(len, by_stage.values()))}
+    return {"ok": True, "board": str(path.resolve()), "changed": changed, "items": sum(map(len, by_stage.values())), "warnings": warnings}
 
 
 def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -448,36 +453,40 @@ def continue_board_rebase(repo: Path, board_dirs: Sequence[Path]) -> tuple[bool,
     inbox_path = (project_dir / "inbox.md").resolve()
     board_paths = {(directory / "board.md").resolve() for directory in feature_dirs}
     board_paths.add((project_dir / "board.md").resolve())
-    while True:
-        conflicts = conflict_paths(repo)
-        if any((repo / path).resolve() not in board_paths | {inbox_path} for path in conflicts):
+    completed = False
+    try:
+        while True:
+            conflicts = conflict_paths(repo)
+            if any((repo / path).resolve() not in board_paths | {inbox_path} for path in conflicts):
+                return False, conflicts
+            if not conflicts:
+                completed = True
+                return True, []
+            for path in conflicts:
+                if (repo / path).resolve() == inbox_path:
+                    # Stage 3 is the local commit being replayed, equivalent to --theirs.
+                    local = git(repo, "show", f":3:{path}")
+                    if local.returncode:
+                        return False, conflicts
+                    (repo / path).write_text(local.stdout, encoding="utf-8")
+            for directory in feature_dirs:
+                board(directory)
+            project_board(repo)
+            for absolute in sorted(board_paths | {(repo / path).resolve() for path in conflicts}):
+                if absolute.exists():
+                    git(repo, "add", "--", os.path.relpath(absolute, repo))
+            env = os.environ.copy()
+            env["GIT_EDITOR"] = "true"
+            continued = git(repo, "rebase", "--continue", env=env)
+            if continued.returncode == 0:
+                completed = True
+                return True, []
+            next_conflicts = conflict_paths(repo)
+            if not next_conflicts:
+                return False, ["rebase --continue failed"]
+    finally:
+        if not completed:
             git(repo, "rebase", "--abort")
-            return False, conflicts
-        if not conflicts:
-            return True, []
-        for path in conflicts:
-            if (repo / path).resolve() == inbox_path:
-                # Stage 3 is the local commit being replayed, equivalent to --theirs.
-                local = git(repo, "show", f":3:{path}")
-                if local.returncode:
-                    git(repo, "rebase", "--abort")
-                    return False, conflicts
-                (repo / path).write_text(local.stdout, encoding="utf-8")
-        for directory in feature_dirs:
-            board(directory)
-        project_board(repo)
-        for absolute in sorted(board_paths | {(repo / path).resolve() for path in conflicts}):
-            if absolute.exists():
-                git(repo, "add", "--", os.path.relpath(absolute, repo))
-        env = os.environ.copy()
-        env["GIT_EDITOR"] = "true"
-        continued = git(repo, "rebase", "--continue", env=env)
-        if continued.returncode == 0:
-            return True, []
-        next_conflicts = conflict_paths(repo)
-        if not next_conflicts:
-            git(repo, "rebase", "--abort")
-            return False, ["rebase --continue failed"]
 
 
 def sync(vault: Path, message: str, board_dirs: Sequence[Path], paths: Sequence[str]) -> dict[str, Any]:

@@ -74,8 +74,8 @@ Log `phase-done` after the completed transition, with no notification.
 Read `### Unplanned Decisions` from the merged PR body. Append every decision
 that survived review to the appropriate `decisions.md` using source `PR #<n>
 unplanned` and its suggested scope. Log a review reversal with source `user
-reversal`. Ask about scope only when the default is project scope; record that
-project manager-side ask by adding `decision-<n>` to `notified`, updating `updated`, and
+reversal`. Ask about scope only when the default is project scope; record
+the project manager's ask by adding `decision-<n>` to `notified`, updating `updated`, and
 notifying `decision-<n>`.
 
 Run the merge-time sync check across this vault only: enumerate active items

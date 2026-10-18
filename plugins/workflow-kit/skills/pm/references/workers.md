@@ -133,7 +133,7 @@ evidence together before changing a stage.
 
 A `paused` worker is either an `implement-plan` worker stopped by its own guard or an
 `address-pr` worker waiting for a decision. The user can answer in `claude attach <worker>` or
-give the answer to the project manager. Before forwarding a project manager-held answer, run `events.py agents`.
+give the answer to the project manager. Before forwarding an answer held by the project manager, run `events.py agents`.
 Send `SendMessage` only when that worker is `idle`; when it is `waiting`, the user must attach
 because `AskUserQuestion` owns the reply path. After a successful forward, set
 `status: running`, clear `question`, and remove `stuck` and all `paused-*` keys from

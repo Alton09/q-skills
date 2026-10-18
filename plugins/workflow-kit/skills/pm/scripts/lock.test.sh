@@ -83,9 +83,32 @@ os.environ.pop("PM_LOCK_OWNER_PID", None)
 assert lock.process(os.getpid())[0] == os.getppid()
 with patch.object(lock.os, "getppid", return_value=30), patch.object(lock.subprocess, "run") as run:
     run.side_effect = [subprocess.CompletedProcess([], 0, "20 sh\n"),
+                       subprocess.CompletedProcess([], 0, "sh -c test\n"),
                        subprocess.CompletedProcess([], 0, "10 /opt/bin/claude\n")]
     assert lock.owner_pid() == 20
     assert run.call_args_list[0].args[0] == ["ps", "-o", "ppid=", "-o", "comm=", "-p", "30"]
+# Versioned comm paths, argv[0], and node script launches identify Claude.
+for comm, args, expected in (
+    ('/opt/claude/versions/2.1.302', None, True),
+    ('2.1.302', '/opt/claude/versions/2.1.302 --resume', True),
+    ('node', 'claude --resume', True),
+    ('node', 'node /opt/bin/claude --resume', True),
+    ('node', 'node /opt/bin/other claude', False),
+    ('sh', 'sh -c claude', False),
+    ('sleep', 'sleep /opt/claude/versions/2.1.302', False),
+):
+    outputs = [subprocess.CompletedProcess([], 0, '1 ' + comm + '\n')]
+    if args is not None:
+        outputs.append(subprocess.CompletedProcess([], 0, args + '\n'))
+    with patch.object(lock.subprocess, 'run', side_effect=outputs) as run:
+        assert (lock.process(30)[1] == 'claude') == expected, (comm, args)
+        if args is not None:
+            assert run.call_args.args[0] == ['ps', '-o', 'args=', '-p', '30']
+    if expected:
+        with patch.object(lock.subprocess, 'run', side_effect=outputs), patch.object(lock.os, 'getppid', return_value=30):
+            assert lock.owner_pid() == 30
+        with patch.object(lock.subprocess, 'run', side_effect=outputs):
+            assert not lock.is_stale({'pid': os.getpid(), 'host': socket.gethostname()})
 with patch.object(lock, "process", return_value=None):
     result = lock.command(lock.parser().parse_args(["acquire", "--project-dir", repo]))
     assert not result["ok"] and result["reason"] == "no claude ancestor", result

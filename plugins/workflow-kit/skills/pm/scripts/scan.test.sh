@@ -84,7 +84,7 @@ print(value if isinstance(value, str) else json.dumps(value))
         argv = [str(scripts / 'scan.py'), action, '--vault', str(vault)]
         if action != 'ignore':
             argv += ['--project-dir', str(repo)]
-        if action == 'scan':
+        if action in ('scan', 'adopt'):
             argv += ['--exclude-session', 'manager', '--exclude-session', 'manager2']
         result = subprocess.run([*argv, *extra], env=env, text=True, capture_output=True)
         assert result.returncode == (0 if success else 2), (argv, result.stdout, result.stderr)
@@ -133,6 +133,28 @@ print(value if isinstance(value, str) else json.dumps(value))
         assert 'pr:123' not in {entry['key'] for entry in command()['entries']}
         tracked_path.unlink()
 
+    # Root workers do not hide or merge independent root sessions.
+    data['sessions'] += [{'name': 'tracked-root', 'cwd': str(repo)},
+                         {'name': 'external-root', 'cwd': str(repo)},
+                         {'name': 'external-root-2', 'cwd': str(repo)}]
+    dossier.item_new(tracked_path.parent.parent, 'matched', 'Matched', ['worker=tracked-root'])
+    entries = {entry['key']: entry for entry in command()['entries']}
+    assert entries['session:external-root']['branch'] == '', entries
+    assert 'session:external-root-2' in entries and 'session:tracked-root' not in entries
+    tracked_path.unlink()
+    data['sessions'] = sessions
+
+    # PR tracking accepts URLs, # forms, and bare numbers.
+    for value in ('https://github.com/owner/repo/pull/123', '#123', '123'):
+        dossier.item_new(tracked_path.parent.parent, 'matched', 'Matched', ['pr=' + value])
+        assert 'pr:123' not in {entry['key'] for entry in command()['entries']}
+        tracked_path.unlink()
+
+    # An ignored branch stays ignored after a PR gives it a higher-priority key.
+    data['open'].append(dict(number=200, title='Spike PR', headRefName='spike'))
+    assert 'pr:200' not in {entry['key'] for entry in command()['entries']}
+    data['open'].pop()
+
     assert command('adopt', '--key', 'absent', '--feature', 'login', '--slug', 'absent', success=False)['ok'] is False
     assert command('adopt', '--key', 'pr:123', '--feature', 'missing', '--slug', 'absent', success=False)['ok'] is False
     adopted = command('adopt', '--key', 'pr:123', '--feature', 'login', '--slug', 'fix')
@@ -140,6 +162,9 @@ print(value if isinstance(value, str) else json.dumps(value))
     assert item['stage'] == 'pr' and item['origin'] == 'external' and item['status'] == 'idle', item
     assert item['title'] == 'Fix login crash' and item['worker'] == 'login-fix' and item['worktree'] == str(wt), item
     assert '`pr:123`' not in inbox.read_text()
+    assert 'manager' not in inbox.read_text(), inbox.read_text()
+    dossier.project_board(vault)
+    assert 'manager' not in (vault / 'Features/_project/board.md').read_text()
     adopted = command('adopt', '--key', 'pr:125', '--standalone', '--slug', 'solo')
     assert Path(adopted['file']).parent.parent.name == dossier.PROJECT_DIR
     assert dossier.feature_label(Path(adopted['file']).parent.parent.name) == 'project'

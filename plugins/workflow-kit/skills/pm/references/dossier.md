@@ -121,10 +121,11 @@ missing worker for attach); mirror runtime failures return JSON `warning` with e
   repeated for `item new`; `--add` may be repeated for `item set`.
 - `board --feature-dir D` → `{ok, board, changed, items}`. It emits a table for every stage,
   in the stage order documented above, with Item, Status, PR, Worker, and Updated columns.
-- `board --project --vault V` → `{ok, board, changed, items}`. Writes
+- `board --project --vault V` → `{ok, board, changed, items, warnings}`. Writes
   `Features/_project/board.md`: per-label active/done counts, stage tables excluding `done`
   and `dropped`, and the generated inbox. Active means neither `done` nor `dropped`;
-  `items` counts all items, including completed and dropped ones. `--project` and
+  `items` counts valid items, including completed and dropped ones; `warnings` lists skipped
+  malformed items. Item cells use `[[Features/<dir>/items/<slug>\|<slug>]]`. `--project` and
   `--feature-dir` are mutually exclusive.
 - `sync --vault V -m MSG [--board D]... [--] [paths...]` → `{ok, committed, attempts}` on
   success; failure has `ok:false` and either `conflict` or `error`. A rejected push is retried
@@ -157,8 +158,8 @@ The commands above use `dossier.py`. The additional scripts have these contracts
   `Features/_project/inbox.md` only when content changes. Source failures become warnings
   with `ok: true` and exit 0; matching considers this vault's items only.
 - `scan.py adopt --vault V --project-dir R --key K (--feature F | --standalone) --slug S
-  [--title T]` → `{ok, file, item, inbox}`. The target options are mutually exclusive.
-  Rescans, creates an external idle item at `pr` when a PR exists or `implement` otherwise,
+  [--title T] [--exclude-session NAME]...` → `{ok, file, item, inbox}`. The target options are mutually exclusive.
+  Pass the same supervisor exclusions as `scan`. Rescans, creates an external idle item at `pr` when a PR exists or `implement` otherwise,
   and removes the entry from the inbox. Missing keys and unknown features are usage errors.
 - `scan.py ignore --vault V --key K` → `{ok, ignored, inbox}`. Appends the key to
   `_project/ignored.md` and removes it from the generated inbox without rescanning.

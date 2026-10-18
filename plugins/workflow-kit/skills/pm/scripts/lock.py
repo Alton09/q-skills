@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shlex
 import socket
 import subprocess
 import sys
@@ -29,7 +30,23 @@ def process(pid: int) -> tuple[int, str] | None:
     fields = result.stdout.strip().split(None, 1)
     if result.returncode or len(fields) != 2:
         return None
-    return int(fields[0]), Path(fields[1]).name
+    comm = fields[1]
+    is_claude = Path(comm).name == "claude" or "/claude/" in comm
+    if not is_claude:
+        args = subprocess.run(
+            ["ps", "-o", "args=", "-p", str(pid)],
+            capture_output=True, text=True,
+        )
+        try:
+            argv = shlex.split(args.stdout) if not args.returncode else []
+        except ValueError:
+            argv = []
+        is_claude = bool(argv) and (
+            Path(argv[0]).name == "claude" or "/claude/" in argv[0]
+            or (Path(argv[0]).name == "node" and len(argv) > 1
+                and Path(argv[1]).name == "claude")
+        )
+    return int(fields[0]), "claude" if is_claude else Path(comm).name
 
 
 def owner_pid() -> int | None:

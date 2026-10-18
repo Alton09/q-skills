@@ -123,12 +123,11 @@ def scan(vault: Path, project_dir: Path, exclude_sessions: Sequence[str] = ()) -
             continue
         row = {"session": name}
         # A session in a worktree subdirectory inherits that worktree's branch.
-        containing = sorted((wt for wt in worktrees if directory.is_relative_to(Path(wt["worktree"]))),
+        containing = sorted((wt for wt in worktrees[1:] if directory.is_relative_to(Path(wt["worktree"]))),
                             key=lambda wt: len(wt["worktree"]), reverse=True)
         if containing:
             row["branch"] = containing[0]["branch"]
-            if containing[0] in worktrees[1:]:
-                row["worktree"] = containing[0]["worktree"]
+            row["worktree"] = containing[0]["worktree"]
         if isinstance(session.get("branch"), str) and session["branch"]:
             row["branch"] = session["branch"]
         rows.append(row)
@@ -140,6 +139,10 @@ def scan(vault: Path, project_dir: Path, exclude_sessions: Sequence[str] = ()) -
             for field in FIELDS:
                 value = item.get("worker" if field == "session" else field)
                 if isinstance(value, str) and value:
+                    if field == "pr":
+                        match = re.fullmatch(r"(?:https?://[^\s]+/pull/|#)?(\d+)/?", value)
+                        if match:
+                            value = match[1]
                     tracked[field].add(resolved(value, project_dir) if field == "worktree" else value)
         except dossier.UsageError as exc:
             warnings.append(str(exc))
@@ -169,7 +172,7 @@ def scan(vault: Path, project_dir: Path, exclude_sessions: Sequence[str] = ()) -
                 if not entry[field] and row.get(field):
                     entry[field] = row[field]
         entry["key"] = next(f"{field}:{entry[field]}" for field in FIELDS if entry[field])
-        if entry["key"] not in ignored:
+        if not any(f"{field}:{row[field]}" in ignored for row in group for field in FIELDS if row.get(field)):
             entries.append(entry)
     entries.sort(key=lambda entry: entry["key"])
     inbox, changed = write_inbox(vault, [entry_line(entry) for entry in entries])
@@ -189,7 +192,7 @@ def adopt(args: argparse.Namespace) -> dict[str, Any]:
     if not args.standalone and not directory.is_dir():
         raise dossier.UsageError(f"feature does not exist: {feature}")
     safe_name(args.slug)
-    result = scan(vault, Path(args.project_dir).expanduser())
+    result = scan(vault, Path(args.project_dir).expanduser(), args.exclude_session)
     entry = next((entry for entry in result["entries"] if entry["key"] == args.key), None)
     if entry is None:
         raise dossier.UsageError(f"discovery key absent: {args.key}")
@@ -228,6 +231,7 @@ def parser() -> argparse.ArgumentParser:
     target.add_argument("--standalone", action="store_true")
     take.add_argument("--slug", required=True)
     take.add_argument("--title")
+    take.add_argument("--exclude-session", action="append", default=[])
     skip = commands.add_parser("ignore")
     for command in (discover, take, skip):
         command.add_argument("--vault", required=True)

@@ -37,11 +37,11 @@ entry on its own; wait for the user's choice and target before running an adopti
 An unanswered entry stays in the inbox. Ignore also follows the user's triage choice.
 
 - Add to an existing feature: run `scan.py adopt --vault <vault> --project-dir <repo>
-  --key <key> --feature <feature> --slug <slug>`, optionally with `--title <title>`. The feature
+  --key <key> --feature <feature> --slug <slug> --exclude-session <supervisor-name>`, optionally with `--title <title>`. The feature
   must already exist. Then run `dossier.py sync --vault <vault> -m "pm: adopt discovery"
   --board <vault>/Features/<feature> -- <returned-file> <returned-inbox>`.
 - Track as standalone: run `scan.py adopt --vault <vault> --project-dir <repo> --key <key>
-  --standalone --slug <slug>`, optionally with `--title <title>`. Then run
+  --standalone --slug <slug> --exclude-session <supervisor-name>`, optionally with `--title <title>`. Then run
   `dossier.py sync --vault <vault> -m "pm: adopt standalone" --board <vault>/Features/_project
   -- <returned-file> <returned-inbox>`.
 - Ignore: run `scan.py ignore --vault <vault> --key <key>`. Then run
@@ -49,7 +49,8 @@ An unanswered entry stays in the inbox. Ignore also follows the user's triage ch
   -- <returned-ignored> <returned-inbox>`. The ignored key is append-only and future scans
   omit it.
 
-Adoption rescans before creating the item. If the key is absent, report the error, refresh
+Adoption rescans before creating the item. Pass the same repeatable `--exclude-session`
+names as the discovery scan; omit the option when no supervisor name is known. If the key is absent, report the error, refresh
 with `scan.py scan --vault <vault> --project-dir <repo>`, and present the current choices;
 do not substitute another entry. Adoption sets `origin: external`, `status: idle`, and the
 available PR, branch, worktree, and worker fields. A PR starts at `stage: pr`; other entries

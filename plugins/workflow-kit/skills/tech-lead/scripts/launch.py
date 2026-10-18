@@ -193,7 +193,8 @@ def command(args: argparse.Namespace) -> dict[str, Any]:
     )
     suffix = "" if args.kind == "implement" else f"-{args.kind}"
     name = f"{feature_name(item_path)}-{item_path.stem}{suffix}"
-    argv = ["claude", "--bg", "--permission-mode", "auto", "--model", args.model, "-n", name, "--settings", '{"env":{"PR_RETRO_NUDGE":"0"}}', prompt]
+    settings = json.dumps({"env": {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}})
+    argv = ["claude", "--bg", "--permission-mode", "auto", "--model", args.model, "-n", name, "--settings", settings, prompt]
     return {"name": name, "argv": argv, "prompt": prompt}
 
 

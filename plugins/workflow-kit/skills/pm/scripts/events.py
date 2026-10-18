@@ -27,7 +27,7 @@ def item_context(path: Path) -> tuple[dict[str, str | list[str]], str, Path, str
     data, body = dossier.parse_item(path)
     try:
         feature_dir = path.resolve().parent.parent
-        feature = feature_dir.name
+        feature = dossier.feature_label(feature_dir.name)
         vault = feature_dir.parent.parent
     except IndexError as exc:
         raise UsageError(f"cannot infer feature directory from {path}") from exc

@@ -90,4 +90,17 @@ assert match, "workers.md has no Worker protocol text block"
 assert match.group(1).rstrip("\n") == constant, "workers.md protocol differs from launch.py WORKER_PROTOCOL"
 PY
 
+# Standalone items share the project label for workers and resolved dependencies.
+standalone="$vault_a/Features/_project/items/fix-x.md"
+item "$standalone" implement idle
+command=$(python3 "$launch" command --item "$standalone" --kind ci --model opus --repo "$tmp/project" --pr 42 --worktree "$tmp/project")
+printf '%s' "$command" | check 'x=json.load(sys.stdin); assert x["name"] == "project-fix-x-ci", x; assert x["argv"][x["argv"].index("-n") + 1] == "project-fix-x-ci", x'
+item "$vault_a/Features/alpha/items/dependent.md" implement queued '[]' '["project/fix-x"]'
+export standalone
+overlap=$(python3 "$launch" overlap --vault "$vault_a" --item "$vault_a/Features/alpha/items/dependent.md")
+printf '%s' "$overlap" | check 'import os; x=json.load(sys.stdin); assert x == {"ok":False,"blockers":[{"item":os.environ["standalone"],"lead":"project","why":"blockedBy"}]}, x'
+# A completed project prerequisite resolves rather than remaining an unknown blocker.
+python3 "$script_dir/dossier.py" item set "$standalone" stage=done >/dev/null
+python3 "$launch" overlap --vault "$vault_a" --item "$vault_a/Features/alpha/items/dependent.md" | check 'x=json.load(sys.stdin); assert x == {"ok":True,"blockers":[]}, x'
+
 printf 'launch.test.sh: pass\n'

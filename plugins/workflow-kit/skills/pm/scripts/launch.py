@@ -49,7 +49,7 @@ def read_item(path: Path) -> dict[str, str | list[str]]:
 
 
 def feature_name(path: Path) -> str:
-    return path.parent.parent.name
+    return dossier.feature_label(path.parent.parent.name)
 
 
 def plan_scope(path: Path) -> dict[str, list[str]]:

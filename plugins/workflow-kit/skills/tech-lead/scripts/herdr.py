@@ -85,22 +85,12 @@ def tabs(workspace_id: str) -> list[dict[str, Any]]:
     return checked(["tab", "list", "--workspace", workspace_id])["tabs"]
 
 
-def ownership(item_path: Path, title: str, add: bool = False, remove: bool = False) -> bool:
-    # Persist labels only, so restart-safe cleanup never claims a pre-existing tab.
-    path = item_path.parent.parent / ".herdr-tabs.json"
-    labels = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise MirrorError(f"invalid ownership ledger: {path}")
-    changed = (add and title not in labels) or (remove and title in labels)
-    if changed:
-        if add:
-            labels.append(title)
-        else:
-            labels.remove(title)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(labels) + "\n", encoding="utf-8")
-        temporary.replace(path)
-    return title in labels
+def feature_titles(item_path: Path) -> set[str]:
+    return {
+        str(launch.read_item(path)["title"])
+        for path in launch.item_files(item_path.parents[3])
+        if path.parent == item_path.parent
+    }
 
 
 def process_info(pane: str) -> dict[str, Any]:
@@ -157,7 +147,6 @@ def prepare(item_path: Path, repo: Path) -> dict[str, Any]:
             return {"workspace": workspace_id, "tab": tab, "pane": pane, "created": False}
         result = checked(["tab", "create", "--workspace", workspace_id, "--label", title, "--cwd", str(repo), "--no-focus"])
         tab = result["tab"]["tab_id"]
-    ownership(item_path, title, add=True)
     return {"workspace": workspace_id, "tab": tab, "pane": result["root_pane"]["pane_id"], "created": True}
 
 
@@ -195,19 +184,18 @@ def ensure(item_path: Path, repo: Path) -> dict[str, Any]:
 
 def close(item_path: Path) -> dict[str, Any]:
     title = str(launch.read_item(item_path)["title"])
-    if not ownership(item_path, title):
+    if title not in feature_titles(item_path):
         return {"closed": False}
     workspace_id = workspace(item_path)
     if workspace_id is None:
-        ownership(item_path, title, remove=True)
         return {"closed": False}
     tab = next((row["tab_id"] for row in tabs(workspace_id) if row.get("label") == title), None)
     if tab is None:
-        ownership(item_path, title, remove=True)
         return {"closed": False}
     checked(["tab", "close", tab])
-    ownership(item_path, title, remove=True)
     # herdr closes the workspace automatically when its last tab closes.
+    if workspace(item_path) == workspace_id and not tabs(workspace_id):
+        checked(["workspace", "close", workspace_id])
     return {"closed": True, "workspace": workspace_id, "tab": tab}
 
 

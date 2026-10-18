@@ -72,8 +72,11 @@ elif command == ['agent', 'rename']:
     result = {'agent': {'name': args[3]}}
 elif command == ['tab', 'close']:
     state['tabs'] = [tab for tab in state['tabs'] if tab['tab_id'] != args[2]]
-    if not state['tabs']:
+    if not state['tabs'] and not os.environ.get('HERDR_TEST_KEEP_EMPTY'):
         state['workspaces'] = []
+elif command == ['workspace', 'close']:
+    assert not any(tab['workspace_id'] == args[2] for tab in state['tabs']), state
+    state['workspaces'] = [ws for ws in state['workspaces'] if ws['workspace_id'] != args[2]]
 else:
     raise AssertionError(args)
 path.write_text(json.dumps(state))
@@ -112,6 +115,7 @@ printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x == {"available":True,"reason":None}, x'
 
 # First worker uses the root tab; reuse looks up its pane separately.
+ls -aR "$tmp/Features/alpha" >"$tmp/feature-before"
 run prepare --item "$item" --repo "$tmp/project" | check 'x=json.load(sys.stdin); assert x == {"workspace":"w1","tab":"w1:t1","pane":"w1:p1","created":True}, x'
 run prepare --item "$item" --repo "$tmp/project" | check 'x=json.load(sys.stdin); assert not x["created"] and x["pane"] == "w1:p1", x'
 run attach --item "$item" --pane w1:p1 | check 'x=json.load(sys.stdin); assert x["attached"] and x["agent"] == "alpha-one-ci", x'
@@ -158,9 +162,25 @@ state = json.load(open(sys.argv[1]))
 assert state['workspaces'] and [tab['label'] for tab in state['tabs']] == ['Personal shell'], state
 assert not any(json.loads(line)[:2] == ['workspace', 'close'] for line in open(sys.argv[2]))
 PY
-# Pre-existing tabs matching an item title are reused but never claimed for close.
+# Prepare/close must never add state files to the feature directory.
+ls -aR "$tmp/Features/alpha" >"$tmp/feature-after"
+cmp "$tmp/feature-before" "$tmp/feature-after"
+
+# Adopting an existing workspace creates a tab without renaming the user's root tab.
+run prepare --item "$item" --repo "$tmp/project" | check 'x=json.load(sys.stdin); assert x["created"], x'
+python3 - "$HERDR_TEST_STATE" "$HERDR_TEST_LOG" <<'PY'
+import json
+import sys
+state = json.load(open(sys.argv[1]))
+assert [tab['label'] for tab in state['tabs']] == ['Personal shell', 'Item one'], state
+calls = [json.loads(line) for line in open(sys.argv[2])]
+assert sum(call[:2] == ['tab', 'rename'] for call in calls) == 1, calls
+PY
+run close --item "$item" | check 'x=json.load(sys.stdin); assert x["closed"], x'
+
+# A matching item title establishes ownership without any prior prepare call.
 printf '%s\n' '---' 'title: Personal shell' 'stage: implement' 'status: paused' '---' >"$tmp/Features/alpha/items/foreign.md"
-run close --item "$tmp/Features/alpha/items/foreign.md" | check 'x=json.load(sys.stdin); assert not x["closed"], x'
+run close --item "$tmp/Features/alpha/items/foreign.md" | check 'x=json.load(sys.stdin); assert x["closed"], x'
 
 # The last owned tab closes its workspace automatically; cleanup is repeatable.
 python3 - "$HERDR_TEST_STATE" <<'PY'
@@ -179,6 +199,16 @@ python3 - "$HERDR_TEST_STATE" <<'PY'
 import json
 import sys
 assert json.load(open(sys.argv[1]))['workspaces'] == []
+PY
+
+# Close an empty workspace explicitly if herdr leaves it behind.
+run prepare --item "$item" --repo "$tmp/project" | check 'x=json.load(sys.stdin); assert x["created"], x'
+HERDR_TEST_KEEP_EMPTY=1 run close --item "$item" | check 'x=json.load(sys.stdin); assert x["closed"], x'
+python3 - "$HERDR_TEST_STATE" "$HERDR_TEST_LOG" <<'PY'
+import json
+import sys
+assert json.load(open(sys.argv[1]))['workspaces'] == []
+assert ['workspace', 'close', 'w1'] in [json.loads(line) for line in open(sys.argv[2])]
 PY
 
 python3 - "$script_dir" <<'PY'

@@ -27,7 +27,7 @@ def item_context(path: Path) -> tuple[dict[str, str | list[str]], str, Path, str
     data, body = dossier.parse_item(path)
     try:
         feature_dir = path.resolve().parent.parent
-        feature = feature_dir.name
+        feature = dossier.feature_label(feature_dir.name)
         vault = feature_dir.parent.parent
     except IndexError as exc:
         raise UsageError(f"cannot infer feature directory from {path}") from exc
@@ -108,7 +108,7 @@ def deliver(data: dict[str, str | list[str]], event: str | None, message: str, n
     notified.append(event)
     data["notified"] = notified
     if notify_cmd and os.path.isfile(notify_cmd) and os.access(notify_cmd, os.X_OK):
-        subprocess.run([notify_cmd, message, "tech-lead"], check=False)
+        subprocess.run([notify_cmd, message, "pm"], check=False)
     return message, True
 
 
@@ -204,7 +204,7 @@ def worker_event(args: argparse.Namespace) -> dict[str, Any]:
     sync_result: dict[str, Any] | None = None
     if not args.no_sync:
         relative = os.path.relpath(path, vault)
-        sync_result = dossier.sync(vault, f"tech-lead: {log_event}", [], [relative, os.path.relpath(path.parent.parent / "log.md", vault)])
+        sync_result = dossier.sync(vault, f"pm: {log_event}", [], [relative, os.path.relpath(path.parent.parent / "log.md", vault)])
     return {"item": str(path), "event": event, "push": push, "synced": sync_result if sync_result is not None else False}
 
 

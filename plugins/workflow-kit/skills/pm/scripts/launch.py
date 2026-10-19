@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capacity, overlap, plan-scope, and worker-command helpers for tech-lead."""
+"""Capacity, overlap, plan-scope, and worker-command helpers for pm."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ Repository: {repo_dir}
 Worktree: {worktree_path}
 Never edit the dossier directly; use python3 {events_path} worker-event for every dossier update.
 Before ending with a needs input block, pass the whole block on stdin through this quoted heredoc, so the shell never expands its text:
-python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'TECH_LEAD_EVENT'
+python3 {events_arg} worker-event --item {item_arg} --line-file -{notify_arg} <<'PM_EVENT'
 <whole needs input block>
-TECH_LEAD_EVENT
+PM_EVENT
 After the skill's final done or stopped line, run the same command with that line as the heredoc body.
 After either command, if `push` is non-null, call PushNotification with it."""
 
@@ -49,7 +49,7 @@ def read_item(path: Path) -> dict[str, str | list[str]]:
 
 
 def feature_name(path: Path) -> str:
-    return path.parent.parent.name
+    return dossier.feature_label(path.parent.parent.name)
 
 
 def plan_scope(path: Path) -> dict[str, list[str]]:

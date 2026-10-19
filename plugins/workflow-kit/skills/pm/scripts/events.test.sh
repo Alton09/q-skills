@@ -230,12 +230,12 @@ pass
 # 17. --line-file - reads a heredoc block literally; shell syntax in the question never runs.
 n=17
 item=$(new_item heredoc)
-out=$(cd "$tmp" && python3 "$script" worker-event --item "$item" --line-file - --no-sync <<'TECH_LEAD_EVENT'
+out=$(cd "$tmp" && python3 "$script" worker-event --item "$item" --line-file - --no-sync <<'PM_EVENT'
 address-pr: needs input #14
 Question: Keep `legacy()` and "$(touch pwned)"?
 Options:
 1. Yes
-TECH_LEAD_EVENT
+PM_EVENT
 ) || fail "heredoc exit $?"
 expect .event '"paused-#14"'
 [ ! -e "$tmp/pwned" ] || fail 'question text was executed'
@@ -265,7 +265,24 @@ printf '%s\n' '---' 'slug: synced' 'title: synced' 'stage: implement' 'status: r
 git -C "$tmp/sync-vault" add -A && git -C "$tmp/sync-vault" commit -qm seed && git -C "$tmp/sync-vault" push -q -u origin main 2>/dev/null
 run worker-event --item "$item" --line 'feature-plan: done plans/synced.md'
 expect .synced.ok true
-git -C "$tmp/vault-remote.git" log -1 --format=%s main | grep -Fxq 'tech-lead: plan-done' || fail 'sync commit not pushed'
+git -C "$tmp/vault-remote.git" log -1 --format=%s main | grep -Fxq 'pm: plan-done' || fail 'sync commit not pushed'
 git -C "$tmp/vault-remote.git" show main:Features/alpha/items/synced.md | grep -Fq 'status: idle' || fail 'item not pushed'
 git -C "$tmp/vault-remote.git" show main:Features/alpha/log.md | grep -Fq 'plan-done' || fail 'log not pushed'
+pass
+
+# 20. Standalone events use the project label and their own log, without feature churn.
+n=20
+python3 "$here/dossier.py" init-project --vault "$tmp/vault" >/dev/null || fail 'init-project'
+python3 "$here/dossier.py" item new --feature-dir "$tmp/vault/Features/_project" --slug fix-x --title 'Fix X' --set workerKind=plan >/dev/null || fail 'standalone item'
+item="$tmp/vault/Features/_project/items/fix-x.md"
+cp "$tmp/vault/Features/alpha/log.md" "$tmp/feature-log-before"
+run worker-event --item "$item" --line 'feature-plan: done plans/fix-x.md' --no-sync
+expect .event '"plan-done"'
+expect '.push | startswith("[project]")' true
+grep -Fq 'plan-done: plans/fix-x.md' "$tmp/vault/Features/_project/log.md" || fail 'standalone log missing event'
+cmp -s "$tmp/feature-log-before" "$tmp/vault/Features/alpha/log.md" || fail 'standalone event changed feature log'
+cp "$tmp/vault/Features/_project/log.md" "$tmp/project-log-before"
+run worker-event --item "$item" --line 'feature-plan: done plans/fix-x.md' --no-sync
+expect .push null
+cmp -s "$tmp/project-log-before" "$tmp/vault/Features/_project/log.md" || fail 'duplicate standalone event appended log'
 pass

@@ -8,7 +8,7 @@ description: >
   request involving planning, task decomposition, or organizing work into parallelizable steps
   — even if they don't say "plan" explicitly but are describing a multi-step change they want
   broken down first before building. Also use it for "plan from this design note", "handoff plan",
-  or to plan for the tech lead without questions.
+  or to plan for the project manager without questions.
 ---
 
 # Feature Plan

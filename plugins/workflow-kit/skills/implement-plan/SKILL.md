@@ -70,7 +70,7 @@ is present (`references/routing.md`).
 4. **Plan Structure** — work from the delegated parse extract
 5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running; unpinned worker targets come from the routing config when present
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
-7. **Task Tracking** — check off completed phases in plan file
+7. **Task Tracking** — tick verified criteria and completed tasks in the plan file
 8. **Plan Review, E2E & Auto-fix** — review and E2E workers run together on the same `HEAD`; one phase-tier fix pass handles review findings and E2E failures under the same two-tier verify
 9. **Pull Request & Report Finalization** — persist the report with `PR: pending`, invoke `/create-pr` or skip it, then patch only the PR line
 10. **Report Contents & Terminal Summary** — define the persisted report and print its short hand-off
@@ -119,36 +119,42 @@ load-bearing data exactly:
 
 - Skip leading YAML front matter (a `---` fenced block at the top). Its fences are not the
   Overview/checklist divider.
-- Validate structure first. Accept two layouts. **New**: `### Phase` headings under
-  `## Implementation Checklist`. **Legacy**: `### Phase` headings under `## Tasks`. Ignore
-  every `###` heading outside those sections. If neither layout matches, return a structure
-  error instead of an extract.
+- Validate structure first. Accept three forms. **New**: `### Phase` headings under
+  `## Implementation Checklist`. **Legacy task blocks**: `### Phase` headings under
+  `## Tasks`, with `#### Task N:` blocks and acceptance criteria. **Legacy task lines**:
+  `### Phase 1: Name` headings under `## Phases`, with top-level `- [ ] Task 1a:` lines
+  and no task blocks or acceptance criteria. Each top-level checkbox line is a task.
+  Ignore every `###` heading outside those sections. If no form matches, return a
+  structure error instead of an extract.
 - For each phase, return: phase name/heading, dependency edges, and the **verbatim nested
   block of every task** (Module, Files, Depends on when present, Do, and Done when, or the
   legacy equivalents). Do not paraphrase or drop tasks. Dependency edges come from the
   `(depends on Phase X)` suffix on
-  the phase headings. In the legacy layout, also read the `## Task Dependency Graph`. In the
+  the phase headings. In either legacy form, also read the `## Task Dependency Graph` when present. In the
   new layout, if the Approach table disagrees with the headings, return a structure error that
   names the phase.
 - Also return the parallel/sequential tag per phase when the legacy graph gives one.
 - Also return every `[e2e]` criterion, verbatim and paired with its phase. New layout: items
-  in a task's "Done when" list. Legacy layout: items in its "Acceptance criteria" list. For
+  in a task's "Done when" list. Legacy task blocks: items in an "Acceptance criteria" list. For
   example: `- [ ] Sample recipes still render after a cleared database [e2e]`.
 
 Why verbatim: the orchestrator injects each phase's task list into its handoff (5a.2) and
 feeds the `Files` lists into the file-overlap *safety* check (5a.1) — a lossy summary there
 causes bad scheduling or worktree collisions.
 
-**Sanity-check on return:** compare the extract's phase count with `grep -c '^### Phase'` on
-the source. Compare its task count with `grep -c '^- \[[ x]\] \*\*Task'` (new layout) or
-`grep -c '^#### Task'` (legacy layout). Nested criteria checkboxes do not count as tasks. On
+**Sanity-check on return:** count only phase sections in the accepted form. Compare the
+extract's phase count with `^### Phase` headings. Compare its task count with
+`^- \[[ x]\] \*\*Task` (new), `^#### Task` (legacy task blocks), or
+`^- \[[ x]\]` (legacy task lines). Nested criteria checkboxes do not count as tasks. On
 mismatch or a structure error, fix the parse or fall back to reading the plan directly before proceeding.
 
 When resuming a partially-complete plan, also diff the working-tree plan against committed
 state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
 are unreliable evidence of completed work — they may be someone's uncommitted edit, and are
 destroyable. Trust committed history for the resume point, and confirm the work exists in the
-diff rather than in the checkbox.
+diff rather than in the checkbox. Use Step 7's "phase implemented" rule for the resume
+point: pending `[e2e]` criteria and the task lines they hold open do not require a phase
+rerun when its gate passed and its non-`[e2e]` work is committed.
 
 ## Step 2: Orchestrator Model
 
@@ -221,8 +227,9 @@ status: planned
 ## Verification
 ```
 
-Full template: `../feature-plan/references/plan-template.md`. The legacy layout (`## Tasks`,
-`#### Task N:` blocks, `**Acceptance criteria**:` lists) stays accepted.
+Full template: `../feature-plan/references/plan-template.md`. Both legacy forms stay
+accepted: `## Tasks` with `#### Task N:` blocks and `**Acceptance criteria**:` lists;
+`## Phases` with `### Phase 1: Name` headings and top-level `- [ ] Task 1a:` lines.
 
 ## Step 5: Phase Delegation
 
@@ -364,11 +371,15 @@ When a phase passes verification, update the plan file:
 
 1. Read the plan file **in the integration worktree** (Step 3) — not the copy in the
    original checkout
-2. Tick the boxes. New layout: tick each non-`[e2e]` criterion in the phase, then tick each
-   task line whose criteria are all ticked. Defer `[e2e]` criteria: after the e2e step passes,
-   tick them and any task lines they complete. Legacy layout: tick the acceptance-criteria
-   checkboxes the same way. A new-layout phase is complete when all its task lines are
-   ticked. A legacy phase is complete when all its acceptance criteria are ticked.
+2. Tick verified criteria. New layout: tick each non-`[e2e]` criterion in the phase, then
+   tick each task line whose criteria are all ticked. Defer `[e2e]` criteria only when E2E
+   will run in Step 8. When E2E is skipped, tick them once the phase gate verifies them
+   (references/phase-execution.md). Legacy task blocks: tick acceptance criteria the same
+   way. Legacy task lines: tick each top-level task checkbox when its phase passes the gate.
+   A phase is implemented when its gate passed, all non-`[e2e]` criteria are ticked, and
+   every task line without pending `[e2e]` criteria is ticked. This permits scheduling and
+   Step 8 before deferred E2E checks. A phase is complete when all its criteria and task
+   lines are ticked; legacy task blocks require all acceptance criteria ticked.
 3. Write the updated plan back to that same file
 4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
    Do not leave plan state uncommitted between phases. The same reasoning that makes 5a.2
@@ -376,10 +387,6 @@ When a phase passes verification, update the plan file:
    commands in this worktree, and an uncommitted checkbox is silently destroyable. A
    plan-only commit also keeps progress legible in history and survives a worker that resets
    the tree.
-5. **Set plan status (completed run only).** When every phase is ticked and the run
-   completes, set the front matter to `status: complete` in this same copy. Add a front matter
-   block (`---`, `status: complete`, `---`) when the plan has none. Keep other keys. Never
-   change the status on a stopped, stuck, or blocked run.
 
 Then print updated plan state so user can see progress:
 
@@ -410,9 +417,10 @@ updated in place and left uncommitted, and name the file.
 
 ## Step 8: Plan Review & Auto-fix
 
-Run ONLY after every phase is implemented and checked off (Step 7). On the last phase's
-`HEAD`, spawn the enabled review and E2E workers together. Each has its own runaway guard
-and shares the parallel-worker limit. Skip both after a hard stop or BLOCKED/HALTED phase.
+Run ONLY after every phase is implemented under Step 7's rule; deferred `[e2e]` criteria
+and the task lines they hold open may remain unticked. On the last phase's `HEAD`, spawn
+the enabled review and E2E workers together. Each has its own runaway guard and shares the
+parallel-worker limit. Skip both after a hard stop or BLOCKED/HALTED phase.
 Otherwise, each worker runs alone when the other is disabled or its skill is absent. State
 every skip reason in the report.
 
@@ -429,10 +437,18 @@ the combined loop. The orchestrator never reads the raw diff or verbatim E2E fai
 Runs only after Step 8 has fully settled — every review/E2E round finished, every auto-fix
 committed and gate-verified. First re-read the plan file at the Step 7 plan-state location —
 the copy in the integration worktree for a repository plan, or the original file for a plan
-outside the repository — and confirm every implemented phase shows `- [x]`. If any are still
-`- [ ]`, update them now (Step 7). Assemble the Step 10 report with `**PR:** pending` and
-write it to that plan file as `## Implementation Report — <YYYY-MM-DD>`. Replace only the
-latest (closest to end of file) `## Implementation Report` section whose `**PR:**` line is
+outside the repository — and confirm all non-`[e2e]` criteria and the task lines they
+complete are ticked under Step 7. Tick `[e2e]` criteria only on the final E2E pass or gate
+verification when E2E is skipped, then tick the task lines they complete. Apply missing
+updates only with that verification evidence. Phases have no checkbox.
+
+**Set plan status (completed run only).** After Step 8 settles and before the report commit,
+set `status: complete` only when every phase is complete under Step 7 and the run completes.
+Use the same Step 7 plan-state copy. Add a front matter block (`---`, `status: complete`,
+`---`) when absent. Keep other keys. Never change status on a stopped, stuck, or blocked run.
+
+Assemble the Step 10 report with `**PR:** pending` and write it to that plan file as
+`## Implementation Report — <YYYY-MM-DD>`. Replace only the latest (closest to end of file) `## Implementation Report` section whose `**PR:**` line is
 exactly `pending`, regardless of its date; otherwise replace the section with today's exact
 heading, from that heading to the next `##` heading or end of file; append only when neither
 exists. Earlier completed reports stay. For a plan outside the project repository, write the
@@ -483,7 +499,7 @@ with no number. Partial → report the measured part and name what it covers. Ne
 figure from token counts, model prices, elapsed time, or a previous run. An estimated cost
 figure was wrong by 13× in a real run; no number is better than a wrong one.
 
-Once all phases are checked off:
+After Step 8 settles:
 
 Fill `### Unplanned Decisions` from the workers' `unplanned_decisions` returns. Write `- None`
 when every list is empty. The user checks these at PR review instead of being asked during the
@@ -758,7 +774,7 @@ template.
   sequential. Logical independence never overrides file-overlap: phases sharing a file
   are demoted to sequential (Step 5a.1).
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
-  integration gate-verify must pass before the group is checked off and advanced.
+  integration gate-verify must pass before Step 7 records progress and the group advances.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
   (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
   raw source, so it doesn't get re-processed every turn.

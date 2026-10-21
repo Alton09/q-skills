@@ -18,8 +18,11 @@ Legacy plans may also carry a `## Task Dependency Graph` block. Read it as a fal
   ```
 
 Parse these into a phase → prerequisites map and compute **layers** (topological levels):
-a layer is the set of phases whose prerequisites are all already complete. Phases in the
-same layer have no dependency edge between them → **candidate parallel group**.
+a layer is the set of phases whose prerequisites are already implemented under Step 7's
+rule: the gate passed, all non-`[e2e]` criteria are ticked, and every task line without
+pending `[e2e]` criteria is ticked. Legacy task-line plans tick tasks directly on gate pass.
+Deferred `[e2e]` criteria do not block dependent phases. Phases in the same layer have no
+dependency edge between them → **candidate parallel group**.
 
 If the plan has no dependency notation at all, treat every phase as depending on the
 previous one (pure sequential) — safe default.
@@ -186,7 +189,7 @@ identically to every executor — they are properties of the handoff, not the ha
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
-4. Gate pass → IMMEDIATELY check off the phase (Step 7), retain only the return facts that
+4. Gate pass → IMMEDIATELY record verified criteria and tasks (Step 7), retain only facts
    a direct dependent needs under 5a.2's compact carry-forward rule, and advance. Do not
    batch checkbox updates — write after each phase.
 
@@ -210,8 +213,8 @@ identically to every executor — they are properties of the handoff, not the ha
 4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
    child can pass alone yet break once merged.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
-   passes — check off ALL phases in the group (Step 7), retain only each member's facts
-   needed by a direct dependent under 5a.2's compact carry-forward rule, then clean up
+   passes — record verified criteria and tasks for ALL phases (Step 7), retain only each
+   member's facts needed by a direct dependent under 5a.2's compact carry-forward rule, then clean up
    (5a.4) and advance to the next layer.
 6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working

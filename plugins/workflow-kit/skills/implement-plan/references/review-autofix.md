@@ -1,7 +1,9 @@
 # Plan Review, E2E & Auto-fix (Step 8)
 
-Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented and checked
-off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
+Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented under Step 7's
+rule: its gate passed, all non-`[e2e]` criteria and the task lines they complete are ticked.
+Deferred `[e2e]` criteria and the task lines they hold open may remain unticked.
+If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
 and state the reason in the report. Disable review with `RUN_REVIEW=false`; skip it when
 `REVIEW_SKILL` is absent. Disable E2E with `RUN_E2E=false`; skip it when `E2E_SKILL` is
 absent. E2E runs alone when review is skipped. Review runs alone when E2E is skipped.
@@ -164,3 +166,10 @@ Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the ca
 a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list
 open findings and failed names in the report. The report shows only the last E2E run on the
 code that ships. Never loop review/E2E↔fix unbounded.
+
+When the loop settles, use only the final E2E result on the code that ships. On `status: pass`,
+tick the deferred `[e2e]` criteria and the task lines they complete in the Step 7 plan-state
+copy. Follow Step 7's commit and which-copy rules. When E2E is skipped, including `env-error`,
+delegate gate verification of any remaining `[e2e]` criteria as required by
+`references/phase-execution.md`. Tick only criteria the gate verifies and the task lines they
+complete, under the same Step 7 rules.

@@ -92,7 +92,9 @@ headings there. Include no checkboxes. Keep file-level detail in What changes bu
 
 Start the plan with the YAML front matter shown above. Its fences are not the
 Overview/checklist divider; parsers skip front matter before finding that divider.
-New plans use `status: planned`. implement-plan owns the change to `status: complete`.
+New plans use `status: planned`. implement-plan Step 9 sets `status: complete` only after
+Step 8 settles, every phase is complete, and the run completes. A stopped, stuck, or blocked
+run leaves status unchanged.
 
 ## Checklist rules
 
@@ -111,6 +113,10 @@ in Agent Notes. Give each Done when criterion a nested checkbox. Keep a trailing
 only for a criterion that requires a running app.
 
 Tick a criterion when it is verified. Tick a task line when all its criteria are ticked.
+Defer `[e2e]` criteria only when E2E will run in implement-plan Step 8; tick them on the
+final E2E pass. When E2E is skipped, tick them once the gate verifies them.
+A phase is implemented when its gate passed, all non-`[e2e]` criteria and the task lines
+they complete are ticked. Deferred `[e2e]` criteria do not block dependent phases or Step 8.
 A phase is complete when all its task lines are ticked.
 
 ## Writing a Good Architecture Diagram

@@ -124,8 +124,9 @@ load-bearing data exactly:
   every `###` heading outside those sections. If neither layout matches, return a structure
   error instead of an extract.
 - For each phase, return: phase name/heading, dependency edges, and the **verbatim nested
-  block of every task** (Module, Files, Do, and Done when, or the legacy equivalents). Do not
-  paraphrase or drop tasks. Dependency edges come from the `(depends on Phase X)` suffix on
+  block of every task** (Module, Files, Depends on when present, Do, and Done when, or the
+  legacy equivalents). Do not paraphrase or drop tasks. Dependency edges come from the
+  `(depends on Phase X)` suffix on
   the phase headings. In the legacy layout, also read the `## Task Dependency Graph`. In the
   new layout, if the Approach table disagrees with the headings, return a structure error that
   names the phase.
@@ -187,9 +188,22 @@ not a fresh raw read. This is the structure the prep agent parsed:
 status: planned
 ---
 # Feature Name
-> **Goal:** ... **Size:** ...
+> **Goal:** ...
+> **Size:** ...
 
-## Summary / What changes / Approach / Decisions & risks
+## Summary
+...
+
+## What changes
+...
+
+## Approach
+| Phase | Outcome | Depends on |
+|---|---|---|
+| 1. Foundation | ... | — |
+
+## Decisions & risks
+...
 
 ---
 
@@ -353,7 +367,8 @@ When a phase passes verification, update the plan file:
 2. Tick the boxes. New layout: tick each non-`[e2e]` criterion in the phase, then tick each
    task line whose criteria are all ticked. Defer `[e2e]` criteria: after the e2e step passes,
    tick them and any task lines they complete. Legacy layout: tick the acceptance-criteria
-   checkboxes the same way. A phase is complete when all its task lines are ticked.
+   checkboxes the same way. A new-layout phase is complete when all its task lines are
+   ticked. A legacy phase is complete when all its acceptance criteria are ticked.
 3. Write the updated plan back to that same file
 4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
    Do not leave plan state uncommitted between phases. The same reasoning that makes 5a.2

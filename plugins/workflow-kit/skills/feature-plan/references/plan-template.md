@@ -27,9 +27,9 @@ status: planned
 ## Decisions & risks
 <!-- Use one short bullet per decision, assumption, or risk. Omit empty categories; keep assumptions in handoff mode. -->
 
-- **Decide before building:** [Open decision and its effect.]
+- **Decide before building**: [Open decision and its effect.]
 - **Assumed**: **A1** [Decision the input did not state]. Source: [design note | brief | decisions | codebase | default].
-- **Risk:** [Issue or edge case and how to address it.]
+- **Risk**: [Issue or edge case and how to address it.]
 
 ---
 

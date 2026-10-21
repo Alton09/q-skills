@@ -88,6 +88,9 @@ Record the chosen model per phase for the final report, with the router `reason`
 everything the phase needs:
 
 - Plan file path + the **verbatim task list for this phase only**
+- **Shared context** from Step 1: `## Agent Notes` verbatim and the **Risk** bullets from
+  `## Decisions & risks` verbatim, or any equivalent context/risks section in a legacy plan.
+  Include it in every phase handoff and in retry/fix handoffs that reuse this payload.
 - **Worktree path** — depends on how the phase runs (see 5a.3):
   - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
   - *Parallel phase* → its own **child worktree** that the orchestrator created off

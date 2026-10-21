@@ -134,6 +134,9 @@ load-bearing data exactly:
   new layout, if the Approach table disagrees with the headings, return a structure error that
   names the phase.
 - Also return the parallel/sequential tag per phase when the legacy graph gives one.
+- Also return `## Agent Notes` verbatim and the **Risk** bullets from
+  `## Decisions & risks` verbatim. For legacy plans, return any equivalent context/risks
+  section verbatim. Include this shared context in every phase handoff.
 - Also return every `[e2e]` criterion, verbatim and paired with its phase. New layout: items
   in a task's "Done when" list. Legacy task blocks: items in an "Acceptance criteria" list. For
   example: `- [ ] Sample recipes still render after a cleared database [e2e]`.
@@ -338,7 +341,8 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
   routes again the same way. The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
-  same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary.
+  same commit contract as 5a.2. Pass the verbatim gate-verify error plus the prior summary
+  and the shared context from 5a.2.
   Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b applies to retry
   sub-agents too.)
 - A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
@@ -374,7 +378,10 @@ When a phase passes verification, update the plan file:
 2. Tick verified criteria. New layout: tick each non-`[e2e]` criterion in the phase, then
    tick each task line whose criteria are all ticked. Defer `[e2e]` criteria only when E2E
    will run in Step 8. When E2E is skipped, tick them once the phase gate verifies them
-   (references/phase-execution.md). Legacy task blocks: tick acceptance criteria the same
+   (references/phase-execution.md). If E2E is skipped or returns `env-error` after criteria
+   were deferred, use the post-loop gate in `references/review-autofix.md` § "8d. Bounded re-run".
+   Tick all remaining `[e2e]` criteria only on `status: pass`. On fail, leave them unticked,
+   list them in the report, and do not enter the fix loop. Legacy task blocks: tick acceptance criteria the same
    way. Legacy task lines: tick each top-level task checkbox when its phase passes the gate.
    A phase is implemented when its gate passed, all non-`[e2e]` criteria are ticked, and
    every task line without pending `[e2e]` criteria is ticked. This permits scheduling and
@@ -442,7 +449,7 @@ complete are ticked under Step 7. Tick `[e2e]` criteria only on the final E2E pa
 verification when E2E is skipped, then tick the task lines they complete. Apply missing
 updates only with that verification evidence. Phases have no checkbox.
 
-**Set plan status (completed run only).** After Step 8 settles and before the report commit,
+**Set plan status (completed run only).** After Step 8 settles and before writing the report,
 set `status: complete` only when every phase is complete under Step 7 and the run completes.
 Use the same Step 7 plan-state copy. Add a front matter block (`---`, `status: complete`,
 `---`) when absent. Keep other keys. Never change status on a stopped, stuck, or blocked run.
@@ -454,7 +461,10 @@ heading, from that heading to the next `##` heading or end of file; append only 
 exists. Earlier completed reports stay. For a plan outside the project repository, write the
 report in place and leave
 it uncommitted, even when its vault has other uncommitted edits. For a repository plan, write
-it to the integration-worktree copy and commit it using the Step 7 plan-state rule.
+it to the integration-worktree copy and commit it together with the status change using the
+Step 7 plan-state rule, before invoking `/create-pr`. Do not leave the status change
+uncommitted for a worker to stage. For a plan outside the repository, leave the status
+change uncommitted with the report.
 
 Then invoke `/create-pr` from the integration worktree when it exists and `CREATE_PR` is not `false`,
 passing the branch and the **path of the plan file that contains the dated

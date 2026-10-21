@@ -6,14 +6,15 @@ independent phases in parallel and dependent phases in order.
 
 ## 5a.1 Build the execution schedule
 
-feature-plan encodes dependencies two ways — use both:
+Read dependencies from the phase headings. This is the primary source:
 
-- Phase headings: `### Phase 2 — Name (depends on Phase 1)`
-- A `## Task Dependency Graph` block:
+- `### Phase 2 — Name (depends on Phase 1, Phase 3)`
+
+Legacy plans may also carry a `## Task Dependency Graph` block. Read it as a fallback:
+
   ```
   Phase 1 (parallel): Task 1, Task 2
   Phase 2 (sequential, depends on Phase 1): Task 3
-  Phase 3 (parallel, depends on Phase 2): Task 4, Task 5
   ```
 
 Parse these into a phase → prerequisites map and compute **layers** (topological levels):
@@ -25,7 +26,7 @@ previous one (pure sequential) — safe default.
 
 **File-overlap demotion (mandatory safety check).** The dependency graph encodes
 *logical* deps, not *file* deps — two "independent" phases can still edit the same file.
-Before parallelizing a candidate group, read each phase's `**Files**:` metadata. If two
+Before parallelizing a candidate group, read each task's `**Files**:` bullets in every phase, including multi-line lists. If two
 phases in the group share any file, they CANNOT run concurrently: split the group so each
 parallel subset has pairwise-disjoint file sets, and run the leftover phases in a later
 sequential sub-step. If any phase in the group has **no `**Files**:` metadata at all**, you

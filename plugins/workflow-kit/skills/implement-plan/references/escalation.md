@@ -21,14 +21,14 @@ below, read it as "the failed phase or group."
    failed phase heading (the first phase heading for a group):
 
    ```markdown
-   ### Phase <N>: <name>
+   ### Phase <N> — <name>
 
    > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Escalation in progress.
    > **Last error:** <one-line summary of the verify error>
    > **Worktree:** <worktree path>
    > **Phases:** <single phase, or all members of the group>
 
-   - [ ] Task ...
+   - [ ] **Task N: ...**
    ```
 
    Write the updated plan back to disk **before** the escalation pass — to the

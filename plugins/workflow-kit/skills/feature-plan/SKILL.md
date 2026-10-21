@@ -13,8 +13,8 @@ description: >
 
 # Feature Plan
 
-Create a structured implementation plan that breaks work into sequential phases with clear
-tasks and acceptance criteria checkboxes, then save it so the `implement-plan` skill can pick it up.
+Create a plan with a short Overview for people and an Implementation Checklist for agents.
+Save it so the `implement-plan` skill can pick it up.
 
 ## Invocation
 
@@ -68,116 +68,28 @@ If API surface is involved and `/research` is available:
    deprecated alternatives, migration paths, and version-specific constraints.
 2. Incorporate findings into task instructions.
 
-If `/research` is not available, skip the lookup and note it in the plan's
-Risks and Considerations section.
+If `/research` is not available, skip the lookup and record it under **Risk** in
+Decisions & risks.
 
 ## Step 3: Write the Plan
 
 Derive a plan key from the title — lowercase kebab-case, 3–5 words
 (e.g., `add-saved-search-alerts`, `fix-notes-persistence`, `websocket-gating`).
 
-Use this structure:
+Read `references/plan-template.md`. Copy the template from its front matter through
+Verification, then follow its Overview rules, Checklist rules, and diagram guidance.
+Keep the Overview to about one screen. Put execution detail in the checklist.
 
-```markdown
-# [Plan Title]
-
-## Context
-[What this plan accomplishes and why — 2–4 sentences]
-
-## Assumptions
-[Optional outside handoff mode; required in handoff mode. One bullet per decision the planner made
-that the input did not state.]
-- **A<n>** <decision>. Source: <design note | brief | decisions | codebase | default>.
-
-## Architecture Diagram
-[Only include if the feature introduces non-trivial data flow, a new layer interaction,
-or a dependency structure that's hard to convey in prose. Skip for simple single-file changes.]
-
-```mermaid
-graph TD
-    A[UI Layer] -->|event| B[Controller/ViewModel]
-    B --> C[Service/UseCase]
-    C --> D[Repository]
-    D --> E[DataSource]
-```
-*(Replace with diagram specific to this feature's actual components and flow)*
-
-## Task Dependency Graph
-[Show which tasks are sequential vs parallel within phases]
-
-Example:
-  Phase 1 (parallel): Task 1, Task 2
-  Phase 2 (sequential, depends on Phase 1): Task 3
-  Phase 3 (parallel, depends on Phase 2): Task 4, Task 5
-
-## Tasks
-
-### Phase 1 — [Phase Name]
-
-#### Task 1: [Task Name]
-- **Module**: [e.g., `src/services/`]
-- **Files**: [exact file paths to create or modify]
-- **Dependencies**: None
-- **Instructions**:
-  [What to implement and why. State what's specific to this task:
-   class names, method signatures, contracts with other tasks, what NOT to touch.]
-
-**Acceptance criteria**:
-- [ ] [Specific, verifiable criterion]
-- [ ] Sample recipes still render after a cleared database [e2e]
-
-#### Task 2: [Task Name]
-- **Module**: [module path]
-- **Files**: [exact file paths]
-- **Dependencies**: None
-- **Instructions**:
-  ...
-
-**Acceptance criteria**:
-- [ ] [Criterion]
-
-### Phase 2 — [Phase Name] (depends on Phase 1)
-
-#### Task 3: [Task Name]
-- **Module**: [module path]
-- **Files**: [exact file paths]
-- **Dependencies**: Task 1, Task 2
-- **Instructions**:
-  ...
-
-**Acceptance criteria**:
-- [ ] [Criterion]
-
-## Integration Notes
-[How to verify the pieces fit together once all tasks are done]
-
-## Risks and Considerations
-[Potential issues, edge cases, or things to watch out for]
-```
-
-## Writing a Good Architecture Diagram
-
-A Mermaid diagram earns its place when the dependency structure or data flow would take a
-paragraph to describe in prose. Good signals: 3+ new components interacting, a non-obvious
-flow (e.g., bidirectional streams, multi-source merges), or a reader would likely draw it
-on a whiteboard anyway.
-
-Skip the diagram when the change is local — patching a single class, adding a field to an
-existing model, or wiring a new endpoint into an established pattern already documented elsewhere.
-
-If you include one, use real class names from the research phase, not generic labels.
-Keep it focused on the new or changed flow — don't diagram the entire app.
-
-Common diagram types:
-- `graph TD` — component dependency / data flow (most common)
-- `sequenceDiagram` — async interactions (e.g., WebSocket, multi-step auth)
-- `stateDiagram-v2` — state transitions
+Put context in Summary. Record assumptions under **Assumed** in Decisions & risks;
+keep `A<n>` identifiers and sources, required in handoff mode. Put integration checks in
+Verification. Put risks and considerations under **Risk** in Decisions & risks.
 
 ## Writing Good Task Instructions
 
 Write as if handing off to a capable engineer who hasn't seen the rest of the conversation:
 
-- Use real file paths, class names, and function names from the research phase
+- Write short **Do** bullets with real file paths, class names, and function names from research
+- Write verifiable **Done when** criteria as nested checkboxes
 - Define input/output contracts between tasks so sequential work integrates cleanly
 - Call out what NOT to change if there's risk of overlap with sibling tasks
 - Keep scope tight — one clear responsibility per task
@@ -185,9 +97,14 @@ Write as if handing off to a capable engineer who hasn't seen the rest of the co
   removes. Once the dependency is gone, the compiler already rejects its imports, so the test
   guards nothing
 
-Tag an acceptance criterion with a trailing `[e2e]` when only a running app can settle it.
-For example: `- [ ] Sample recipes still render after a cleared database [e2e]`. Do not tag
-criteria that a build, unit test, or static check can settle.
+Tag a **Done when** criterion with a trailing `[e2e]` when only a running app can settle it:
+
+```markdown
+  - **Done when**:
+    - [ ] Sample recipes still render after a cleared database [e2e]
+```
+
+Do not tag criteria that a build, unit test, or static check can settle.
 
 ## Step 4: Save the Plan
 
@@ -209,7 +126,7 @@ Tell the user which path was used.
 
 After saving, tell the user:
 1. Where the plan was saved
-2. Brief summary: how many phases, how many tasks, rough breakdown of what each phase covers
+2. Brief Overview summary and checklist counts: phases, tasks, and what each phase covers
 3. Any risks or open questions they should decide before implementing
 4. In handoff mode, how many assumptions the plan records
 

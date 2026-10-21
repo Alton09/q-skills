@@ -117,23 +117,31 @@ the inline content you pass it) and return a **verbatim normalized extract** —
 summary. The orchestrator schedules and hands off from this extract, so it must preserve the
 load-bearing data exactly:
 
-- Validate structure first: phases are `###` sections with checkboxes (`- [ ]` / `- [x]`).
-  If the plan lacks this, return a structure error instead of an extract.
-- For each phase, return: phase name/heading, dependency edges (from `(depends on Phase X)`
-  headings and the `## Task Dependency Graph`), the `**Files**:` list, and the **verbatim
-  task lines** (do not paraphrase or drop tasks).
-- Also return the parallel/sequential tag per phase from the dependency graph.
-- Also return every acceptance criterion whose task line ends in `[e2e]`, verbatim and
-  paired with its phase. For example:
-  `- [ ] Sample recipes still render after a cleared database [e2e]`.
+- Skip leading YAML front matter (a `---` fenced block at the top). Its fences are not the
+  Overview/checklist divider.
+- Validate structure first. Accept two layouts. **New**: `### Phase` headings under
+  `## Implementation Checklist`. **Legacy**: `### Phase` headings under `## Tasks`. Ignore
+  every `###` heading outside those sections. If neither layout matches, return a structure
+  error instead of an extract.
+- For each phase, return: phase name/heading, dependency edges, and the **verbatim nested
+  block of every task** (Module, Files, Do, and Done when, or the legacy equivalents). Do not
+  paraphrase or drop tasks. Dependency edges come from the `(depends on Phase X)` suffix on
+  the phase headings. In the legacy layout, also read the `## Task Dependency Graph`. In the
+  new layout, if the Approach table disagrees with the headings, return a structure error that
+  names the phase.
+- Also return the parallel/sequential tag per phase when the legacy graph gives one.
+- Also return every `[e2e]` criterion, verbatim and paired with its phase. New layout: items
+  in a task's "Done when" list. Legacy layout: items in its "Acceptance criteria" list. For
+  example: `- [ ] Sample recipes still render after a cleared database [e2e]`.
 
 Why verbatim: the orchestrator injects each phase's task list into its handoff (5a.2) and
 feeds the `Files` lists into the file-overlap *safety* check (5a.1) — a lossy summary there
 causes bad scheduling or worktree collisions.
 
-**Sanity-check on return:** confirm the extract's phase count and per-phase task counts look
-right (e.g. match a quick `grep -c` of `###` and `- [` in the source). On mismatch or a
-structure error, fix the parse or fall back to reading the plan directly before proceeding.
+**Sanity-check on return:** compare the extract's phase count with `grep -c '^### Phase'` on
+the source. Compare its task count with `grep -c '^- \[[ x]\] \*\*Task'` (new layout) or
+`grep -c '^#### Task'` (legacy layout). Nested criteria checkboxes do not count as tasks. On
+mismatch or a structure error, fix the parse or fall back to reading the plan directly before proceeding.
 
 When resuming a partially-complete plan, also diff the working-tree plan against committed
 state (`git show HEAD:<plan-path>`). Checkboxes present in the working tree but not in HEAD
@@ -175,30 +183,32 @@ You already have the normalized extract from the delegated parse (Step 1) — wo
 not a fresh raw read. This is the structure the prep agent parsed:
 
 ```markdown
+---
+status: planned
+---
 # Feature Name
+> **Goal:** ... **Size:** ...
 
-## Overview
-Brief description of what's being implemented.
+## Summary / What changes / Approach / Decisions & risks
 
-## Phases
+---
 
-### Phase 1: Foundation Setup
-- [ ] Task 1a: description
-- [ ] Task 1b: description
+## Implementation Checklist
 
-### Phase 2: Core Implementation
-- [ ] Task 2a: description
-- [ ] Task 2b: description
-- [ ] Task 2c: description
+### Phase 1 — Foundation
+- [ ] **Task 1: Name**
+  - **Module**: `path/`
+  - **Files**: `a`, `b`
+  - **Do**:
+    - What to build
+  - **Done when**:
+    - [ ] Criterion
 
-## Tests
-List of expected test coverage.
-
-## Edge Cases
-Known edge cases to handle.
+## Verification
 ```
 
-Key: Each phase is a section with checkboxes for tasks. The skill tracks and updates these.
+Full template: `../feature-plan/references/plan-template.md`. The legacy layout (`## Tasks`,
+`#### Task N:` blocks, `**Acceptance criteria**:` lists) stays accepted.
 
 ## Step 5: Phase Delegation
 
@@ -340,7 +350,10 @@ When a phase passes verification, update the plan file:
 
 1. Read the plan file **in the integration worktree** (Step 3) — not the copy in the
    original checkout
-2. Change phase checkbox from `- [ ]` to `- [x]`
+2. Tick the boxes. New layout: tick each non-`[e2e]` criterion in the phase, then tick each
+   task line whose criteria are all ticked. Defer `[e2e]` criteria: after the e2e step passes,
+   tick them and any task lines they complete. Legacy layout: tick the acceptance-criteria
+   checkboxes the same way. A phase is complete when all its task lines are ticked.
 3. Write the updated plan back to that same file
 4. **Commit it immediately** — `git add <plan-path> && git commit -m "Plan: mark <phase> complete"`.
    Do not leave plan state uncommitted between phases. The same reasoning that makes 5a.2
@@ -348,6 +361,10 @@ When a phase passes verification, update the plan file:
    commands in this worktree, and an uncommitted checkbox is silently destroyable. A
    plan-only commit also keeps progress legible in history and survives a worker that resets
    the tree.
+5. **Set plan status (completed run only).** When every phase is ticked and the run
+   completes, set the front matter to `status: complete` in this same copy. Add a front matter
+   block (`---`, `status: complete`, `---`) when the plan has none. Keep other keys. Never
+   change the status on a stopped, stuck, or blocked run.
 
 Then print updated plan state so user can see progress:
 
@@ -360,7 +377,7 @@ Phases completed:
 ```
 
 **Which copy (normative).** With an integration worktree there are always two copies of the
-plan. Every plan-state update this skill makes — phase checkboxes, the BLOCKED callout, and
+plan. Every plan-state update this skill makes — phase checkboxes, the plan status, the BLOCKED callout, and
 the HALTED callout (`references/escalation.md`) — lands in the **integration worktree's
 copy**, and only there. Never the original checkout's copy. That worktree copy is the file a
 resuming session reads and the file the rung-2 rescue block tells the user to open, so a
@@ -711,44 +728,8 @@ Projects can override via environment or project CLAUDE.md:
 
 ## Plan Format Example
 
-```markdown
-# Feature: Recipe Favorites
-
-## Overview
-Add ability to mark recipes as favorites and filter by them.
-
-## Phases
-
-### Phase 1: Domain Layer
-- [ ] Create Favorite use case in domain/favorites/
-- [ ] Create FavoritesRepository interface
-- [ ] Add unit tests for use case
-
-### Phase 2: Data Layer
-- [ ] Implement FavoritesRepositoryImpl
-- [ ] Add Room entity and DAO
-- [ ] Add data layer tests
-
-### Phase 3: UI Layer
-- [ ] Create FavoritesViewModel with UDF state
-- [ ] Build Favorites Compose screens
-- [ ] Add UI tests
-
-### Phase 4: Integration
-- [ ] Wire up navigation
-- [ ] Integration tests across layers
-- [ ] Manual testing (happy path + edge cases)
-
-## Tests
-- FavoritesUseCaseTest: ≥80% coverage
-- FavoritesRepositoryImplTest: ≥80% coverage
-- FavoritesViewModelTest: ≥80% coverage
-
-## Edge Cases
-- Favorite a recipe, then delete it from system
-- Toggle favorite state rapidly
-- Sync favorites across multiple devices (if applicable)
-```
+See Step 4 for the layout and `../feature-plan/references/plan-template.md` for the full
+template.
 
 ## Notes
 

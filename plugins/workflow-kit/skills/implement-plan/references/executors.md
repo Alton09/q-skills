@@ -158,8 +158,18 @@ the `executor:model` address may come from the quota-aware router
   user `.agents/skills`. Before the first spawn in a worktree, create
   `<worktree>/.agents/skills` as a symlink to `../.claude/skills`, add `.agents/` once to
   that worktree's git `info/exclude`, and link any required user-level skill from
-  `~/.agents/skills/<name>` to `~/.claude/skills/<name>`. The orchestrator, never the user,
-  does this; pi's no-`.agents` rule still applies only to pi.
+  `~/.agents/skills/<name>` to `~/.claude/skills/<name>`. Always use `ln -sfn`, which
+  replaces an existing link instead of following it:
+
+  ```bash
+  mkdir -p <worktree>/.agents ~/.agents/skills
+  ln -sfn ../.claude/skills <worktree>/.agents/skills
+  ln -sfn ~/.claude/skills/<name> ~/.agents/skills/<name>
+  ```
+
+  A plain `ln -s` onto an existing directory link creates the new link inside the target,
+  for example a `.claude/skills/skills` self-link. The orchestrator, never the user, does
+  this; pi's no-`.agents` rule still applies only to pi.
 
 ## Adding an executor
 

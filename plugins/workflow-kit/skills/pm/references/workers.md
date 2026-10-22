@@ -70,7 +70,11 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
 5. Run `herdr.py prepare --item <item> --repo <repo>` and keep its returned pane for attach.
    Then run `launch.py command` with the item, kind, model, the dev-toolkit `notify-me.sh` path as
    `--notify-cmd` when it exists, and the required kind-specific arguments. Execute its
-   returned `argv` without changing argument order. Its `--settings` env sets `HERDR_ENV=0`
+   returned `argv` without changing argument order. For a `ci`, `sync`, or `comments`
+   launch, pass the item's `worktree` as `--worktree` only when that directory exists and is
+   on the PR branch. Otherwise omit `--worktree`: address-pr then finds the PR worktree or
+   creates it through the project's `/create-worktree`, so project setup runs. Never create
+   an ad-hoc PR worktree for the worker. Its `--settings` env sets `HERDR_ENV=0`
    so the worker hook stays silent. If the launch fails, restore the item's
    previous `status` and sync. Otherwise record only `worker` and `sessionId`, without
    rewriting `status`, and sync the item. If prepare returned a pane, run

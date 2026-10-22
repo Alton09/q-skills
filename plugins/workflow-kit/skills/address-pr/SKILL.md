@@ -129,15 +129,23 @@ With `--worktree <path>`, check that the path is a worktree whose branch is
 `<headRefName>`; refuse a mismatch. Without it, find a worktree whose branch is
 `refs/heads/<headRefName>` with `git worktree list --porcelain`. If none exists, run
 `git fetch origin <headRefName>`. Resolve `<repo-root>` with `git rev-parse --show-toplevel`
-and make `<abs-sibling>` the absolute path `dirname(<repo-root>)/<repo>-pr-<number>`. From
-`<repo-root>`, if `refs/heads/<headRefName>` is missing, run:
+and make `<abs-sibling>` the absolute path `dirname(<repo-root>)/<repo>-pr-<number>`.
+
+When the project has a `/create-worktree` skill, create the worktree through it, so project
+setup such as copying `local.properties` runs. Pass `<abs-sibling>` and the existing
+`<headRefName>`, and tell it to check out that branch from `origin/<headRefName>` instead of
+creating a new branch, so it has nothing to ask. Then check that the new worktree is on
+`<headRefName>`. If it is on another branch, remove that worktree and the branch it created,
+use the fallback below, and report that the project's worktree setup did not run.
+
+Without a `/create-worktree` skill, from `<repo-root>`, if `refs/heads/<headRefName>` is
+missing, run:
 
 ```bash
 git worktree add -b <headRefName> <abs-sibling> origin/<headRefName>
 ```
 
-Otherwise, add `<abs-sibling>` with the existing local `<headRefName>` branch. Do not use
-`/create-worktree`, which creates new branches in consumer projects.
+Otherwise, add `<abs-sibling>` with the existing local `<headRefName>` branch.
 
 If the worktree is dirty, stop and ask. Then, in the worktree, run:
 

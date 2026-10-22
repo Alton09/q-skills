@@ -132,6 +132,13 @@ standalone="$vault_a/Features/_project/items/fix-x.md"
 item "$standalone" implement idle
 command=$(python3 "$launch" command --item "$standalone" --kind ci --model opus --repo "$tmp/project" --pr 42 --worktree "$tmp/project")
 printf '%s' "$command" | check 'x=json.load(sys.stdin); assert x["name"] == "project-fix-x-ci", x; assert x["argv"][x["argv"].index("-n") + 1] == "project-fix-x-ci", x'
+# An address-pr launch without --worktree lets the worker find or create the PR worktree.
+command=$(python3 "$launch" command --item "$standalone" --kind sync --model opus --repo "$tmp/project" --pr 42)
+printf '%s' "$command" | check 'x=json.load(sys.stdin); p=x["prompt"]; assert p.startswith("/workflow-kit:address-pr 42 --sync --worker\n"), p; assert "Worktree: found or created by address-pr\n" in p, p'
+command=$(python3 "$launch" command --item "$standalone" --kind comments --model opus --repo "$tmp/project" --pr 42 --worktree "$tmp/project")
+export tmp
+printf '%s' "$command" | check 'import os; x=json.load(sys.stdin); p=x["prompt"]; assert p.startswith("/workflow-kit:address-pr 42 --worktree " + os.path.realpath(os.environ["tmp"] + "/project") + " --worker\n"), p'
+if python3 "$launch" command --item "$standalone" --kind ci --model opus --repo "$tmp/project" 2>/dev/null; then echo "ci without --pr succeeded" >&2; exit 1; fi
 item "$vault_a/Features/alpha/items/dependent.md" implement queued '[]' '["project/fix-x"]'
 export standalone
 overlap=$(python3 "$launch" overlap --vault "$vault_a" --item "$vault_a/Features/alpha/items/dependent.md")

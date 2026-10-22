@@ -184,14 +184,19 @@ def command(args: argparse.Namespace) -> dict[str, Any]:
         vault = item_path.parent.parent.parent.parent
         invocation = ["/workflow-kit:implement-plan", absolute(plan, vault), "--worker"]
     else:
-        if not args.pr or not args.worktree:
-            raise UsageError(f"{args.kind} requires --pr and --worktree")
+        if not args.pr:
+            raise UsageError(f"{args.kind} requires --pr")
         invocation = ["/workflow-kit:address-pr", str(args.pr)]
         if args.kind == "ci":
             invocation.append("--ci")
         elif args.kind == "sync":
             invocation.append("--sync")
-        invocation.extend(("--worktree", str(worktree), "--worker"))
+        if args.worktree:
+            invocation.extend(("--worktree", str(worktree)))
+        else:
+            # address-pr Step 3 finds the PR worktree or creates it through /create-worktree.
+            worktree = "found or created by address-pr"
+        invocation.append("--worker")
     notify_arg = f" --notify-cmd {shlex.quote(str(Path(args.notify_cmd).expanduser().resolve()))}" if args.notify_cmd else ""
     prompt = " ".join(invocation) + "\n\n" + WORKER_PROTOCOL.format(
         item_path=item_path, repo_dir=repo, worktree_path=worktree, events_path=events,

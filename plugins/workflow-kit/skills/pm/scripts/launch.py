@@ -60,19 +60,25 @@ def plan_scope(path: Path) -> dict[str, list[str]]:
     modules: list[str] = []
     files: list[str] = []
     module: str | None = None
-    line_re = re.compile(r"^\s*-?\s*\*\*(Module|Files)\*\*:\s*(.*)$")
+    line_re = re.compile(r"^(\s*)[-*]\s+\*\*(Module|Files)\*\*:\s*(.*)$")
     tick_re = re.compile(r"`([^`]+)`")
-    for line in lines:
+    for index, line in enumerate(lines):
         match = line_re.match(line)
         if not match:
             continue
-        kind, text = match.groups()
+        indent, kind, text = match.groups()
         values = tick_re.findall(text)
         if kind == "Module":
             module = values[0] if values else None
             if module and module not in modules:
                 modules.append(module)
         else:
+            base_indent = len(indent.expandtabs(tabsize=8))
+            for continuation in lines[index + 1:]:
+                nested = re.match(r"^(\s*)[-*]\s+", continuation)
+                if not nested or len(nested.group(1).expandtabs(tabsize=8)) <= base_indent:
+                    break
+                values.extend(tick_re.findall(continuation))
             for value in values:
                 # Task file lists are relative to their Module (including `scripts/foo.py`).
                 resolved = str(Path(module) / value) if module and not Path(value).is_absolute() else value

@@ -6,26 +6,30 @@ independent phases in parallel and dependent phases in order.
 
 ## 5a.1 Build the execution schedule
 
-feature-plan encodes dependencies two ways — use both:
+Read dependencies from the phase headings. This is the primary source:
 
-- Phase headings: `### Phase 2 — Name (depends on Phase 1)`
-- A `## Task Dependency Graph` block:
+- `### Phase 2 — Name (depends on Phase 1, Phase 3)`
+
+Legacy plans may also carry a `## Task Dependency Graph` block. Read it as a fallback:
+
   ```
   Phase 1 (parallel): Task 1, Task 2
   Phase 2 (sequential, depends on Phase 1): Task 3
-  Phase 3 (parallel, depends on Phase 2): Task 4, Task 5
   ```
 
 Parse these into a phase → prerequisites map and compute **layers** (topological levels):
-a layer is the set of phases whose prerequisites are all already complete. Phases in the
-same layer have no dependency edge between them → **candidate parallel group**.
+a layer is the set of phases whose prerequisites are already implemented under Step 7's
+rule: the gate passed, all non-`[e2e]` criteria are ticked, and every task line without
+pending `[e2e]` criteria is ticked. Legacy task-line plans tick tasks directly on gate pass.
+Deferred `[e2e]` criteria do not block dependent phases. Phases in the same layer have no
+dependency edge between them → **candidate parallel group**.
 
 If the plan has no dependency notation at all, treat every phase as depending on the
 previous one (pure sequential) — safe default.
 
 **File-overlap demotion (mandatory safety check).** The dependency graph encodes
 *logical* deps, not *file* deps — two "independent" phases can still edit the same file.
-Before parallelizing a candidate group, read each phase's `**Files**:` metadata. If two
+Before parallelizing a candidate group, read each task's `**Files**:` bullets in every phase, including multi-line lists. If two
 phases in the group share any file, they CANNOT run concurrently: split the group so each
 parallel subset has pairwise-disjoint file sets, and run the leftover phases in a later
 sequential sub-step. If any phase in the group has **no `**Files**:` metadata at all**, you
@@ -84,6 +88,9 @@ Record the chosen model per phase for the final report, with the router `reason`
 everything the phase needs:
 
 - Plan file path + the **verbatim task list for this phase only**
+- **Shared context** from Step 1: `## Agent Notes` verbatim and the **Risk** bullets from
+  `## Decisions & risks` verbatim, or any equivalent context/risks section in a legacy plan.
+  Include it in every phase handoff and in retry/fix handoffs that reuse this payload.
 - **Worktree path** — depends on how the phase runs (see 5a.3):
   - *Sequential phase* → the integration worktree from Step 3; `cd` in and work there.
   - *Parallel phase* → its own **child worktree** that the orchestrator created off
@@ -185,7 +192,7 @@ identically to every executor — they are properties of the handoff, not the ha
 2. On return, review the summary including the agent's self-verify result.
 3. Delegate the authoritative gate-verify (Step 6) — independent, even if the agent
    self-reported pass.
-4. Gate pass → IMMEDIATELY check off the phase (Step 7), retain only the return facts that
+4. Gate pass → IMMEDIATELY record verified criteria and tasks (Step 7), retain only facts
    a direct dependent needs under 5a.2's compact carry-forward rule, and advance. Do not
    batch checkbox updates — write after each phase.
 
@@ -209,8 +216,8 @@ identically to every executor — they are properties of the handoff, not the ha
 4. Run ONE **integration gate-verify** (Step 6) on the merged state — not per-child; a
    child can pass alone yet break once merged.
 5. **Atomic advance:** only when the whole group is merged AND the integration gate-verify
-   passes — check off ALL phases in the group (Step 7), retain only each member's facts
-   needed by a direct dependent under 5a.2's compact carry-forward rule, then clean up
+   passes — record verified criteria and tasks for ALL phases (Step 7), retain only each
+   member's facts needed by a direct dependent under 5a.2's compact carry-forward rule, then clean up
    (5a.4) and advance to the next layer.
 6. Integration-verify fail → the failure belongs to the **group as a unit**, not any one
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working

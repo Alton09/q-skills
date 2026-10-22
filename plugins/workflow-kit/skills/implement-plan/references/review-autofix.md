@@ -1,7 +1,9 @@
 # Plan Review, E2E & Auto-fix (Step 8)
 
-Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented and checked
-off (Step 7). If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
+Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented under Step 7's
+rule: its gate passed, all non-`[e2e]` criteria and the task lines they complete are ticked.
+Deferred `[e2e]` criteria and the task lines they hold open may remain unticked.
+If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
 and state the reason in the report. Disable review with `RUN_REVIEW=false`; skip it when
 `REVIEW_SKILL` is absent. Disable E2E with `RUN_E2E=false`; skip it when `E2E_SKILL` is
 absent. E2E runs alone when review is skipped. Review runs alone when E2E is skipped.
@@ -138,7 +140,8 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim at-threshold review findings, the E2E failed names, and the `evidence` path. The
    fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include
-   the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
+   the shared context from `references/phase-execution.md` § "5a.2 Per-phase handoff payload".
+   Include the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
    and iterate while warm, bounded by `SELF_VERIFY_LIMIT`; commit on pass; report whether a
    commit was made and `unplanned_decisions`: a list of `{decision, why}` for each choice the
    plan text did not specify or that departs from it, or `none`.
@@ -164,3 +167,19 @@ Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the ca
 a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list
 open findings and failed names in the report. The report shows only the last E2E run on the
 code that ships. Never loop review/E2E↔fix unbounded.
+
+When the loop settles, use only the final E2E result on the code that ships. On `status: pass`,
+tick the deferred `[e2e]` criteria and the task lines they complete in the Step 7 plan-state
+copy. Follow Step 7's commit and which-copy rules.
+
+When E2E is skipped or returns `env-error`, delegate one independent post-loop gate for any
+remaining `[e2e]` criteria. Resolve its target like the Step 6 gate: honor `VERIFY_AGENT_MODEL`
+when pinned; otherwise call the router with `--role gateVerify --project-dir <run-root>` and
+use Step 6's fallback on `target: null`. Use Step 6's executor and device handoff rules.
+Pass the integration worktree path and every remaining `[e2e]` criterion verbatim with its
+phase. Name these criteria as checks the gate must perform. It writes no code and returns
+only `status: pass|fail` and `errors: none|<verbatim errors>`.
+
+On `status: pass`, tick all these criteria and the task lines they complete under Step 7's
+commit and which-copy rules. On fail, leave them unticked, list them in the report, and do
+not enter the fix loop.

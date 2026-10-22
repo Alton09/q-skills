@@ -45,6 +45,43 @@ printf '%s\n' '#### Task 4' '- **Module**: `plugins/workflow-kit/skills/pm/`' '-
 scope=$(python3 "$launch" plan-scope "$plan")
 printf '%s' "$scope" | check 'x=json.load(sys.stdin); assert "plugins/workflow-kit/skills/pm/scripts/launch.py" in x["files"], x'
 
+# New checklist tasks may list Files over nested bullets. Do and Done-when
+# commands also use backticks, so only the Files bullet's children are paths.
+cat >"$plan" <<'EOF'
+## Implementation Checklist
+### Phase 1 — Scope
+- [ ] **Task 1: Read files**
+  - **Module**: `plugins/workflow-kit/skills/pm/`
+  - **Files**:
+    * `scripts/launch.py`
+    * `scripts/launch.test.sh`
+  - **Do**:
+    - Run `python3 scripts/launch.py plan-scope`
+  - **Done when**:
+    - [ ] `bash scripts/launch.test.sh` passes.
+- [ ] **Task 2: Check scope**
+  - **Module**: `plugins/workflow-kit/skills/pm/`
+  - **Files**: `scripts/launch.test.sh`
+  - **Depends on**: Task 1
+  - **Do**:
+    - Check `plan-scope` output.
+  - **Done when**:
+    - [ ] Duplicate paths appear once.
+### Phase 2 — Template (depends on Phase 1)
+- [ ] **Task 3: Check template**
+  - **Module**: `plugins/workflow-kit/skills/feature-plan/`
+  - **Files**: `references/plan-template.md`
+  - **Do**:
+    - Read `references/plan-template.md`.
+  - **Done when**:
+    - [ ] Fields match the scope fixture.
+EOF
+scope=$(python3 "$launch" plan-scope "$plan")
+printf '%s' "$scope" | check 'x=json.load(sys.stdin); assert x["files"] == ["plugins/workflow-kit/skills/pm/scripts/launch.py", "plugins/workflow-kit/skills/pm/scripts/launch.test.sh", "plugins/workflow-kit/skills/feature-plan/references/plan-template.md"], x'
+{ printf '%s\n' '---' 'status: planned' '---'; cat "$plan"; } >"$tmp/plan-frontmatter.md"
+frontmatter_scope=$(python3 "$launch" plan-scope "$tmp/plan-frontmatter.md")
+[ "$frontmatter_scope" = "$scope" ]
+
 item "$vault_a/Features/alpha/items/implement.md" implement queued
 python3 "$script_dir/dossier.py" item set "$vault_a/Features/alpha/items/implement.md" "plan=$plan" >/dev/null
 command=$(python3 "$launch" command --item "$vault_a/Features/alpha/items/implement.md" --kind implement --model opus --repo "$tmp/project")

@@ -12,7 +12,7 @@ resume procedures.
 
 Enable the mirror only when the project manager runs inside herdr (`HERDR_ENV=1`) and `herdr` is on
 `PATH`. It is on by default when available; set `pm.herdr: false` in
-`.claude/workflow-kit.json` to disable it. Outside herdr, every mirror call is a silent no-op.
+`.claude/workflow-kit.json` (or the user file) to disable it. Outside herdr, every mirror call is a silent no-op.
 Control a herdr session only from inside herdr, because outside it there is no target pane
 or socket to act on.
 
@@ -60,7 +60,7 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
    `events.py notify`. On approval, continue with the selected target. When `quota` is
    `unavailable`, continue the launch, notify no event, and tell the user the warning: routing
    is fail-safe and does not stop a run. Take the model id after `claude:` from `target` for
-   `--model`. When `target` is `null` (invalid config, a failed script, or output that is not
+   `--model`. When `target` is `null` (a failed script or output that is not
    JSON), print its `warnings` or stderr once and use `--model opus`, the built-in orchestrator
    default; this is not a quota block, so notify no event.
 4. Before launching, write `status: running` and `workerKind`, clear `question`, and remove

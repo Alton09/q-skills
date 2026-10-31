@@ -104,9 +104,11 @@ missing worker for attach); mirror runtime failures return JSON `warning` with e
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.
 - `config [--project-dir D]` → `{maxWorkers, vault, herdr}`. `herdr` is a boolean from
-  `pm.herdr`, default `true`; a non-boolean falls back to `true` and adds
-  `warnings: ["pm.herdr must be a boolean; using true"]`, with exit 0. The `warnings`
-  key is absent when there is no warning.
+  `pm.herdr`, default `true`. A non-boolean `pm.herdr` (or any other invalid config value)
+  is an error: the message `config.py: <file>: pm.herdr: must be a boolean` goes to stderr
+  and the command exits 2, as for usage errors; `herdr.py` behaves the same. `warnings`
+  carries the config reader's warnings (unknown keys, the `lead` rename) and is absent
+  when there are none.
 - `list --vault V [--match NAME]` → `{features, project}`, plus `match` and `closest`
   when matching. Each feature has `name`, total `items`, and `stages` counts; `project` has
   `{items, stages}` for `_project/items/`, which is excluded from `features`. `match` echoes
@@ -137,9 +139,10 @@ missing worker for attach); mirror runtime failures return JSON `warning` with e
   return.
 - `checks [--project-dir D]` → `{allowRule, trusted, permissionMode, fixes}`.
 
-`resolve-vault` and `config` merge the `pm` object from user then project
-`.claude/workflow-kit.json`, so project keys override the same user keys. At each config
-file, a missing or non-object `pm` falls back to legacy `lead`. Keys are `pm.vault`,
+`resolve-vault` and `config` resolve through `../implement-plan/scripts/config.py`, which
+merges shipped defaults, then the user, then the project `.claude/workflow-kit.json`, so
+project keys override the same user keys. A file with a `lead` object and no `pm` object
+is still read as `pm`, with a rename warning. Keys are `pm.vault`,
 `pm.maxWorkers`, and `pm.herdr`. `checks` adds `rename "lead" to "pm" in <path>` to `fixes`
 when a file has `lead` and no `pm`. The vault convention is
 `~/Workspace/Obsidian/<lowercased repo directory name>-vault`. `sync` never force-pushes;

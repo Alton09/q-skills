@@ -117,10 +117,10 @@ done
 printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x == {"available":True,"reason":None}, x'
 
-# Invalid config warnings survive both availability outcomes.
+# A bad pm.herdr is a config error: exit 2 with the message on stderr, no JSON.
 printf '%s\n' '{"pm":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
-run available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert x["available"] and x["warnings"] == ["pm.herdr must be a boolean; using true"], x'
-env -u HERDR_ENV "$mirror" available --project-dir "$tmp/project" | check 'x=json.load(sys.stdin); assert not x["available"] and x["warnings"] == ["pm.herdr must be a boolean; using true"], x'
+rc=0; err=$(run available --project-dir "$tmp/project" 2>&1 >/dev/null) || rc=$?
+[ "$rc" -eq 2 ] && case "$err" in *"pm.herdr: must be a boolean"*) ;; *) false ;; esac || { echo "herdr bad config: rc=$rc err=$err" >&2; exit 1; }
 printf '%s\n' '{}' >"$tmp/project/.claude/workflow-kit.json"
 
 # First worker uses the root tab; reuse looks up its pane separately.

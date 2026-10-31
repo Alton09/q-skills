@@ -1,6 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "routing": {
     "review": ["claude:opus"]
+  },
+  "implementPlan": {
+    "review": {
+      "autofixSeverity": "low"
+    }
   }
 }

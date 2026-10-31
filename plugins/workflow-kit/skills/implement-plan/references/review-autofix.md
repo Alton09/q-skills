@@ -4,9 +4,9 @@ Referenced from `SKILL.md` Step 8. Runs ONLY after every phase is implemented un
 rule: its gate passed, all non-`[e2e]` criteria and the task lines they complete are ticked.
 Deferred `[e2e]` criteria and the task lines they hold open may remain unticked.
 If the plan hard-stopped or any phase is BLOCKED/HALTED, skip review and E2E
-and state the reason in the report. Disable review with `RUN_REVIEW=false`; skip it when
-`REVIEW_SKILL` is absent. Disable E2E with `RUN_E2E=false`; skip it when `E2E_SKILL` is
-absent. E2E runs alone when review is skipped. Review runs alone when E2E is skipped.
+and state the reason in the report. Disable review with `implementPlan.review.enabled: false`;
+skip it when the `skills.review` skill is absent. Disable E2E with
+`implementPlan.e2e.enabled: false`; skip it when the `skills.e2e` skill is absent. E2E runs alone when review is skipped. Review runs alone when E2E is skipped.
 
 This step mirrors Step 5's delegation discipline. The review sub-agent judges the diff.
 The E2E sub-agent runs device checks. One cheaper fix agent handles both result sets. The
@@ -15,18 +15,19 @@ raw diff or verbatim E2E failures.
 
 ## 8a. Fan out review and E2E
 
-Resolve `REVIEW_MODEL` and `E2E_MODEL` as `executor:model` (see SKILL.md Configuration).
-Unless `REVIEW_MODEL` or `REVIEW_EXECUTOR` is explicitly set (a pin), first call the router
-with `--role review --project-dir <run-root>` (the repo root the run started from), adding
-`--exclude-executor codex` when any phase or fix spawn record in this run used a `codex:*`
-target, per `references/routing.md` § "Calling the router". A router failure (non-zero exit,
-empty stdout, non-JSON) counts as `target: null` (§ "Fail-safe"). A
-non-null `target` is the review address; `target: null` resolves `REVIEW_MODEL` as before.
-The reviewer diversity rules in SKILL.md Configuration still apply to the routed target.
-E2E is not routed. When enabled, spawn ONE review sub-agent and ONE E2E sub-agent together on the same `HEAD`.
+Both targets always come from the router, per `references/routing.md` § "Calling the
+router", with `--project-dir <run-root>` (the repo root the run started from). Call
+`--role review`, adding `--exclude-executor codex` when any phase or fix spawn record in this
+run used a `codex:*` target, and `--role e2e`. Each `target` is an `executor:model` address.
+On `target: null` or a router failure (non-zero exit, empty stdout, non-JSON), use that role's
+first target from `config.py defaults` (§ "Fail-safe"). SKILL.md § "Reviewer diversity"
+applies to the routed review target and gates a codex reviewer: it never checks a `codex:*`
+implementer. If a routed codex reviewer still would, refuse it with the family-diversity
+error and do not spawn the review.
+When enabled, spawn ONE review sub-agent and ONE E2E sub-agent together on the same `HEAD`.
 Use the executor registry and background spawn contract for each. Both share the worktree
 and the Step 5 concurrent-worker limit. Give each its own runaway timer: the review uses its
-resolved tier budget; E2E uses `E2E_TIME_BUDGET` and `E2E_TOKEN_CEILING`. Record the spawn
+resolved tier budget; E2E uses `implementPlan.e2e.timeBudget` and `implementPlan.e2e.tokenCeiling`. Record the spawn
 time for E2E. Wait for both enabled workers before 8b, even when one finishes much earlier.
 
 Review payload:
@@ -36,7 +37,7 @@ Review payload:
   of the whole plan**: `git -C <integration> diff <base>...HEAD` — the local committed diff,
   not a PR. (This diff is non-empty precisely because phases commit; uncommitted work would be
   invisible here.)
-- Invoke the project's review skill (`REVIEW_SKILL`, default `/code-review`) on that diff. It
+- Invoke the project's review skill (`skills.review`, default `/code-review`) on that diff. It
   must be **non-interactive and read-only**. It must not build, test, or write files. Running
   headless, an interactive review skill like `/pr-review` would stall. A build or test also
   contends with E2E for the Gradle lock. If a consumer review skill builds, disable review
@@ -63,11 +64,11 @@ E2E payload:
   empty list still runs the normal suite.
 - The contract in `references/e2e.md`. The worker writes no code and returns only its
   required hand-back.
-- A codex E2E worker (`E2E_MODEL=codex:*`) gets the reserved-device steps from
-  `references/executors.md` § codex. Under `CODEX_DEVICE_MODE=off` it falls back to
-  `claude:sonnet`; say so on the report's E2E worker line.
+- A codex E2E worker (a `codex:*` `routing.e2e` target) gets the reserved-device steps from
+  `references/executors.md` § codex. Under `implementPlan.e2e.codexDeviceMode: "off"` it
+  falls back to `claude:sonnet`; say so on the report's E2E worker line.
 
-For a foreign E2E executor, name `E2E_SKILL` by the path that executor can read, as in
+For a foreign E2E executor, name the `skills.e2e` skill by the path that executor can read, as in
 5a.2 § 3. Alongside the five-field verdict, require a sibling proof-of-reading field: one
 verbatim line from that skill's first heading and the heading of the section it acted on. A
 missing quote is a failed hand-back.
@@ -84,12 +85,12 @@ The other worker's result still counts. Do not re-run the stopped worker automat
 that round. Wait for the other worker before continuing. A Step 8 runaway does not enter
 the Step 6 opus rescue; it is an open result for the user.
 
-**Foreign review executors (`pi`, `codex`).** A foreign reviewer cannot invoke `REVIEW_SKILL`
+**Foreign review executors (`pi`, `codex`).** A foreign reviewer cannot invoke the `skills.review` skill
 (no `Skill` tool). Give it a written review handoff instead: the diff command above, the
 project's architecture skill named by path (5a.2 § 3), the review scope (correctness,
 behavior changes, build/packaging, architecture-rule violations; no style), and the findings
 format above. Tell it not to modify files. Record in the report that the review ran from a
-handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
+handoff, not from `skills.review` — it is not a like-for-like substitute.
 
 - **`pi`** → the 5a.3 pi spawn contract with the review handoff.
 - **`codex`** → `codex exec`, **not** `codex exec review`. The native command cannot take
@@ -97,7 +98,7 @@ handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
   with '[PROMPT]'`) and reports zero token usage. Spawn:
   ```bash
   cd <integration> && { setsid timeout -k <grace> <budget-plus-5-min-secs> codex exec --json \
-    -m <model part of REVIEW_MODEL> -s read-only \
+    -m <model part of the review target> -s read-only \
     --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
     "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl \
     2> <scratch>/review.err & echo $! > <scratch>/review.pid; wait $!; }
@@ -111,7 +112,7 @@ handoff, not from `REVIEW_SKILL` — it is not a like-for-like substitute.
 
 ## 8b. Triage findings and failures
 
-Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and above):
+Split findings at `implementPlan.review.autofixSeverity` (default: high / correctness and above):
 
 - **At/above threshold** → auto-fix queue (8c).
 - **Below threshold** (nits, style, subjective, out-of-scope / pre-existing) → DO NOT
@@ -119,7 +120,7 @@ Split findings at `REVIEW_AUTOFIX_SEVERITY` (default: high / correctness and abo
   code — leave that call to the user. The orchestrator never edits code for any finding.
   If the user later wants a below-threshold finding fixed, a fresh session delegates it to a
   light-tier fix sub-agent resolved on the active executor under §8c's same two-tier verify
-  contract (warm self-verify bounded by `SELF_VERIFY_LIMIT`, then an independent gate-verify);
+  contract (warm self-verify bounded by `selfVerifyLimit`, then an independent gate-verify);
   it is never an orchestrator edit.
 
 Add failed E2E names to the auto-fix queue with the `evidence` path. Do not add flaky names,
@@ -133,16 +134,16 @@ not in parallel**. Bundle the whole combined queue into ONE fix pass per round:
 
 1. Classify complexity across its findings → light (mechanical) or standard (needs
    inference); use the max across the bundle. Resolve that tier exactly like a phase worker
-   (Step 5a.2), including its executor: unless the tier is pinned, route it with
+   (Step 5a.2), including its executor: route it with
    `--role phase --tier <tier> --project-dir <run-root>` (a fresh quota read per fix spawn),
-   adding `--exclude-executor codex` when the resolved reviewer is pinned to codex;
-   otherwise, or on `target: null`, use `PHASE_MODEL_LIGHT` or `PHASE_MODEL_STANDARD`.
+   adding `--exclude-executor codex` when every `routing.review` target is codex; on
+   `target: null` or a router failure, use that tier's first shipped target.
 2. Spawn ONE fix sub-agent (background; 5b guard) in the integration worktree. Payload: the
    verbatim at-threshold review findings, the E2E failed names, and the `evidence` path. The
    fix agent reads verbatim failures from `evidence`; the orchestrator never does. Include
    the shared context from `references/phase-execution.md` § "5a.2 Per-phase handoff payload".
    Include the **same two-tier verify and commit contract as Step 5** — after fixing, run `/verify`
-   and iterate while warm, bounded by `SELF_VERIFY_LIMIT`; commit on pass; report whether a
+   and iterate while warm, bounded by `selfVerifyLimit`; commit on pass; report whether a
    commit was made and `unplanned_decisions`: a list of `{decision, why}` for each choice the
    plan text did not specify or that departs from it, or `none`.
 3. On return, the orchestrator runs the authoritative gate-verify (Step 6) on the
@@ -163,7 +164,7 @@ review is still enabled and another round is needed; do not re-run E2E.
 If E2E alone remains failed and the fix pass commits nothing, stop: keep the last E2E result,
 list its open failed names in the report, and do not wait for another 8a or 8c.
 
-Cap the whole combined loop at `REVIEW_MAX_ROUNDS` (default 2). Stop when the cap is hit or
+Cap the whole combined loop at `implementPlan.review.maxRounds` (default 2). Stop when the cap is hit or
 a round has no at-threshold findings or E2E failures. At the cap, keep the branch and list
 open findings and failed names in the report. The report shows only the last E2E run on the
 code that ships. Never loop review/E2E↔fix unbounded.
@@ -173,9 +174,8 @@ tick the deferred `[e2e]` criteria and the task lines they complete in the Step 
 copy. Follow Step 7's commit and which-copy rules.
 
 When E2E is skipped or returns `env-error`, delegate one independent post-loop gate for any
-remaining `[e2e]` criteria. Resolve its target like the Step 6 gate: honor `VERIFY_AGENT_MODEL`
-when pinned; otherwise call the router with `--role gateVerify --project-dir <run-root>` and
-use Step 6's fallback on `target: null`. Use Step 6's executor and device handoff rules.
+remaining `[e2e]` criteria. Resolve its target like the Step 6 gate: call the router with
+`--role gateVerify --project-dir <run-root>` and use Step 6's fallback on `target: null`. Use Step 6's executor and device handoff rules.
 Pass the integration worktree path and every remaining `[e2e]` criterion verbatim with its
 phase. Name these criteria as checks the gate must perform. It writes no code and returns
 only `status: pass|fail` and `errors: none|<verbatim errors>`.

@@ -1,7 +1,7 @@
 # Escalation Pass & Hard Stop (Step 6)
 
 Referenced from `SKILL.md` Step 6. Runs after a phase (or parallel group) has failed its
-gate-verify on all `SELF_VERIFY_LIMIT` attempts.
+gate-verify on all `selfVerifyLimit` attempts.
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation
 loop, but with a stronger model and an extended budget. This is not a separate skill: it
@@ -23,7 +23,7 @@ below, read it as "the failed phase or group."
    ```markdown
    ### Phase <N> — <name>
 
-   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`SELF_VERIFY_LIMIT`). Escalation in progress.
+   > ⚠️ **BLOCKED**: `/verify` failed every gate attempt (`selfVerifyLimit`). Escalation in progress.
    > **Last error:** <one-line summary of the verify error>
    > **Worktree:** <worktree path>
    > **Phases:** <single phase, or all members of the group>
@@ -43,24 +43,24 @@ below, read it as "the failed phase or group."
      `claude:opus`; a failed `claude:*` worker stays on `claude:opus`. This executor switch
      is stronger than a same-harness model bump and is the default rescue address regardless
      of the phase's complexity classification.
-   - **Extended 5b budget** — `ESCALATION_TOKEN_CEILING` / `ESCALATION_TIME_BUDGET` instead
+   - **Extended 5b budget** — `implementPlan.escalation.tokenCeiling` / `implementPlan.escalation.timeBudget` instead
      of the per-phase defaults (these are the hardest cases; don't strangle the rescue).
    - **Richer payload** — beyond the normal phase handoff, include the full failure history
      from step 1 and an explicit instruction: *"diagnose the root cause from the prior
      attempts and errors BEFORE writing any fix; do not just re-run the same approach."*
      This is what makes the escalation more than a model bump.
-   - Bounded by `ESCALATION_ATTEMPTS` (default 2): each attempt is implement(+warm
+   - Bounded by `implementPlan.escalation.attempts` (default 2): each attempt is implement(+warm
      self-verify) → gate-verify, same as a phase. The runaway guard (5b, extended budget)
      applies to every escalation attempt. The rescue payload uses the phase return format,
      including `unplanned_decisions`.
 4. Outcome:
    - **Gate pass** within the attempt budget → clear the BLOCKED callout, check off the
      phase/group (Step 7), and continue to the next phase/layer.
-   - **Exhausted** (`ESCALATION_ATTEMPTS` gate failures) → replace the BLOCKED callout with
+   - **Exhausted** (`implementPlan.escalation.attempts` gate failures) → replace the BLOCKED callout with
      a HALTED callout, then fall through to user-wait below:
 
      ```markdown
-     > 🛑 **HALTED**: escalation exhausted `ESCALATION_ATTEMPTS` opus rescue attempts.
+     > 🛑 **HALTED**: escalation exhausted `implementPlan.escalation.attempts` opus rescue attempts.
      > **Last error:** <one-line summary>
      > **Worktree:** <worktree path>
      ```
@@ -76,7 +76,7 @@ below, read it as "the failed phase or group."
 1. Report what failed, including the escalation attempt history and last error.
 2. Call the notify skill with an error summary:
    ```
-   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (SELF_VERIFY_LIMIT) and escalation halted. Error: <summary>"
+   /notify-me "implement-plan hard stop: Phase <N> failed verification every gate attempt (selfVerifyLimit) and escalation halted. Error: <summary>"
    ```
 3. Without `--worker`, wait for user intervention — do NOT check off the phase or continue.
    With `--worker`, after notifying, end the turn with the `needs input` block from

@@ -5,9 +5,9 @@ notifications, and all decisions. An executor changes only a worker's harness. W
 targets use `executor:model`; an unprefixed model resolves to `claude:model`. Split on the
 first colon and use the matching entry below for every phase, retry, escalation, review, or
 fix spawn. Reject unknown executors or model ids before spawning, and name the executor and
-id in the error (for example, `unknown model 'x' for executor 'pi'`). For an unpinned role
-the `executor:model` address may come from the quota-aware router
-(`references/routing.md`); the entries below apply to it unchanged.
+id in the error (for example, `unknown model 'x' for executor 'pi'`). Every routed role's
+`executor:model` address comes from the quota-aware router (`references/routing.md`); the
+entries below apply to it unchanged.
 
 ## Executor entries
 
@@ -40,7 +40,7 @@ the `executor:model` address may come from the quota-aware router
   do not create an `.agents` symlink or edit `~/.pi/agent/settings.json`. Its cwd is the
   worktree; no session-root constraint applies because the orchestrator is not confined.
 - **Model address syntax:** `pi:<provider/id>`; pass the suffix as `--model <provider/id>`.
-  Phase tiers currently use
+  The pi example tier lists (`references/routing.md` § "Example lists") use
   `opencode-go/minimax-m3`, `opencode-go/glm-5.3`, and `opencode-go/qwen3.8-max`.
 - **Stop mechanism:** TERM the recorded process group: `kill -TERM -- -<pid>`. See
   `references/runaway-guard.md` § "Stop" for the measured rationale and tree-kill caveat.
@@ -71,7 +71,7 @@ the `executor:model` address may come from the quota-aware router
   `turn_context.payload.model` (`thread_id` comes from `thread.started`) and preserves token
   totals and plan windows. `setsid` alone is insufficient for stopping; the final answer is
   `-o` output or the last `item.completed` `agent_message`.
-- **Device path (`CODEX_DEVICE_MODE`):** Boot nothing inside the sandbox: `/dev/kvm` is hidden
+- **Device path (`implementPlan.e2e.codexDeviceMode`):** Boot nothing inside the sandbox: `/dev/kvm` is hidden
   there (MenuLens sessions `27cab714`, `09cbe7b9`), so emulator boot stays with the
   orchestrator. Measured 2026-10-02 (codex-cli 0.158.0, 2026-10-02 probe in q-skills
   implement-plan session `e67625dd`, recorded in the plan's Probe results; no MenuLens
@@ -86,7 +86,7 @@ the `executor:model` address may come from the quota-aware router
   the device path. Default mode `reserved-device`:
   1. Reserve only for a codex worker that actually carries device checks: a phase worker or
      gate given device checks (see `references/phase-execution.md` 5a.2), or the codex E2E
-     worker (`E2E_MODEL=codex:*`). Before spawning it, the orchestrator runs `adb start-server`
+     worker (a `codex:*` `routing.e2e` target). Before spawning it, the orchestrator runs `adb start-server`
      and reserves a device outside the sandbox. It uses the consumer project's reservation
      convention where one exists; otherwise it probes each candidate serial's lock file with
      non-blocking `flock -n`, takes the first one acquired, and holds it from a background
@@ -144,7 +144,7 @@ the `executor:model` address may come from the quota-aware router
     the block to the user and never work around it.
   - `off`: phase-execution.md 5a.2 routing applies unchanged (no reservation; a codex worker
     or gate cannot run device checks). A codex E2E worker cannot boot a device either.
-- **Model address syntax:** `codex:<model>`; pass the suffix as `-m <model>`. Phase tiers use `gpt-5.6-luna`,
+- **Model address syntax:** `codex:<model>`; pass the suffix as `-m <model>`. The codex example tier lists use `gpt-5.6-luna`,
   `gpt-5.6-terra`, and `gpt-5.6-sol` (all GPT family).
 - **Stop mechanism:** Walk descendants before killing, then TERM every discovered process
   group; `codex-linux-sandbox` creates sessions, so a launcher group kill leaves children.

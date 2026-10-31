@@ -3,7 +3,7 @@
 # a local quota-axi read. Deterministic, read-only: spawns nothing, writes no files.
 #
 # Usage:
-#   route-target.sh --role phase|gateVerify|review|prFix|orchestrator [--tier light|standard|deep]
+#   route-target.sh --role phase|gateVerify|review|prFix|orchestrator|prep|e2e [--tier light|standard|deep]
 #                   [--exclude-executor <claude|pi|codex>]...
 #                   [--project-dir <dir>] [--user-config <file>] [--quota-json <file>]
 #
@@ -18,7 +18,7 @@ QUOTA_PROVIDERS="claude codex cursor copilot grok kimi zai agy alibaba opencode-
 
 usage_error() {
   printf 'route-target.sh: %s\n' "$1" >&2
-  printf 'usage: route-target.sh --role phase|gateVerify|review|prFix|orchestrator [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
+  printf 'usage: route-target.sh --role phase|gateVerify|review|prFix|orchestrator|prep|e2e [--tier light|standard|deep] [--exclude-executor claude|pi|codex]... [--project-dir DIR] [--user-config FILE] [--quota-json FILE]\n' >&2
   exit 2
 }
 
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$role" in
-  phase|gateVerify|review|prFix|orchestrator) ;;
+  phase|gateVerify|review|prFix|orchestrator|prep|e2e) ;;
   "") usage_error "--role is required" ;;
   *) usage_error "invalid --role: $role" ;;
 esac
@@ -71,139 +71,59 @@ for verify_ex in ${excludes[@]+"${excludes[@]}"}; do
 done
 
 command -v jq >/dev/null 2>&1 || usage_error "jq is required"
+command -v python3 >/dev/null 2>&1 || usage_error "python3 is required"
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if [ "$project_dir_set" -eq 0 ]; then
   project_dir=$(git rev-parse --show-toplevel 2>/dev/null || true)
 fi
-if [ "$user_config_set" -eq 0 ]; then
-  user_config="${HOME:-}/.claude/workflow-kit.json"
-fi
-project_config=""
-[ -n "$project_dir" ] && project_config="$project_dir/.claude/workflow-kit.json"
+# Outside a git repo there is no project file: point config.py at a dir that has none.
+[ -n "$project_dir" ] || project_dir=/nonexistent-project-dir
+config_args=(--project-dir "$project_dir")
+[ "$user_config_set" -eq 1 ] && config_args+=(--user-config "$user_config")
 
 warnings='[]'
 warn() {
   warnings=$(jq -c --arg w "$1" '. + [$w]' <<<"$warnings")
 }
 
-# emit_null <source> <reason>: caller must use its shipped default.
-emit_null() {
-  jq -nc --arg source "$1" --arg reason "$2" --argjson warnings "$warnings" \
-    '{target:null, source:$source, quota:"ok", percent:null, reason:$reason, skipped:[], warnings:$warnings, usable:null, resetsAt:null}'
-  exit 0
-}
-
-# validate_config <file>: prints the first problem, or nothing when the file is valid.
-validate_config() {
-  jq -r '
-    def num_or_null: . == null or type == "number";
-    if type != "object" then "top level is not an object"
-    elif .version != 1 then "unsupported version (expected 1)"
-    elif (.routing // {}) | type != "object" then "routing is not an object"
-    elif ((.routing.phase // {}) | type) != "object" then "routing.phase is not an object"
-    else
-      (.routing // {}) as $r
-      | ($r.phase // {}) as $p
-      | ([["routing.phase.light", $p.light], ["routing.phase.standard", $p.standard],
-          ["routing.phase.deep", $p.deep], ["routing.gateVerify", $r.gateVerify],
-          ["routing.review", $r.review], ["routing.prFix", $r.prFix],
-          ["routing.orchestrator", $r.orchestrator]] | map(select(.[1] != null))) as $ls
-      | first(
-          ($ls[] | select((.[1] | type) != "array" or (.[1] | any(.[]; type != "string")))
-            | "\(.[0]) is not an array of strings"),
-          ($ls[] | .[0] as $n | .[1][]
-            | (if . == "" then "" else (split(":") | if length > 1 then .[0] else "claude" end) end) as $e
-            | select(($e | IN("claude", "pi", "codex")) | not)
-            | "\($n) names unknown executor \"\($e)\" in \"\(.)\""),
-          ($r.orchestrator // [] | select(type == "array")
-            | map(select(type == "string" and . != "" and (split(":") | length > 1 and .[0] != "claude")))
-            | select(length > 0) | "routing.orchestrator targets must be claude:*"),
-          (select((.minBudgetPercent | num_or_null) | not) | "minBudgetPercent is not a number"),
-          (select((.minBudgetPercentByRole // {}) | type != "object") | "minBudgetPercentByRole is not an object"),
-          ((.minBudgetPercentByRole // {}) | select(type == "object" and any(.[]; type != "number"))
-            | "minBudgetPercentByRole has a non-number value")
-        ) // ""
-    end' "$1" 2>/dev/null
-}
-
-# load_config <file> <label>: prints nothing; sets config_state to absent|ok|invalid.
-config_state=""
-load_config() {
-  config_state=absent
-  [ -n "$1" ] && [ -f "$1" ] || return 0
-  if ! jq -e . "$1" >/dev/null 2>&1; then
-    warn "$1: file does not parse as JSON"
-    config_state=invalid
-    return 0
-  fi
-  verify_problem=$(validate_config "$1")
-  if [ -n "$verify_problem" ]; then
-    warn "$1: $verify_problem"
-    config_state=invalid
-    return 0
-  fi
-  config_state=ok
-}
-
-load_config "$user_config"
-user_state=$config_state
-load_config "$project_config"
-project_state=$config_state
-
-if [ "$user_state" = invalid ] || [ "$project_state" = invalid ]; then
-  emit_null invalid "invalid routing config, using shipped default"
-fi
-# The orchestrator role is the one exception: its built-in list applies with no config.
-if [ "$role" != orchestrator ]; then
-  [ "$user_state" = absent ] && [ "$project_state" = absent ] && emit_null none "no routing config"
-fi
-
-# Resolve the list for this call (project replaces user at list level) and thresholds.
-list_filter='(.routing // {}) | if $role == "phase" then (.phase // {})[$tier] else .[$role] end'
-user_list=null
-project_list=null
-user_cfg='{}'
-project_cfg='{}'
-if [ "$user_state" = ok ]; then
-  user_cfg=$(jq -c . "$user_config")
-  user_list=$(jq -c --arg role "$role" --arg tier "$tier" "$list_filter" <<<"$user_cfg")
-fi
-if [ "$project_state" = ok ]; then
-  project_cfg=$(jq -c . "$project_config")
-  project_list=$(jq -c --arg role "$role" --arg tier "$tier" "$list_filter" <<<"$project_cfg")
-fi
-
-if [ "$project_list" != null ]; then
-  source=project
-  list=$project_list
-elif [ "$user_list" != null ]; then
-  source=user
-  list=$user_list
-elif [ "$role" = prFix ]; then
-  # No dedicated prFix list anywhere: fall back to phase.standard (project, then user).
-  std_filter='(.routing // {}) | (.phase // {}).standard'
-  project_std=$(jq -c "$std_filter" <<<"$project_cfg")
-  user_std=$(jq -c "$std_filter" <<<"$user_cfg")
-  if [ "$project_std" != null ]; then
-    source=project
-    list=$project_std
-  elif [ "$user_std" != null ]; then
-    source=user
-    list=$user_std
-  else
-    emit_null none "no routing list for $role"
-  fi
-  warn "no routing.prFix list; using routing.phase.standard"
-elif [ "$role" = orchestrator ]; then
-  source=default
-  list='["claude:opus"]'
+# One reader for validation and merging: config.py (shipped defaults < user < project).
+# Success prints nothing on stderr, so 2>&1 only ever carries an error message.
+if dump=$(python3 "$here/config.py" dump --with-sources "${config_args[@]}" 2>&1); then
+  warnings=$(jq -c '.warnings // []' <<<"$dump")
 else
-  emit_null none "no routing list for $role"
+  err_line=$(printf '%s\n' "$dump" | head -n 1)
+  err_line=${err_line#config.py: }
+  warn "invalid config: $err_line; using shipped defaults"
+  defaults=$(python3 "$here/config.py" defaults) || { echo "route-target.sh: config.py defaults failed" >&2; exit 1; }
+  dump=$(jq -nc --argjson c "$defaults" '{config: $c, sources: {}, warnings: []}')
 fi
 
-threshold=$(jq -nc --arg role "$role" --argjson u "$user_cfg" --argjson p "$project_cfg" '
-  (($u.minBudgetPercentByRole // {}) + ($p.minBudgetPercentByRole // {})) as $byRole
-  | $byRole[$role] // $p.minBudgetPercent // $u.minBudgetPercent // (if $role == "review" then 25 elif $role == "orchestrator" then 10 else 15 end)')
+# The list for this call and where it came from (project|user|default).
+if [ "$role" = phase ]; then
+  list_path="routing.phase.$tier"
+else
+  list_path="routing.$role"
+fi
+list=$(jq -c --arg p "$list_path" '.config | getpath($p | split(".")) // null' <<<"$dump")
+source=$(jq -r --arg p "$list_path" '.sources[$p] // "default"' <<<"$dump")
+if [ "$list" = null ] && [ "$role" = prFix ]; then
+  # No dedicated prFix list: fall back to the merged phase.standard.
+  list=$(jq -c '.config.routing.phase.standard' <<<"$dump")
+  source=$(jq -r '.sources["routing.phase.standard"] // "default"' <<<"$dump")
+  [ "$source" != default ] && warn "no routing.prFix list; using routing.phase.standard"
+fi
+[ "$list" = null ] && list='[]'
+
+# Threshold: a file-set byRole value, else a file-set minBudgetPercent, else the
+# shipped byRole default, else the shipped minBudgetPercent (built-ins live in config.py).
+threshold=$(jq -c --arg role "$role" '
+  .config as $c | .sources as $s
+  | $c.minBudgetPercentByRole[$role] as $r
+  | if $r != null and (($s["minBudgetPercentByRole." + $role] // "default") != "default") then $r
+    elif ($s.minBudgetPercent // "default") != "default" then $c.minBudgetPercent
+    else $r // $c.minBudgetPercent end' <<<"$dump")
 
 # Normalise targets (unprefixed means claude:<id>), drop excluded executors, map providers.
 excludes_json=$(printf '%s\n' ${excludes[@]+"${excludes[@]}"} | jq -Rnc '[inputs | select(. != "")]')

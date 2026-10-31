@@ -95,6 +95,18 @@ Refuse a PR that is not `OPEN`, and refuse a cross-repository (fork) PR; forks a
 scope for v1. If the cwd is not inside a clone of the PR's repository and no `--worktree`
 was supplied, refuse with a message naming `--worktree`.
 
+Then read the configuration. Resolve `<repo-root>` with `git rev-parse --show-toplevel`
+(from the `--worktree` path when supplied) and run:
+
+```bash
+<skill-dir>/../implement-plan/scripts/config.py legacy-check --project-dir <repo-root>
+<skill-dir>/../implement-plan/scripts/config.py dump --project-dir <repo-root>
+```
+
+Print the `legacy-check` warnings once, in the final report. If `config.py` exits non-zero,
+stop and show its `config.py: <file>: <key>: <problem>` error. Use `dump` for the scalar
+settings named under [Configuration](#configuration).
+
 ### Step 2: Lock
 
 Take the lock before touching any worktree, so two runs never race to create or change the
@@ -170,21 +182,20 @@ Follow exactly one mode reference:
 Run fix jobs one at a time in the PR worktree. Each worker may stage and commit its assigned
 changes, so serial execution prevents concurrent `git add` and `git commit` mutations.
 
-Before each spawn, unless `PR_FIX_MODEL` pins the role, call:
+Before each spawn, call:
 
 ```bash
 <skill-dir>/../implement-plan/scripts/route-target.sh --role prFix --project-dir <repo-root>
 ```
 
 Do not pass `--tier`: `prFix` has no tier. A `null` target resolves to `claude:sonnet`.
-`PR_FIX_MODEL` is an `executor:model` value that pins the fix-worker role and skips routing.
 Spawn through `../implement-plan/references/executors.md § "Executor entries"`, including
 the codex `.agents` setup. Apply `../implement-plan/references/runaway-guard.md` with
-`PR_FIX_TIME_BUDGET` as the budget in seconds (default `1800`) and the standard-tier token
+`addressPr.fixTimeBudget` (its `seconds` value) as the budget and the standard-tier token
 ceiling.
 
-The handoff tells every worker to apply only its listed fixes, run `VERIFY_SKILL` and iterate
-up to `SELF_VERIFY_LIMIT` times, commit with the project's commit convention, and end with:
+The handoff tells every worker to apply only its listed fixes, run `skills.verify` and iterate
+up to `selfVerifyLimit` times, commit with the project's commit convention, and end with:
 
 ```json
 {"jobs":[{"id","outcome":"fixed|failed","commit","note"}]}
@@ -199,9 +210,8 @@ for write-back.
 
 After all workers finish, if no job produced a commit and the mode made no merge commit,
 skip the gate and Step 7. Otherwise, run one gate verify of the worktree head. Delegate it
-with the target from `route-target.sh --role gateVerify --project-dir <repo-root>`, unless
-`VERIFY_AGENT_MODEL` pins the role. If it is red, spawn one `kind: verify` fix job carrying
-the failure output, then gate again. After `SELF_VERIFY_LIMIT` red gates, do not push:
+with the target from `route-target.sh --role gateVerify --project-dir <repo-root>`. If it is red, spawn one `kind: verify` fix job carrying
+the failure output, then gate again. After `selfVerifyLimit` red gates, do not push:
 report and ask.
 
 ### Step 7: Push
@@ -246,21 +256,24 @@ Whenever a step says "ask", do not guess: stop and get the user's decision befor
 
 ## Configuration
 
-Set these through the environment or project `CLAUDE.md`:
+Settings live in `workflow-kit.json`: the project's `.claude/workflow-kit.json` over the
+user's `~/.claude/workflow-kit.json` over the shipped defaults. Objects merge key by key;
+lists and scalars replace whole. Read them with `config.py` (Step 1).
 
-- `VERIFY_SKILL` — default `/verify`.
-- `SELF_VERIFY_LIMIT` — default `2`.
-- `PR_FIX_MODEL` — `executor:model` pin for fix workers; skips routing. The default is
-  `claude:sonnet` when routing returns `null`.
-- `VERIFY_AGENT_MODEL` — pins gate verify.
-- `PR_FIX_TIME_BUDGET` — fix-worker wall-clock budget in seconds; default `1800` (30 min),
-  as for `PHASE_TIME_BUDGET`.
-- `PR_BOT_ALLOWLIST` — default
-  `copilot-pull-request-reviewer,copilot-pull-request-reviewer[bot],coderabbitai,coderabbitai[bot]`.
-- `CI_FIX_MAX_ROUNDS` — default `2`.
-- `CI_WAIT_TIMEOUT` — default 30 min (`30m` in `timeout(1)` syntax).
-- `CI_REPRO_COMMAND` — optional local command mirroring CI for `--ci` checks whose logs gh
-  cannot fetch.
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `skills.verify` | `/verify` | Skill workers and the gate run to verify. |
+| `selfVerifyLimit` | `2` | Verify iterations per worker and red gates before asking. |
+| `routing.prFix` | none (falls back to `routing.phase.standard`) | Target list for fix workers. |
+| `routing.gateVerify` | `["claude:sonnet"]` | Target list for the gate verify. |
+| `addressPr.fixTimeBudget` | `30m` | Fix-worker wall-clock budget. |
+| `addressPr.botAllowlist` | copilot and coderabbit reviewer logins | Bot authors whose comments are eligible. |
+| `addressPr.ciFixMaxRounds` | `2` | Maximum CI fix rounds. |
+| `addressPr.ciWaitTimeout` | `30m` | Limit for waiting on `gh pr checks`. |
+| `addressPr.ciReproCommand` | `null` | Local command mirroring CI for checks whose logs gh cannot fetch. |
 
-For routing configuration files, precedence, router output, and fail-safe behavior, see
+`addressPr.ciReproCommand` runs a shell command taken from the project file. It runs with
+the same trust as CLAUDE.md, so review it as you would any project instruction.
+
+For routing, precedence, router output, and fail-safe behavior, see
 `../implement-plan/references/routing.md`.

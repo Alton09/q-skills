@@ -59,9 +59,9 @@ printf '%s\n' '{"pm":{"herdr":true}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .herdr true
 printf '%s\n' '{"pm":{"herdr":"false"}}' >"$tmp/project/.claude/workflow-kit.json"
-run config --project-dir "$tmp/project"
-expect .herdr true
-expect .warnings '["pm.herdr must be a boolean; using true"]'
+err=$(python3 "$script" config --project-dir "$tmp/project" 2>&1 >/dev/null) && fail "non-boolean pm.herdr must exit 2"
+[ "$(python3 "$script" config --project-dir "$tmp/project" >/dev/null 2>&1; echo $?)" -eq 2 ] || fail "non-boolean pm.herdr exit code"
+case "$err" in *"pm.herdr: must be a boolean"*) ;; *) fail "pm.herdr error missing: $err" ;; esac
 pass
 
 # 2. init is byte-idempotent and adds each union attribute exactly once.
@@ -235,11 +235,12 @@ expect '.fixes | length' 1
 printf '%s\n' '{"pm":{},"lead":{"maxWorkers":6}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .maxWorkers 3
-printf '%s\n' '{"pm":null,"lead":{"maxWorkers":6}}' >"$tmp/project/.claude/workflow-kit.json"
+printf '%s\n' '{"lead":{"maxWorkers":6}}' >"$tmp/project/.claude/workflow-kit.json"
 run config --project-dir "$tmp/project"
 expect .maxWorkers 6
+expect '.warnings | length' 2
 run checks --project-dir "$tmp/project"
-expect '.fixes | length' 1
+expect '.fixes | length' 2
 pass
 
 # 13. Both project names are reserved, with no partial initialization.

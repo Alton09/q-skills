@@ -8,6 +8,30 @@ workflow.
 
 ## Step 4: Merge the base
 
+### Stacked base
+
+When `baseRefName` is not the default branch, check whether its PR has merged:
+
+```bash
+gh pr list --head <baseRefName> --state merged --json number,mergedAt
+```
+
+If it has, the PR is the upper PR of a stack whose lower PR merged. Change its base to the
+default branch before anything deletes `<baseRefName>`, because deleting the base branch
+first makes GitHub close this PR:
+
+```bash
+gh api -X PATCH repos/{owner}/{repo}/pulls/<number> -f base=<default branch>
+```
+
+Use `gh api`, not `gh pr edit`, which fails on some repositories. Then use the default branch
+as `<baseRefName>` for the rest of this mode. After a squash merge, the PR branch still
+holds the lower PR's original commits, so it needs this merge even when GitHub reports the
+PR `MERGEABLE`. Merge the default branch in as below; never rebase or force-push to drop
+those commits.
+
+### Merge
+
 Resolve the PR's `baseRefName` and the current PR worktree before running this
 mode. Fetch the base ref, then compare it with the worktree head:
 

@@ -37,7 +37,7 @@ If one or more checks are pending, wait rather than guessing their result. Start
 background Bash command, not a foreground wait:
 
 ```bash
-timeout "${CI_WAIT_TIMEOUT:-30m}" gh pr checks <number> --watch --interval 30
+timeout <addressPr.ciWaitTimeout seconds> gh pr checks <number> --watch --interval 30
 ```
 
 When the background command exits, read `statusCheckRollup` again and continue with the
@@ -60,8 +60,8 @@ gh run view <run-id> --log-failed
 Use only the final 200 lines for each failed job as the evidence passed to triage or in a
 fix job payload; the scratchpad remains the complete record. A `CheckRun` with a
 non-Actions URL and every `StatusContext` are non-Actions failures: gh cannot retrieve
-their logs. In the PR worktree, reproduce one locally by running `CI_REPRO_COMMAND` when
-set, otherwise `VERIFY_SKILL`, and save its complete output to the scratchpad.
+their logs. In the PR worktree, reproduce one locally by running `addressPr.ciReproCommand` when
+set, otherwise `skills.verify`, and save its complete output to the scratchpad.
 
 - When the non-Actions check is red locally, triage its local output as `real`.
 - When it is green locally, ask the user why the remote check failed, including that
@@ -92,8 +92,8 @@ Classify failure evidence as exactly one of the following:
   and ask the user.
 - `real` is every actionable failure that is neither infra nor base-red. Create one `ci`
   fix job per failed job or check. Its payload includes the check name, the log excerpt or
-  local output, and an instruction to reproduce locally through `CI_REPRO_COMMAND`,
-  `VERIFY_SKILL`, or the failing command before changing code. Include only files the
+  local output, and an instruction to reproduce locally through `addressPr.ciReproCommand`,
+  `skills.verify`, or the failing command before changing code. Include only files the
   evidence identifies; use an empty `files` list when it identifies none.
 
 ## Rounds and Step 8: GitHub write-back
@@ -101,7 +101,7 @@ Classify failure evidence as exactly one of the following:
 Treat the initial fix attempt as round 1. Send its `real` jobs one at a time through the
 serial fix-worker flow in Steps 5 and 6. If the gate passes, Step 7 pushes the branch.
 After each push, wait for and re-read CI (Step 4a), then repeat Step 4b for another round
-as needed. Run at most `CI_FIX_MAX_ROUNDS` rounds (default `2`). If checks remain red after
+as needed. Run at most `addressPr.ciFixMaxRounds` rounds. If checks remain red after
 that limit, stop and ask; do not make another fix job or push.
 
 After each round that pushed a commit or reran a run, post exactly one PR comment for that

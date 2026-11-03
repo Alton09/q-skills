@@ -72,12 +72,11 @@ set -euo pipefail
 
 KNOWN_EXECUTORS="claude pi codex"
 
-PHASE_EXECUTOR="${1:-}"
+EXECUTOR="${1:-}"
 SCENARIO="${2:-baseline}"
 COMMAND="${3:-all}"
-export PHASE_EXECUTOR
 
-if [[ -z "$PHASE_EXECUTOR" || " $KNOWN_EXECUTORS " != *" $PHASE_EXECUTOR "* ]]; then
+if [[ -z "$EXECUTOR" || " $KNOWN_EXECUTORS " != *" $EXECUTOR "* ]]; then
   echo "usage: $0 <${KNOWN_EXECUTORS// /|}> [baseline|forced-failure|resume] [all|setup|run|collect]" >&2
   exit 2
 fi
@@ -91,7 +90,7 @@ esac
 REPO_ROOT="${REPO_ROOT:-$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)}"
 SKILL_SRC="$REPO_ROOT/plugins/workflow-kit/skills"
 VALIDATION_ROOT="${VALIDATION_ROOT:-${TMPDIR:-/tmp}/implement-plan-validation}"
-RUN_LABEL="${RUN_LABEL:-${PHASE_EXECUTOR}-${SCENARIO}}"
+RUN_LABEL="${RUN_LABEL:-${EXECUTOR}-${SCENARIO}}"
 RUN_DIR="${RUN_DIR:-$VALIDATION_ROOT/$RUN_LABEL}"
 # Absolute path for notifications so every worktree (including phase worktrees
 # nested under $RUN_DIR/.wt/) appends to the same file that collect() reads.
@@ -102,7 +101,7 @@ PROJECT_DIR="$RUN_DIR/$PROJECT_SUBDIR"
 # A resume run must not overwrite the artifacts of the run it is rescuing —
 # the halted run's report and cost data are the evidence for the handoff.
 if [[ "$SCENARIO" == "resume" ]]; then
-  ARTIFACT_DIR="$RUN_DIR/artifacts-resume-$PHASE_EXECUTOR"
+  ARTIFACT_DIR="$RUN_DIR/artifacts-resume-$EXECUTOR"
 else
   ARTIFACT_DIR="$RUN_DIR/artifacts"
 fi
@@ -449,6 +448,18 @@ configure_claude() {
   "permissions": { "defaultMode": "bypassPermissions" }
 }
 EOF
+  cat > "$PROJECT_DIR/.claude/workflow-kit.json" <<'EOF'
+{
+  "version": 2,
+  "routing": {
+    "phase": {
+      "light":    ["claude:haiku"],
+      "standard": ["claude:sonnet"],
+      "deep":     ["claude:opus"]
+    }
+  }
+}
+EOF
 }
 
 configure_pi() {
@@ -464,11 +475,37 @@ configure_pi() {
   # No extension install, no symlinks to ~/.agents/, no settings.json edits.
   mkdir -p "$PROJECT_DIR/.claude/skills"
   ln -snf "$SKILL_SRC/implement-plan" "$PROJECT_DIR/.claude/skills/implement-plan"
+  cat > "$PROJECT_DIR/.claude/workflow-kit.json" <<'EOF'
+{
+  "version": 2,
+  "routing": {
+    "phase": {
+      "light":    ["pi:opencode-go/minimax-m3"],
+      "standard": ["pi:opencode-go/glm-5.3"],
+      "deep":     ["pi:opencode-go/qwen3.8-max"]
+    },
+    "review": ["pi:opencode-go/grok-4.6"]
+  }
+}
+EOF
 }
 
 configure_codex() {
   # The orchestrator stays on Claude Code, so start from the claude setup.
   configure_claude
+  cat > "$PROJECT_DIR/.claude/workflow-kit.json" <<'EOF'
+{
+  "version": 2,
+  "routing": {
+    "phase": {
+      "light":    ["codex:gpt-5.6-luna"],
+      "standard": ["codex:gpt-5.6-terra"],
+      "deep":     ["codex:gpt-5.6-sol"]
+    },
+    "review": ["claude:opus"]
+  }
+}
+EOF
   if [[ -z "${DRY_RUN:-}" ]]; then
     if ! codex login status 2>&1 | grep -q 'Logged in'; then
       echo "configure_codex: codex login status does not report a login — run 'codex login'" >&2
@@ -572,12 +609,13 @@ run_pi() {
 # ===========================================================================
 # Run — codex executor
 # Unlike run_pi, this does NOT hand the whole run to the foreign harness: a
-# claude -p orchestrator runs with PHASE_EXECUTOR=codex exported (set at the
-# top of this script), and shells out to codex for phase workers only.
+# claude -p orchestrator reads codex phase lists from the scratch project's
+# .claude/workflow-kit.json (written by configure_codex), and shells out to
+# codex for phase workers only.
 # ===========================================================================
 
 run_codex() {
-  log "claude -p orchestrator with PHASE_EXECUTOR=$PHASE_EXECUTOR"
+  log "claude -p orchestrator with codex routing.phase lists"
   run_claude
 }
 
@@ -706,7 +744,7 @@ collect() {
   local out="$ARTIFACT_DIR/collected.txt"
   {
     echo "=== run ==============================================================="
-    echo "executor:  $PHASE_EXECUTOR"
+    echo "executor:  $EXECUTOR"
     echo "scenario:  $SCENARIO"
     echo "run dir:   $RUN_DIR"
     echo "skill src: $SKILL_SRC/implement-plan"
@@ -743,11 +781,11 @@ collect() {
     cat "$RUN_DIR/notifications.log" 2>/dev/null || echo "(none)"
     echo
     echo "=== cost =============================================================="
-    "cost_${PHASE_EXECUTOR}"
+    "cost_${EXECUTOR}"
   } | tee "$out"
   log "collected -> $out"
   # Token ceiling check runs outside the tee block so a failure actually exits.
-  if [[ "$PHASE_EXECUTOR" == "pi" && -z "${DRY_RUN:-}" ]]; then
+  if [[ "$EXECUTOR" == "pi" && -z "${DRY_RUN:-}" ]]; then
     check_pi_tokens
   fi
 }
@@ -772,14 +810,14 @@ do_setup() {
     mkdir -p "$RUN_DIR"
     scaffold_project
   fi
-  "configure_${PHASE_EXECUTOR}"
-  log "configured for $PHASE_EXECUTOR"
+  "configure_${EXECUTOR}"
+  log "configured for $EXECUTOR"
 }
 
 do_run() {
   local t0 t1
   t0=$(date -u +%s)
-  "run_${PHASE_EXECUTOR}"
+  "run_${EXECUTOR}"
   t1=$(date -u +%s)
   echo "$((t1 - t0))" > "$ARTIFACT_DIR/wall-seconds"
   log "run finished in $((t1 - t0))s"

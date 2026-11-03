@@ -133,11 +133,14 @@ run() {
   [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] || fail "expected exactly one output line"
 }
 
-# 1. No config files -> target null, source none.
+# 1. No config files -> shipped default target, source default.
 n=1
 out=$("$script" --role phase --tier standard --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
-expect .target null
-expect .source '"none"'
+expect .target '"claude:sonnet"'
+expect .source '"default"'
+out=$("$script" --role phase --tier light --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"claude:haiku"'
+expect .source '"default"'
 pass
 
 # 2. First target has budget -> it wins; reason is "<provider> <p>%".
@@ -249,16 +252,17 @@ expect .target '"codex:gpt-5.6-terra"'
 expect .source '"user"'
 pass
 
-# 12. Invalid JSON, version 2, unknown executor -> source invalid, target null.
+# 12. Invalid JSON, unsupported version, unknown executor -> shipped default, source default, warning.
 n=12
 printf '{ not json' >"$tmp/bad-parse.json"
-printf '{"version": 2, "routing": {}}' >"$tmp/bad-version.json"
+printf '{"version": 3, "routing": {}}' >"$tmp/bad-version.json"
 printf '{"version": 1, "routing": {"review": ["foo:bar"]}}' >"$tmp/bad-executor.json"
 for bad in bad-parse bad-version bad-executor; do
   out=$("$script" --role review --user-config "$tmp/$bad.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
-  expect .source '"invalid"'
-  expect .target null
+  expect .source '"default"'
+  expect .target '"claude:opus"'
   expect '.warnings | length' 1
+  expect_true '.warnings[0] | startswith("invalid config: ") and endswith("; using shipped defaults")'
   expect_true ".warnings[0] | contains(\"$bad.json\")"
 done
 pass
@@ -291,11 +295,14 @@ cat "$tmp/quota.json"
 STUB
 chmod +x "$stub_dir/quota-axi"
 
-# 15. No config and no --quota-json -> target null, quota-axi never invoked.
+# 15. No config and no --quota-json -> shipped default target, quota-axi consulted once.
 n=15
 out=$(PATH="$stub_dir:$PATH" "$script" --role phase --tier standard --user-config "$tmp/missing.json" --project-dir "$tmp/empty")
-expect .target null
-[ ! -e "$tmp/quota-axi.calls" ] || fail "quota-axi was called with no config"
+expect .target '"claude:sonnet"'
+expect .source '"default"'
+[ "$(wc -l <"$tmp/quota-axi.calls")" -eq 1 ] || fail "expected one quota-axi call"
+grep -q -- '--provider claude$' "$tmp/quota-axi.calls" || fail "wrong --provider list: $(cat "$tmp/quota-axi.calls")"
+rm -f "$tmp/quota-axi.calls"
 pass
 
 # 16. With config and no --quota-json -> exactly one call, with --no-credential-refresh.
@@ -370,13 +377,13 @@ verify_rc=$?
 [ -s "$tmp/e22" ] || fail "expected a message on stderr"
 pass
 
-# 23. routing.prFix set to a string -> source invalid.
+# 23. routing.prFix set to a string -> shipped default (phase.standard), source default.
 n=23
 printf '{"version": 1, "routing": {"prFix": "claude:sonnet"}}' >"$tmp/bad-prfix.json"
 out=$("$script" --role prFix --user-config "$tmp/bad-prfix.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
-expect .source '"invalid"'
-expect .target null
-expect_true '.warnings[0] | contains("routing.prFix is not an array of strings")'
+expect .source '"default"'
+expect .target '"claude:sonnet"'
+expect_true '.warnings[0] | startswith("invalid config: ") and contains("routing.prFix")'
 pass
 
 # 24. minBudgetPercentByRole.prFix is applied: codex at 20% skipped with threshold 30.
@@ -390,13 +397,14 @@ expect .target '"claude:sonnet"'
 expect .skipped '[{"target":"codex:gpt-5.6-terra","why":"codex 20% < 30%"}]'
 pass
 
-# 25. No config at all -> prFix gives target null, source none, exit 0.
+# 25. No config at all -> prFix uses shipped phase.standard, source default, no fallback warning.
 n=25
-out=$("$script" --role prFix --user-config "$tmp/missing.json" --project-dir "$tmp/empty")
+out=$("$script" --role prFix --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
 verify_rc=$?
 [ "$verify_rc" -eq 0 ] || fail "exit $verify_rc"
-expect .target null
-expect .source '"none"'
+expect .target '"claude:sonnet"'
+expect .source '"default"'
+expect .warnings '[]'
 pass
 
 # --- orchestrator role -----------------------------------------------------------------
@@ -455,16 +463,15 @@ expect .target '"claude:opus"'
 expect .source '"default"'
 pass
 
-# 31. Non-claude orchestrator target -> invalid config.
+# 31. Non-claude orchestrator target -> invalid config, shipped default.
 n=31
 cat >"$tmp/orch-bad.json" <<'JSON'
 {"version": 1, "routing": {"orchestrator": ["claude:opus", "codex:gpt-5.6-sol"]}}
 JSON
 out=$("$script" --role orchestrator --user-config "$tmp/orch-bad.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
-expect .source '"invalid"'
-expect .target null
-expect .usable null
-expect_true '.warnings[0] | contains("routing.orchestrator targets must be claude:*")'
+expect .source '"default"'
+expect .target '"claude:opus"'
+expect_true '.warnings[0] | startswith("invalid config: ") and contains("routing.orchestrator")'
 pass
 
 # 32. Threshold order: byRole, then minBudgetPercent, then built-in 10.
@@ -493,18 +500,77 @@ expect .resetsAt null
 pass
 
 # 34. Other roles gain usable/resetsAt: usable true with the limiting window's reset;
-# fallback target gives usable false; target null gives null.
+# fallback target gives usable false; no targets after exclusions gives null.
 n=34
 run --role phase --tier standard --quota-json "$tmp/quota.json"
 expect .usable true
 expect .resetsAt '"2026-10-07T10:03:45.000Z"'
 run --role phase --tier standard --quota-json "$tmp/alllow.json"
 expect .usable false
-out=$("$script" --role phase --tier standard --user-config "$tmp/missing.json" --project-dir "$tmp/empty")
+out=$("$script" --role phase --tier standard --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --exclude-executor claude)
+expect .target null
+expect .reason '"no targets after exclusions"'
 expect .usable null
 expect .resetsAt null
 run --role review --quota-json "$tmp/quota.json"
 expect .target '"pi:opencode-go/grok-4.6"'
 expect .usable true
 expect .resetsAt null
+pass
+
+# 35. prep and e2e roles: shipped claude:sonnet; --tier rejected.
+n=35
+for r in prep e2e; do
+  out=$("$script" --role "$r" --user-config "$tmp/missing.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+  expect .target '"claude:sonnet"'
+  expect .source '"default"'
+  expect .usable true
+done
+"$script" --role prep --tier light --user-config "$tmp/missing.json" --project-dir "$tmp/empty" >/dev/null 2>&1
+[ $? -eq 2 ] || fail "--tier with --role prep should exit 2"
+printf '{"version": 2, "routing": {"e2e": ["codex:gpt-5.6-luna"]}}' >"$tmp/e2e.json"
+out=$("$script" --role e2e --user-config "$tmp/e2e.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"codex:gpt-5.6-luna"'
+expect .source '"user"'
+pass
+
+# 36. One-target list below budget -> still that target, quota check ran, usable false.
+n=36
+printf '{"version": 2, "routing": {"phase": {"standard": ["codex:gpt-5.6-terra"]}}}' >"$tmp/one.json"
+out=$("$script" --role phase --tier standard --user-config "$tmp/one.json" --project-dir "$tmp/empty" --quota-json "$tmp/codex9.json")
+expect .target '"codex:gpt-5.6-terra"'
+expect .usable false
+expect .percent 9
+expect '.warnings | index("all targets below budget; using last target codex:gpt-5.6-terra") != null' true
+pass
+
+# 37. A version 2 file is accepted without warnings.
+n=37
+printf '{"version": 2, "routing": {"phase": {"deep": ["claude:sonnet"]}}}' >"$tmp/v2.json"
+out=$("$script" --role phase --tier deep --user-config "$tmp/v2.json" --project-dir "$tmp/empty" --quota-json "$tmp/quota.json")
+expect .target '"claude:sonnet"'
+expect .source '"user"'
+expect .warnings '[]'
+pass
+
+# 38. Threshold precedence survives the merged defaults: a file-set minBudgetPercent
+# beats the shipped byRole defaults; a file-set byRole beats minBudgetPercent.
+n=38
+quota_variant claude20 claude 20
+printf '{"version": 2, "minBudgetPercent": 30}' >"$tmp/thr-gen.json"
+out=$("$script" --role orchestrator --user-config "$tmp/thr-gen.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude20.json")
+expect .usable false
+expect '.reason' '"claude 20% < 30%"'
+printf '{"version": 2, "minBudgetPercent": 5}' >"$tmp/thr-low.json"
+out=$("$script" --role review --user-config "$tmp/thr-low.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude20.json")
+expect .usable true
+printf '{"version": 2, "minBudgetPercent": 5, "minBudgetPercentByRole": {"review": 40}}' >"$tmp/thr-both.json"
+out=$("$script" --role review --user-config "$tmp/thr-both.json" --project-dir "$tmp/empty" --quota-json "$tmp/claude20.json")
+expect .usable false
+# user byRole beats a project minBudgetPercent (merged byRole is file-set)
+printf '{"version": 2, "minBudgetPercentByRole": {"review": 40}}' >"$tmp/thr-user.json"
+printf '{"version": 2, "minBudgetPercent": 5}' >"$tmp/proj/.claude/workflow-kit.json"
+out=$("$script" --role review --user-config "$tmp/thr-user.json" --project-dir "$tmp/proj" --quota-json "$tmp/claude20.json")
+expect .usable false
+rm "$tmp/proj/.claude/workflow-kit.json"
 pass

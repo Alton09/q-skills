@@ -62,7 +62,7 @@ the first run and there is no cutoff.
 
 An author is a **bot** when GraphQL `author.__typename` is `Bot`. GraphQL returns a bot's
 login without the `[bot]` suffix, so the login alone cannot identify one. An author is
-**eligible** when it is not a bot, or when its `author.login` is in `PR_BOT_ALLOWLIST`.
+**eligible** when it is not a bot, or when its `author.login` is in `addressPr.botAllowlist`.
 
 A review thread needs action only when all of the following are true:
 

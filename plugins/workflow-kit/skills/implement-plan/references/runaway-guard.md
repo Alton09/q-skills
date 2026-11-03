@@ -14,9 +14,12 @@ timeout while running, and the token total on completion.
 > synchronous return values. The notification is also where the token total + duration
 > arrive (the metric the ceiling check uses).
 
-**Wall-clock budget (while running).** Set a per-phase time budget (`PHASE_TIME_BUDGET`,
-default 30 min; scale up for deep phases, use `ESCALATION_TIME_BUDGET` for escalation
-attempts, and use `E2E_TIME_BUDGET` for E2E). Alongside every Claude or codex spawn, start a timer with
+**Wall-clock budget (while running).** Set a per-phase time budget (`implementPlan.phase.timeBudget`,
+default `30m`; scale up for deep phases, use `implementPlan.escalation.timeBudget` for escalation
+attempts, and use `implementPlan.e2e.timeBudget` for E2E). Each is a duration key: every
+`<budget seconds>` and `<budget-secs>` below is its `seconds`, the value
+`config.py get <key> --project-dir <run-root>` returns beside the duration string (`30m` is
+1800). Read it with the Step 0 settings, not per spawn. Alongside every Claude or codex spawn, start a timer with
 `Bash(run_in_background: true)` running `sleep <budget seconds>`. In the spawn record, bind
 the timer task id to the exact worker it guards: the Agent task id for Claude or the pidfile
 for codex. Its completion notification re-invokes the orchestrator even if the worker hangs
@@ -35,15 +38,15 @@ not partial work—report what the orchestrator last knew, not a recovered trans
 
 **Token ceiling (on completion).** When the sub-agent returns, compare its budget figure
 against the resolved light/standard/deep tier ceiling in Configuration
-(`PHASE_TOKEN_CEILING`, `CODEX_PHASE_TOKEN_CEILING`, `ESCALATION_TOKEN_CEILING` for escalation attempts, or
-`E2E_TOKEN_CEILING` for E2E): Claude uses
+(`implementPlan.phase.tokenCeiling.<tier>`, `implementPlan.phase.codexTokenCeiling.<tier>`, `implementPlan.escalation.tokenCeiling` for escalation attempts, or
+`implementPlan.e2e.tokenCeiling` for E2E): Claude uses
 the completion-notification total, while pi and codex use `new` tokens below. The phase
 agent's total now includes its warm self-verify loop, so the ceilings already budget for
 impl + verify — don't double-count. If it overran, do NOT silently accept the result — page
 the user before the gate-verify so an overrun phase gets a human look (the output may still
 be fine, but the cost signal is worth a glance, and it lets you tune the ceiling).
 
-Codex has higher default ceilings (`CODEX_PHASE_TOKEN_CEILING`) than Claude and pi because its `new` total includes the
+Codex has higher default ceilings (`implementPlan.phase.codexTokenCeiling`) than Claude and pi because its `new` total includes the
 verify output (e.g. full Gradle logs) the worker reads: MenuLens retro sessions `1bdbb8d2`
 (186k, light), `27cab714` (213k and 164k, standard) and `09cbe7b9` (122k light, 200k
 standard) all tripped the shared Claude/pi tier ceilings on otherwise normal phases.
@@ -58,18 +61,18 @@ For all other workers:
 
 1. **Do NOT** check off the phase or advance to the next phase. Do not run the gate-verify
    unless a completed worker hit the token ceiling and the user selects skip to gate-verify.
-2. Page the user via the configured notify skill (`NOTIFY_SKILL`, default `/notify-me`):
+2. Page the user via the configured notify skill (`skills.notify`, default `/notify-me`):
    - Without `--worker`:
      ```
-     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
+     <skills.notify> "implement-plan paused: Phase <N> hit <wall-clock timeout | token ceiling NNNk>. Awaiting your call: resume, re-scope, switch model, or take over."
      ```
    - With `--worker`, use the matching worker options. For a wall-clock timeout:
      ```
-     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit wall-clock timeout. Awaiting your call: continue the stopped phase or stop the run."
+     <skills.notify> "implement-plan paused: Phase <N> hit wall-clock timeout. Awaiting your call: continue the stopped phase or stop the run."
      ```
      For a token ceiling on a completed worker:
      ```
-     <NOTIFY_SKILL> "implement-plan paused: Phase <N> hit token ceiling NNNk. Awaiting your call: continue the stopped phase, skip to gate-verify, or stop the run."
+     <skills.notify> "implement-plan paused: Phase <N> hit token ceiling NNNk. Awaiting your call: continue the stopped phase, skip to gate-verify, or stop the run."
      ```
 3. Without `--worker`, wait for the user's decision before doing anything else with this
    phase. With `--worker`, after notifying, end the turn with the `needs input` block from

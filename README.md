@@ -147,38 +147,63 @@ claude plugin install dev-toolkit
 `implement-plan` always orchestrates from Claude Code; an executor changes only the
 harness used for an individual phase, retry, review, or fix worker. Keeping scheduling,
 worktrees, pacing, gate verification, notifications, and decisions in Claude Code avoids
-the foreign-orchestrator failures observed in F1–F5 while still allowing worker choice.
+the foreign-orchestrator failures observed in F1-F5 while still allowing worker choice.
 
-The default is Claude workers. Select the shipped pi worker tiers for one run with:
+The default is Claude workers. You choose executors with `routing.phase` lists in
+`.claude/workflow-kit.json`: each tier (`light`, `standard`, `deep`) takes an ordered list of
+`executor:model` targets, where the executor is `claude`, `pi`, or `codex`. The shipped
+defaults are:
 
-```bash
-PHASE_EXECUTOR=pi
-```
-
-`PHASE_EXECUTOR` accepts `claude` (the default), `pi`, or `codex`, and sets all phase-tier
-defaults for that executor. `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, and
-`PHASE_MODEL_DEEP` can instead select each tier independently with an `executor:model`
-address; an unprefixed model means `claude:<model>`. The shipped tier defaults are:
-
-| `PHASE_EXECUTOR` | Light | Standard | Deep |
+| Executor | Light | Standard | Deep |
 |---|---|---|---|
 | `claude` (default) | `claude:haiku` | `claude:sonnet` | `claude:opus` |
-| `pi` | `pi:opencode-go/minimax-m3` | `pi:opencode-go/glm-5.3` | `pi:opencode-go/qwen3.8-max` |
-| `codex` | `codex:gpt-5.6-luna` | `codex:gpt-5.6-terra` | `codex:gpt-5.6-sol` |
 
-An explicit `PHASE_MODEL_*` setting overrides the shorthand for that tier. The
-per-worker wall-clock budget, `PHASE_TIME_BUDGET`, defaults to 30 minutes.
+To run pi workers with a Grok reviewer, put this in `<repo>/.claude/workflow-kit.json`:
+
+```json
+{
+  "version": 2,
+  "routing": {
+    "phase": {
+      "light":    ["pi:opencode-go/minimax-m3"],
+      "standard": ["pi:opencode-go/glm-5.3"],
+      "deep":     ["pi:opencode-go/qwen3.8-max"]
+    },
+    "review": ["pi:opencode-go/grok-4.6"]
+  }
+}
+```
+
+For codex workers, keep the Claude reviewer (a Codex reviewer cannot review a Codex
+implementer):
+
+```json
+{
+  "version": 2,
+  "routing": {
+    "phase": {
+      "light":    ["codex:gpt-5.6-luna"],
+      "standard": ["codex:gpt-5.6-terra"],
+      "deep":     ["codex:gpt-5.6-sol"]
+    }
+  }
+}
+```
+
+The per-worker wall-clock budget is `implementPlan.phase.timeBudget` (default 30 minutes).
+Every other setting (verify skill, self-verify limit, review, E2E, PR creation, address-pr
+and pm options) lives in the same file; the key tables in the `implement-plan` and
+`address-pr` SKILL.md files list them all.
 
 For pi, install the `pi` CLI and authenticate its `opencode-go` provider. For Codex,
 install the Codex CLI and sign in with a ChatGPT plan. The orchestrator creates the
 per-worktree `.agents/skills` link Codex needs; no manual skill-link setup is required.
 
-`VERIFY_AGENT_MODEL` defaults to `claude:sonnet` (use `claude:haiku` only for a
-deterministic exit-code gate). `REVIEW_EXECUTOR` normally follows `PHASE_EXECUTOR`, except
-Codex phases default their review to Claude; `REVIEW_MODEL` defaults to `claude:opus`,
-`pi:opencode-go/grok-4.6`, or `codex:gpt-5.6-sol` for the selected review executor.
-Reviewers should differ from each implementer by executor or model family whenever the
-configured pool permits it, and a Codex reviewer cannot review a Codex implementer.
+The gate-verify role defaults to `claude:sonnet` (use `claude:haiku` only for a
+deterministic exit-code gate) and is set with `routing.gateVerify`. The reviewer is
+`routing.review`, which defaults to `claude:opus`. Reviewers should differ from each
+implementer by executor or model family whenever the configured pool permits it, and a
+Codex reviewer cannot review a Codex implementer.
 
 Foreign workers may not cover device work during their warm self-verify: Codex workers
 skip that half, while pi workers may or may not run it. The independent gate covers device
@@ -190,13 +215,14 @@ ChatGPT Plus has both five-hour and weekly windows.
 
 ### Quota-aware routing
 
-Instead of picking targets by hand before each run, write an ordered fallback list per
-role once. Before every phase, fix, gate-verify, and review spawn, `implement-plan` reads
-local quota and uses the first target in the role's list that still has budget:
+Every role takes an ordered fallback list, and nothing is pinned outside the file. Before
+every phase, fix, gate-verify, and review spawn, `implement-plan` reads local quota and
+uses the first target in the role's list that still has budget. A one-target list is a pin
+that still reports its quota:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "minBudgetPercent": 15,
   "minBudgetPercentByRole": { "review": 25 },
   "routing": {
@@ -214,22 +240,31 @@ local quota and uses the first target in the role's list that still has budget:
 ```
 
 Put it at `~/.claude/workflow-kit.json` (your default) or `<repo>/.claude/workflow-kit.json`
-(per project, replacing whole lists). Precedence, highest first: explicit `PHASE_MODEL_*`,
-`PHASE_EXECUTOR`, `VERIFY_AGENT_MODEL`, `REVIEW_MODEL`, or `REVIEW_EXECUTOR` settings pin a
-role with no quota check, then the project file, then the user file, then the shipped
-defaults; with no file, nothing changes. Routing needs `quota-axi` and `jq` on `PATH`; without
+(per project). Precedence, highest first, per key: the project file, then the user file,
+then the shipped defaults in `config.py`. Objects merge key by key; lists and scalars
+replace whole. Routing needs `quota-axi`, `jq`, and `python3` on `PATH`; without
 `quota-axi` it falls back safely to the first target in each list. Escalation stays on
-`claude:opus`. The run report shows why each target was chosen. Full rules:
-`plugins/workflow-kit/skills/implement-plan/references/routing.md`.
+`claude:opus`. The run report shows why each target was chosen. Full rules, including more
+example lists: `plugins/workflow-kit/skills/implement-plan/references/routing.md`.
 
 The address-pr fix workers use `routing.prFix`, falling back to `routing.phase.standard` when no
 `prFix` list is configured.
 
 `routing.orchestrator` is the pm launch gate. It accepts only `claude:*` targets and
 defaults to `claude:opus`; its threshold is `minBudgetPercentByRole.orchestrator`, then
-`minBudgetPercent`, then 10%. Before each `claude --bg` launch, the lead reads the router's
+`minBudgetPercent`, then 10%. Before each `claude --bg` launch, pm reads the router's
 `usable` and `resetsAt` fields. A false `usable` queues the item and asks whether to wait or
 start despite the quota gate; unavailable quota is fail-safe and does not block the launch.
+
+## Upgrading to 4.0.0
+
+workflow-kit 4.0.0 moves every setting into `workflow-kit.json` (`version: 2`). The old
+environment variables and CLAUDE.md lines are ignored. Run
+`plugins/workflow-kit/skills/implement-plan/scripts/config.py legacy-check --project-dir .`
+to get one warning per stale name with its new key. The same old-name to new-key map is in
+the key tables of the `implement-plan` and `address-pr` SKILL.md files. For example,
+`PHASE_EXECUTOR=codex` becomes the codex `routing.phase` lists above, and `SELF_VERIFY_LIMIT`
+becomes `selfVerifyLimit`.
 
 ## Updating
 

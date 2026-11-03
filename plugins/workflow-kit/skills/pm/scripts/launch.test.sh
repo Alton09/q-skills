@@ -10,6 +10,8 @@ launch="$script_dir/launch.py"
 "$script_dir/events.py" --help >/dev/null
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+export HOME="$tmp/home"
+mkdir -p "$HOME"
 
 check() { python3 -c "import json,sys; $1"; }
 item() {

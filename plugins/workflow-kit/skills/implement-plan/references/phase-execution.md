@@ -37,7 +37,7 @@ cannot prove its file set is disjoint — demote the whole group to sequential r
 guess. When in doubt, demote: a false-sequential is merely slow; a false-parallel corrupts
 the worktree.
 
-Cap concurrency at `MAX_PARALLEL_AGENTS` (default 3); if a group is larger, run it in
+Cap concurrency at `implementPlan.maxParallelAgents` (default 3); if a group is larger, run it in
 batches of that size.
 
 ## 5a.2 Per-phase handoff payload
@@ -45,43 +45,36 @@ batches of that size.
 For each phase (sequential or parallel), build its handoff:
 
 **1. Classify complexity → resolve the sub-agent target** (auto, no user prompt). Judge
-the phase's tasks as light, standard, or deep. If no explicit pin applies for that tier
-(`PHASE_MODEL_<TIER>` for the tier, or `PHASE_EXECUTOR`), call the router with
+the phase's tasks as light, standard, or deep, then always call the router with
 `--role phase --tier <tier> --project-dir <run-root>` (the repo root the run started from)
 per `references/routing.md` § "Calling the router", adding `--exclude-executor codex` when
-the resolved reviewer is pinned to codex, and use its non-null `target`. Treat a non-zero
-exit, empty stdout, or non-JSON output as `target: null` (§ "Fail-safe"). When a pin applies, or the router returns `target: null` (always the case
-with no config file), read `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, or
-`PHASE_MODEL_DEEP` as before. Either way the result is an `executor:model` address;
-split only on the first colon and use the matching registry entry. An unprefixed model id
+every `routing.review` target is codex (SKILL.md § "Reviewer diversity"), and use its
+`target`. On `target: null`, a non-zero exit, empty stdout, or non-JSON output, use the
+tier's first shipped target from `config.py defaults` (§ "Fail-safe"). Either way the result
+is an `executor:model` address; split only on the first colon and use the matching registry
+entry. An unprefixed model id
 always resolves to `claude:<id>` for backward compatibility. Reject an unknown executor or
 an invalid model id before spawning, with an error that names the resolved executor and id.
 
-The shipped tier defaults preserve the existing `PHASE_EXECUTOR` shorthand:
+The tier lists are `routing.phase.light`, `routing.phase.standard`, and
+`routing.phase.deep`, shipped as `claude:haiku`, `claude:sonnet`, and `claude:opus`. Each
+tier may name a different executor; for example, `"light": ["pi:opencode-go/minimax-m3"]`
+and `"standard": ["codex:gpt-5.6-terra"]` are valid in the same file. The pi and codex tier
+lists to copy are in `references/routing.md` § "Example lists".
 
-| `PHASE_EXECUTOR` | light | standard | deep |
-|---|---|---|---|
-| `claude` (default) | `claude:haiku` | `claude:sonnet` | `claude:opus` |
-| `pi` | `pi:opencode-go/minimax-m3` | `pi:opencode-go/glm-5.3` | `pi:opencode-go/qwen3.8-max` |
-| `codex` | `codex:gpt-5.6-luna` | `codex:gpt-5.6-terra` | `codex:gpt-5.6-sol` |
-
-Explicit `PHASE_MODEL_*` values win over that shorthand, so tiers may use different
-executors. For example, `PHASE_MODEL_LIGHT=pi:opencode-go/minimax-m3` and
-`PHASE_MODEL_STANDARD=codex:gpt-5.6-terra` are valid in the same run.
-
-The deep tier is `qwen3.8-max`, not Kimi K3. In the 2026-09-16 bake-off, Kimi K3 failed
+In the pi example the deep tier is `qwen3.8-max`, not Kimi K3. In the 2026-09-16 bake-off, Kimi K3 failed
 C2 tool discipline: it stopped after 4 of 10 steps and reported the task done. Complex
 phases are the longest multi-step work and end with `/verify`, so a premature stop with a
 false completion claim costs most there. `qwen3.8-max` passed all three canaries and was
 faster and cheaper than Kimi K3 on each.
 
-These are provisional defaults taken from the model descriptions, not from a bake-off. Every
+The codex example lists are provisional, taken from the model descriptions, not from a bake-off. Every
 Codex model is GPT family. On a Plus plan a single large worker can take a double-digit share
 of the 5-hour window (one full-diff review on `gpt-6-astra` took 22 %), so `gpt-6-astra` is
 deliberately not a phase tier.
 
 Record the chosen model per phase for the final report, with the router `reason` (or
-`pinned` when an explicit setting chose it) and any router warnings, per
+`shipped default` when the router did not choose it) and any router warnings, per
 `references/routing.md` § "Report format".
 
 **2. Build the handoff payload.** Sub-agents start blank, so the prompt MUST carry
@@ -107,7 +100,7 @@ everything the phase needs:
   (MenuLens sessions `21163bb7` / `9e8b7fa4`): plan-file edits + carry-forward added
   12.2% / 17.9% of positive orchestrator context growth.
 - Self-verify instruction: "After implementing, run /verify. If it fails, iterate to
-  fix — up to <SELF_VERIFY_LIMIT, default 2> rounds — then stop regardless. Report your
+  fix — up to <selfVerifyLimit, default 2> rounds — then stop regardless. Report your
   final /verify result (pass/fail) and any remaining errors verbatim."
 - **Commit instruction**: "When your self-verify is done, stage and commit your phase's
   work on the current branch (`git add -A && git commit -m \"<phase name>\"`)." This is
@@ -169,7 +162,7 @@ its phase's gate-verify payload (SKILL.md Step 6) as a check the gate must perfo
 not rely on the foreign worker's self-verify to have covered it.
 
 That measurement is history for the default `workspace-write` sandbox without a device. Under
-`CODEX_DEVICE_MODE=reserved-device` (default), a codex worker or gate given a reserved device
+`implementPlan.e2e.codexDeviceMode: "reserved-device"` (default), a codex worker or gate given a reserved device
 runs the device half of verify. Reserve only for the codex worker that carries device checks:
 a phase worker or gate given them (the `[e2e]` criteria of a skipped-E2E run, or device steps
 in verify), or the codex E2E worker. Measured 2026-10-02 (q-skills implement-plan session
@@ -181,8 +174,9 @@ inside the sandbox. Reserve the device and pass it per `references/executors.md`
 Walk layers in topological order (5a.1). The resolved `executor:model` address determines
 how each phase agent is spawned. Use the selected entry in
 references/executors.md § "Executor entries" for its spawn command, model address syntax,
-stop mechanism, token extraction, and any one-time setup. With `PHASE_EXECUTOR` unset, use
-the `claude` entry: the Agent-tool `run_in_background: true` spawn remains the default path.
+stop mechanism, token extraction, and any one-time setup. With the shipped `claude:*` tier
+lists, use the `claude` entry: the Agent-tool `run_in_background: true` spawn remains the
+default path.
 
 The worktree-ownership rule and the destructive-git prohibition in the handoff (5a.2) apply
 identically to every executor — they are properties of the handoff, not the harness.
@@ -204,7 +198,7 @@ identically to every executor — they are properties of the handoff, not the ha
    git -C <integration> worktree add <integration>/../.wt/<phase-slug> -b <phase-branch>
    ```
 2. Spawn all phase agents concurrently (background), each pointed at its own child
-   worktree, capped at `MAX_PARALLEL_AGENTS`. The 5b runaway guard applies per agent.
+   worktree, capped at `implementPlan.maxParallelAgents`. The 5b runaway guard applies per agent.
 3. When ALL agents in the group have returned, merge each child branch into integration
    in turn (each agent committed its work per 5a.2, so there is something to merge):
    ```
@@ -223,7 +217,7 @@ identically to every executor — they are properties of the handoff, not the ha
    phase (the break is in the merged result). Re-delegate the fix to ONE sub-agent working
    on the merged integration worktree (warm: read the full merged diff + verbatim error),
    covering ALL phases in the group; then re-run the integration gate-verify. This is the
-   Step 6 retry path, scoped to the group. If it exhausts `SELF_VERIFY_LIMIT` attempts, the
+   Step 6 retry path, scoped to the group. If it exhausts `selfVerifyLimit` attempts, the
    Step 6 escalation runs on the same merged integration worktree and the BLOCKED/HALTED
    marker is attached to the **first phase heading in the group**, with a note listing all
    member phases. Do NOT clean up child worktrees until the group finally passes.

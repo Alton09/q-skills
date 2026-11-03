@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import difflib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -51,25 +52,31 @@ def read_json(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def pm_config(project_dir: Path) -> dict[str, Any]:
-    """Merge user then project pm config, one key deep."""
-    merged: dict[str, Any] = {}
-    for path in (
-        Path.home() / ".claude" / "workflow-kit.json",
-        project_dir / ".claude" / "workflow-kit.json",
-    ):
-        document = read_json(path)
-        pm = document.get("pm")
-        if not isinstance(pm, dict):
-            pm = document.get("lead", {})
-        if isinstance(pm, dict):
-            merged.update(pm)
-    return merged
+def _load_config_module() -> Any:
+    path = Path(__file__).resolve().parents[2] / "implement-plan" / "scripts" / "config.py"
+    spec = importlib.util.spec_from_file_location("workflow_kit_config", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+workflow_config = _load_config_module()
+
+
+def pm_config(project_dir: Path) -> tuple[dict[str, Any], list[str]]:
+    """Return the merged pm config and reader warnings; a bad config is a UsageError."""
+    try:
+        merged, _sources, warnings = workflow_config.load(project_dir)
+    except workflow_config.ConfigError as exc:
+        raise UsageError("\n".join(f"config.py: {line}" for line in exc.errors)) from exc
+    return merged["pm"], warnings
 
 
 def resolve_vault(project_dir: Path) -> dict[str, Any]:
     project_dir = project_dir.expanduser().resolve()
-    configured = pm_config(project_dir).get("vault")
+    configured = pm_config(project_dir)[0].get("vault")
     source = "none"
     vault: Path | None = None
     if isinstance(configured, str) and configured.strip():
@@ -91,15 +98,11 @@ def resolve_vault(project_dir: Path) -> dict[str, Any]:
 
 
 def config(project_dir: Path) -> dict[str, Any]:
-    pm = pm_config(project_dir.expanduser().resolve())
-    max_workers = pm.get("maxWorkers", 2)
-    if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
-        max_workers = 2
-    herdr = pm.get("herdr", True)
+    pm, warnings = pm_config(project_dir.expanduser().resolve())
     resolved = resolve_vault(project_dir)
-    result = {"maxWorkers": max_workers, "vault": resolved["vault"], "herdr": herdr}
-    if not isinstance(herdr, bool):
-        result.update(herdr=True, warnings=["pm.herdr must be a boolean; using true"])
+    result = {"maxWorkers": pm["maxWorkers"], "vault": resolved["vault"], "herdr": pm["herdr"]}
+    if warnings:
+        result["warnings"] = warnings
     return result
 
 

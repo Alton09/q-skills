@@ -43,24 +43,25 @@ follow the existing flow.
   sequentially, or a dedicated child worktree when run in a parallel group), runs
   `/verify` and iterates on failures while warm (bounded), then returns a structured
   summary including its self-verify result. Does not touch the plan file or advance phases.
-- **Prep sub-agent** (`PREP_AGENT_MODEL`, default `sonnet`): runs the one-time setup read
+- **Prep sub-agent** (routed `routing.prep` target, default `claude:sonnet`): runs the one-time setup read
   the orchestrator shouldn't pull into its window — parses the plan into a verbatim
   normalized extract (Step 1). Returns load-bearing data verbatim; makes no decisions.
 - **Gate-verify sub-agent** (one per phase after the phase agent returns, model by
   verify nature): runs the project's `/verify` independently of the implementer and
   returns only `pass | fail + verbatim errors`. The independent confirmation is the
   real quality gate; it writes no code and makes no decisions.
-- **Review sub-agent** (Step 8, resolved `REVIEW_MODEL` target): reviews the full plan diff
+- **Review sub-agent** (Step 8, routed `routing.review` target): reviews the full plan diff
   via the project's review skill and returns a structured findings list only — no code, no
   decisions.
-- **E2E sub-agent** (Step 8, resolved `E2E_MODEL` target): runs the project's `/e2e`
+- **E2E sub-agent** (Step 8, routed `routing.e2e` target): runs the project's `/e2e`
   skill against the integration worktree and returns the `references/e2e.md` verdict. It
   writes no code.
 - **Fix sub-agent** (Step 8, light/standard phase tier by complexity): applies the severity-gated
   findings in the integration worktree under the same two-tier verify contract as a phase.
 
-Unpinned phase, fix, gate-verify, and review targets come from the routing config when one
-is present (`references/routing.md`).
+Prep, phase, fix, gate-verify, review, and E2E targets come from the router, which reads the
+`routing` lists in `workflow-kit.json` (`references/routing.md`). Only the escalation rescue
+is forced to `claude:opus`.
 
 ## Workflow Overview
 
@@ -68,7 +69,7 @@ is present (`references/routing.md`).
 2. **Orchestrator Model** — opus default (per-phase sub-agent models auto-selected)
 3. **Worktree Setup** — delegate to `/create-worktree` skill
 4. **Plan Structure** — work from the delegated parse extract
-5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running; unpinned worker targets come from the routing config when present
+5. **Phase Delegation** — dependency-graph scheduled: independent phases run as parallel sub-agents (isolated child worktrees, merged back), dependent phases sequentially; each implements + warm self-verify, observed while running; worker targets come from the router
 6. **Quality Verification** — two-tier: phase agent's warm self-verify, then an orchestrator-delegated independent gate-verify sub-agent
 7. **Task Tracking** — tick verified criteria and completed tasks in the plan file
 8. **Plan Review, E2E & Auto-fix** — review and E2E workers run together on the same `HEAD`; one phase-tier fix pass handles review findings and E2E failures under the same two-tier verify
@@ -86,6 +87,24 @@ Step 1 plan-parse prep agent is part of #1 and is allowed):
    per-phase sub-agent models are auto-selected later, NOT asked here
 3. Worktree decision (Step 3) — and if yes, complete `/create-worktree`
    and note the new worktree path, then proceed immediately
+
+**Read the settings first**, right after parsing the flags and before any spawn. Resolve
+`<run-root>` once: the repo root the run started from (`git rev-parse --show-toplevel` in the
+starting directory). Then:
+
+- Run `<skill-dir>/scripts/config.py legacy-check --project-dir <run-root>` and print each
+  entry of its `warnings` once. It always exits 0. An old UPPER_CASE variable it names is
+  ignored, never read.
+- Run `<skill-dir>/scripts/config.py dump --project-dir <run-root>` and keep its JSON as the
+  run's settings. Every `selfVerifyLimit`, `skills.*`, and `implementPlan.*` value this skill
+  names comes from that one read; there is no cache to refresh mid-run. Routing lists are the
+  exception: the router reads the files again before each spawn (`references/routing.md`).
+  Duration values convert to seconds as `references/runaway-guard.md` describes.
+- Apply the startup check in § "Reviewer diversity" to the dumped `routing` lists.
+
+A `config.py` error (exit 1, `config.py: <file>: <key>: <problem>` on stderr) stops
+pre-flight: print the message and ask the user to fix that file. With `--worker`, end with
+`implement-plan: stopped <plan-key> pre-flight`.
 
 Do NOT begin Step 4 (Plan Structure) or any code reading until
 Steps 1–3 are answered and the worktree (if requested) exists. Skipping
@@ -112,7 +131,9 @@ Without `--worker`, accept either:
 - Inline markdown: (user pastes plan content directly)
 
 **Delegate the parse — do not read the raw plan into the orchestrator window.** Spawn ONE
-prep sub-agent (`PREP_AGENT_MODEL`, default `sonnet`) to read the plan (from the path, or
+prep sub-agent on the target the router returns for `--role prep --project-dir <run-root>`
+(default `claude:sonnet`; `routing.prep` accepts only `claude:*`, since prep runs through the
+Agent tool) to read the plan (from the path, or
 the inline content you pass it) and return a **verbatim normalized extract** — not a lossy
 summary. The orchestrator schedules and hands off from this extract, so it must preserve the
 load-bearing data exactly:
@@ -162,7 +183,7 @@ rerun when its gate passed and its non-`[e2e]` work is committed.
 ## Step 2: Orchestrator Model
 
 The orchestrator runs on **whatever model this session was launched with** — it cannot
-switch its own model mid-run. `ORCHESTRATOR_MODEL` (default `opus`, any Opus-family model) is the *recommended*
+switch its own model mid-run. `implementPlan.orchestratorModel` (default `opus`, any Opus-family model) is the *recommended*
 model because the orchestrator holds cross-phase state, judges complexity, and supervises
 sub-agents, which is exactly the work Opus is best at.
 
@@ -170,7 +191,7 @@ Only when the session model is not in the recommended family (for default `opus`
 Opus model) and `--worker` is absent, confirm with the user (one line). They relaunch on it
 — you can't change it from here:
 ```
-Orchestrator runs on the current session model; <ORCHESTRATOR_MODEL> family recommended. To use a
+Orchestrator runs on the current session model; <implementPlan.orchestratorModel> family recommended. To use a
 different model, relaunch the session on it — I can't switch mid-run. Press enter to continue.
 ```
 
@@ -270,12 +291,12 @@ Two rules are load-bearing and easy to get wrong:
 
 ### 5b. Runaway guard
 
-Every sub-agent runs under a **wall-clock budget** (`PHASE_TIME_BUDGET`) and a **token
-ceiling** checked on completion (`PHASE_TOKEN_CEILING`, or `CODEX_PHASE_TOKEN_CEILING` for codex). Claude and codex workers get a
+Every sub-agent runs under a **wall-clock budget** (`implementPlan.phase.timeBudget`) and a **token
+ceiling** checked on completion (`implementPlan.phase.tokenCeiling.<tier>`, or `implementPlan.phase.codexTokenCeiling.<tier>` for codex). Claude and codex workers get a
 parallel background Bash `sleep` timer whose notification wakes the orchestrator; codex's
 command `timeout` has a five-minute margin and is only a backstop, while pi uses `timeout`
 directly. On a trip, stop the worker with its executor binding (`TaskStop`, process-group
-kill, or process-tree kill), page the user via `NOTIFY_SKILL`, and wait.
+kill, or process-tree kill), page the user via `skills.notify`, and wait.
 
 → Full procedure, resumption model, and the notify payload: **`references/runaway-guard.md`**.
 With `--worker`, use `references/worker-mode.md` § "Asking the user" for the `needs input`
@@ -288,7 +309,7 @@ Verification is **two-tier**:
 1. **Warm self-verify (phase agent).** The phase sub-agent runs `/verify` itself and
    iterates on failures while it still holds full context of the code it just wrote
    (Step 5a payload). This catches most issues in-context, with no cold re-derivation,
-   and is bounded by `SELF_VERIFY_LIMIT` so it can't loop forever.
+   and is bounded by `selfVerifyLimit` so it can't loop forever.
 
 2. **Authoritative gate-verify (delegated).** Self-report on one's own gate is not a
    gate — so after the phase agent returns, the **orchestrator delegates an independent
@@ -308,21 +329,22 @@ actually does:
 | Pure pass/fail (build + tests, exit-code gate) | `claude:haiku` |
 | Behavioral (run the app, observe behavior matches intent) | `claude:sonnet` |
 
-`VERIFY_AGENT_MODEL` is the configured default (`claude:sonnet`) and wins when set; the table
-above is how you pick it when the project hasn't — drop to `claude:haiku` only when verify is a
-deterministic exit-code gate. When no `VERIFY_AGENT_MODEL` pin applies, call the router with
-`--role gateVerify --project-dir <run-root>` (the repo root the run started from) before each gate spawn per `references/routing.md` § "Calling the router";
-a non-null `target` is the gate address, and `target: null` resolves as above. Spawn it with
+`routing.gateVerify` holds the gate targets (shipped `["claude:sonnet"]`); the table above is
+how a project picks its list — drop to `["claude:haiku"]` only when verify is a deterministic
+exit-code gate. Before each gate spawn, call the router with
+`--role gateVerify --project-dir <run-root>` (the repo root the run started from) per `references/routing.md` § "Calling the router";
+its `target` is the gate address. On `target: null` or a router failure, use the role's first
+shipped target from `config.py defaults`. Spawn it with
 the worktree path; it writes no code and only reports.
 A codex gate that is given device checks gets the same device reservation, `ANDROID_SERIAL`,
 `DEVICE_RESERVED=1`, and reserved-device handoff line as a codex worker; see `references/executors.md`
-§ codex and `CODEX_DEVICE_MODE`.
+§ codex and `implementPlan.e2e.codexDeviceMode`.
 
 Resolve this address by the same `executor:model` rule as phase workers (5a.2). An
 unprefixed id still means `claude:<id>`. For gate verify the routing list order wins, so
 the same executor or model family may implement and verify: gate verify mostly runs `/verify`
 and reads exit codes, so the soft diversity rule is relaxed for gate verify only. Reviewer
-diversity (Configuration, `REVIEW_EXECUTOR`) stays mandatory.
+diversity (§ "Reviewer diversity") stays mandatory.
 
 **A sub-agent can fail *after* it has delivered.** A task notification with status
 `failed` — a rate limit, an API error, a killed process — means the agent stopped, not that
@@ -336,8 +358,8 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
 
 **Retry Logic (orchestrator-level, on gate-verify fail):**
 - Gate fail → orchestrator re-delegates the fix to a phase sub-agent for the SAME phase.
-  Resolve the retry agent's target through the phase tier again (5a.2 step 1): an unpinned
-  tier gets a fresh router call, so a fallback can take over mid-run. The re-spawned gate
+  Resolve the retry agent's target through the phase tier again (5a.2 step 1): every retry
+  gets a fresh router call, so a fallback can take over mid-run. The re-spawned gate
   routes again the same way. The prior phase work is committed (5a.2), so instruct the retry agent to FIRST read the
   committed diff plus any working changes, then fix and re-run its warm self-verify — do not
   re-implement from scratch off the summary. It commits the fix when its self-verify passes,
@@ -345,22 +367,22 @@ truncated mid-artifact, re-spawn as usual and say so in the report.
   and the shared context from 5a.2.
   Then re-spawn the gate-verify sub-agent. (The runaway guard from Step 5b applies to retry
   sub-agents too.)
-- A phase gets at most `SELF_VERIFY_LIMIT` gate-verify attempts (default 2): attempt 1 is
+- A phase gets at most `selfVerifyLimit` gate-verify attempts (default 2): attempt 1 is
   the initial phase agent, each subsequent attempt is one re-delegated fix. The same knob
   intentionally bounds the in-agent warm self-verify loop and these orchestrator-level gate
   retries (one budget, see Configuration) — the old fixed "3x retry" contract is retired.
-- When all `SELF_VERIFY_LIMIT` attempts have failed their gate → hard stop
+- When all `selfVerifyLimit` attempts have failed their gate → hard stop
 
-**On Hard Stop (`SELF_VERIFY_LIMIT` gate failures):**
+**On Hard Stop (`selfVerifyLimit` gate failures):**
 
 Before paging the user, run a bounded **escalation pass** — the same Step 5 delegation loop
-with the rescue target forced to `claude:opus` (switching executor first for pi/codex), an extended 5b budget (`ESCALATION_TOKEN_CEILING` /
-`ESCALATION_TIME_BUDGET`), a richer payload (full failure history + "diagnose root cause
-before fixing"), and capped at `ESCALATION_ATTEMPTS` (default 2). It reuses the existing
+with the rescue target forced to `claude:opus` (switching executor first for pi/codex), an extended 5b budget (`implementPlan.escalation.tokenCeiling` /
+`implementPlan.escalation.timeBudget`), a richer payload (full failure history + "diagnose root cause
+before fixing"), and capped at `implementPlan.escalation.attempts` (default 2). It reuses the existing
 machinery, so it inherits the runaway guard automatically — not a separate skill. The plan
 gets a BLOCKED marker before the pass and a HALTED marker if it exhausts; for a parallel
 group the marker lands on the group's first phase heading. On exhaustion, fall through to
-user-wait (page via `NOTIFY_SKILL`, do NOT check off, resume from the failed phase on the
+user-wait (page via `skills.notify`, do NOT check off, resume from the failed phase on the
 user's signal).
 
 → Full escalation procedure, BLOCKED/HALTED callout formats, group-failure handling, and
@@ -434,7 +456,7 @@ every skip reason in the report.
 The review worker reads the cumulative diff without building or testing. The E2E worker
 receives the worktree, the prep extract's `[e2e]` criteria, and `references/e2e.md`. Wait for
 both enabled workers. Then delegate one combined fix pass for at-threshold review findings
-and E2E failures. Re-run E2E only after a fix commit. One cap, `REVIEW_MAX_ROUNDS`, bounds
+and E2E failures. Re-run E2E only after a fix commit. One cap, `implementPlan.review.maxRounds`, bounds
 the combined loop. The orchestrator never reads the raw diff or verbatim E2E failures.
 
 → Full review/triage/fix/re-review procedure (8a–8d): **`references/review-autofix.md`**.
@@ -466,7 +488,7 @@ Step 7 plan-state rule, before invoking `/create-pr`. Do not leave the status ch
 uncommitted for a worker to stage. For a plan outside the repository, leave the status
 change uncommitted with the report.
 
-Then invoke `/create-pr` from the integration worktree when it exists and `CREATE_PR` is not `false`,
+Then invoke `/create-pr` (`skills.createPr`) from the integration worktree when it exists and `implementPlan.createPr` is not `false`,
 passing the branch and the **path of the plan file that contains the dated
 `## Implementation Report — <YYYY-MM-DD>` section**, with a request to include that report in
 the PR body. Let `/create-pr` own everything else — push, title, body, templates, and host
@@ -475,7 +497,7 @@ projects for this skill to bundle an implementation.
 
 Expectations on the project's `/create-pr`: open a **draft** PR, never merge anything, run
 without prompting (Step 9 is unattended), and return the PR URL for the report. If no
-`/create-pr` skill exists in the session, or `CREATE_PR=false`, skip it. Patch only the
+`/create-pr` skill exists in the session, or `implementPlan.createPr` is `false`, skip it. Patch only the
 persisted report's `**PR:**` line to `skipped — <reason>`; do not reassemble the report. The
 report still goes to the plan and the run ends at the local worktree branch, as before.
 Otherwise, after `/create-pr` returns, patch only that line to its URL; do not reassemble the
@@ -500,7 +522,7 @@ defaults can never reveal an override or substitution — the only case where th
 matters. Where actual and configured differ, print both:
 `Phase 3 (light): <actual> (configured: <configured>)`. Where the actual model cannot be
 recovered, print `unknown (configured: <id>)` — never fill the gap from a table. Phase,
-gate, review, and fix model lines carry the router reason in parentheses, also from the
+gate, review, fix, and E2E model lines carry the router reason in parentheses, also from the
 spawn record, per `references/routing.md` § "Report format".
 
 **F4 — Cost: measured or absent, never estimated.** Any cost figure comes from token
@@ -529,9 +551,9 @@ run.
 **PR:** <`pending` before Step 9, then url, or `skipped — <reason>`>
 
 ### Phases Completed
-- Phase 1 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
-- Phase 2 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
-- Phase 3 (<tier>): <description> — sub-agent: <model> (<router reason | pinned>); gate: <model> (<router reason | pinned>)
+- Phase 1 (<tier>): <description> — sub-agent: <model> (<router reason>); gate: <model> (<router reason>)
+- Phase 2 (<tier>): <description> — sub-agent: <model> (<router reason>); gate: <model> (<router reason>)
+- Phase 3 (<tier>): <description> — sub-agent: <model> (<router reason>); gate: <model> (<router reason>)
 - Routing warnings: <each router warning once, or none>
 
 ### Verification Status
@@ -541,19 +563,19 @@ run.
 - <decision> (<Phase N | rescue Phase N | review fix round N>) — <why>
 
 ### Review & Auto-fix
-- Reviewer: <REVIEW_MODEL> (<router reason | pinned>) on `<base>...HEAD` via <REVIEW_SKILL>
+- Reviewer: <review target> (<router reason>) on `<base>...HEAD` via <skills.review>
 - Findings: <N total> — <M auto-fixed & verified> / <K left for you>
-- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model> (<router reason | pinned>)
+- Auto-fixed: <one line each, file:line + what changed> — fix sub-agent: <model> (<router reason>)
 - Left for you (below threshold): <one line each, severity + file:line + problem>
-- Rounds: <R> of <REVIEW_MAX_ROUNDS>
+- Rounds: <R> of <implementPlan.review.maxRounds>
 
 ### E2E
-- Worker: <actual executor:model from the E2E spawn record>
+- Worker: <actual executor:model from the E2E spawn record> (<router reason>)
 - Status: <pass | fail — failed names or failed hand-back | env-error — E2E did not run | skipped — reason | not finished — reason>
 - Passed: <n>/<total>
 - Failed: <names; empty if none>
 - Flaky: <names; empty if none>
-- Rounds: <R> of <REVIEW_MAX_ROUNDS>
+- Rounds: <R> of <implementPlan.review.maxRounds>
 - Evidence: <path, or absent>
 - Codex device mode: <reserved-device | full-access (user confirmed: yes/no) | off>
 
@@ -610,8 +632,8 @@ report out`. Do not print the full report to the terminal.
 With `--worker`, every terminal exit ends with either
 `implement-plan: done <plan-key> <PR url | pr-skipped>` or
 `implement-plan: stopped <plan-key> <phase>`. `needs input` pauses the run and resumes from
-that step. Use `pre-flight` for a plan structure error or `/create-worktree` failure before a
-phase, `step-9` for a Step 9 failure, and `<unknown> pre-flight` for missing or inline plan
+that step. Use `pre-flight` for a plan structure error, a `config.py` error, or a
+`/create-worktree` failure before a phase, `step-9` for a Step 9 failure, and `<unknown> pre-flight` for missing or inline plan
 input. Use a phase name for a hard stop, including when a `needs input` answer selects "stop
 the run".
 
@@ -627,7 +649,7 @@ If hard-stopped due to failure:
 
 **Plan:** <plan-name>
 **Failed Phase:** <phase-name>
-**Failure Point:** verification failed every gate attempt (SELF_VERIFY_LIMIT) + escalation halted
+**Failure Point:** verification failed every gate attempt (selfVerifyLimit) + escalation halted
 
 ## Error Summary
 <error output from last /verify call>
@@ -641,131 +663,70 @@ If hard-stopped due to failure:
 
 ## Configuration
 
-Projects can override via environment or project CLAUDE.md:
+Settings live in `workflow-kit.json`: the user file `~/.claude/workflow-kit.json`, then the
+project file `<repo>/.claude/workflow-kit.json`, which overrides it key by key (lists and
+scalars replace whole). `scripts/config.py` is the only reader and the single source of the
+defaults below (`config.py defaults` prints them); Step 0 reads the run's settings through it.
+A duration is one number and one unit (`30m`, `45m`, `1h`). Routing lists, budget thresholds,
+and the router contract: `references/routing.md`. Old UPPER_CASE variables in the environment
+or CLAUDE.md are ignored; `config.py legacy-check` names each one and its new key. Where this
+skill says `/verify`, `/e2e`, `/notify-me`, or `/create-pr`, it means the configured
+`skills.*` value.
 
-- `PREP_AGENT_MODEL` — model for the delegated plan parse (Step 1). Default `sonnet` — keeps
-  the raw plan out of the orchestrator's persistent window while preserving the load-bearing
-  extract verbatim. (Avoid `haiku`: the extract is load-bearing and needs light judgment.)
-- `VERIFY_SKILL` — project's verification skill (default: `/verify`)
-- `VERIFY_AGENT_MODEL` — `executor:model` target for the delegated gate-verify sub-agent
-  (Step 6). Default `claude:sonnet`; set `claude:haiku` when the project's verify is a
-  deterministic exit-code gate. Unprefixed `sonnet`/`haiku` remain equivalent. A set value
-  pins the role and skips quota routing.
-- `SELF_VERIFY_LIMIT` — default 2. Governs **two** caps with the same value: (a) max warm
-  self-verify fix rounds inside a phase sub-agent before it stops and reports (Step 5a);
-  and (b) max orchestrator-level gate-verify attempts per phase before the hard stop /
-  escalation pass (Step 6). One knob, both retry budgets.
-- `NOTIFY_SKILL` — notification skill (default: `/notify-me`)
-- `ORCHESTRATOR_MODEL` — orchestrator model (default: `opus`, any Opus-family model)
-- `PHASE_TOKEN_CEILING` — per-phase sub-agent token usage that triggers a user page on
-  completion (Step 5b). Now budgets impl + warm self-verify together. Governs claude and pi.
-  Defaults by tier: light 80k / standard 150k / deep 250k (therefore Claude's
-  haiku/sonnet/opus values stay 80k/150k/250k, and pi uses the same values). Measure
-  Claude's notification total and pi `new` tokens as defined in `references/runaway-guard.md`.
-  Single source for these numbers — Step 5b references it.
-- `CODEX_PHASE_TOKEN_CEILING` — the codex override of the per-phase ceiling, by tier. Defaults:
-  light 200k / standard 250k / deep 400k, because codex `new` tokens include the verify
-  output the worker reads (see `references/runaway-guard.md`). `PHASE_TOKEN_CEILING` never
-  applies to codex.
-- `PHASE_TIME_BUDGET` — per-phase wall-clock budget before the runaway guard stops the
-  sub-agent (Step 5b). Default 30 min; scale up for `opus` phases.
-- `ESCALATION_ATTEMPTS` — max forced-`opus` rescue attempts in the Step 6 escalation pass
-  before HALTED / user-wait. Default 2.
-- `ESCALATION_TOKEN_CEILING` — token ceiling for an escalation attempt (Step 6), replacing
-  the per-phase ceiling for the rescue. Default 400k (above the `opus` phase ceiling — these
-  are the hardest cases).
-- `ESCALATION_TIME_BUDGET` — wall-clock budget for an escalation attempt (Step 6). Default
-  30 min.
-- `MAX_PARALLEL_AGENTS` — max phase sub-agents run concurrently in a parallel group
-  (Step 5a.1/5a.3). Default 3; larger groups run in batches of this size.
-- `RUN_REVIEW` — whether to run the post-implementation review + auto-fix step (Step 8).
-  Default `true`; set `false` to skip review only. E2E still runs unless its own skip
-  condition applies.
-- `REVIEW_SKILL` — project's code-review skill for Step 8 (default: `/code-review`). Must be
-  **non-interactive and read-only**: it runs as a background sub-agent with no user present
-  and must not build or test while E2E owns those resources. A skill that prompts mid-run
-  (e.g. `/pr-review`, which asks which findings to keep and whether to post) will stall. If
-  a consumer review skill builds, disable review or E2E, or give E2E its own build directory.
-  If absent, review is skipped.
-- `RUN_E2E` — whether to run E2E in Step 8. Default `true`.
-- `E2E_SKILL` — project's E2E skill. Default `/e2e`. E2E is skipped when it is absent.
-- `E2E_MODEL` — `executor:model` target for the E2E worker. Default `claude:sonnet` because
-  the Claude gate ran the device checks reliably in both paired runs. Foreign targets are
-  allowed; the fresh-evidence check in `references/review-autofix.md` guards them.
-- `CODEX_DEVICE_MODE` — how codex workers and gates get device work: `reserved-device` |
-  `full-access` | `off`. Default `reserved-device` (measured 2026-10-02; the orchestrator
-  reserves a device and passes the serial). `full-access` runs device phases with
-  `danger-full-access` and needs a per-run user confirmation recorded in the report. `off`
-  applies 5a.2 routing unchanged (no reservation, so a codex worker, gate, or E2E worker
-  cannot run device checks; a `codex:*` E2E worker falls back to `claude:sonnet`). Details in `references/executors.md` § codex.
-- `E2E_TIME_BUDGET` — E2E wall-clock budget. Default 45 min so a cold emulator and the
-  Maestro suite can finish.
-- `E2E_TOKEN_CEILING` — E2E token ceiling. Default 150k.
-- `REVIEW_AUTOFIX_SEVERITY` — minimum finding severity that gets auto-fixed (Step 8b).
-  Default: high / correctness and above; lower-severity findings are reported, not touched.
-- `REVIEW_MAX_ROUNDS` — max combined review/E2E↔fix rounds before stopping and listing
-  open findings and failures (Step 8d). Default 2.
-- `CREATE_PR` — whether Step 9 delegates to the project's `/create-pr` skill. Default `true`;
-  set `false` to end the run at the local worktree branch. Has no effect when the project has
-  no `/create-pr` — the step is skipped either way.
-- `PHASE_MODEL_LIGHT`, `PHASE_MODEL_STANDARD`, `PHASE_MODEL_DEEP` — phase and fix worker
-  targets in `executor:model` form. Defaults are `claude:haiku`, `claude:sonnet`, and
-  `claude:opus`. Each tier may name a different executor. An unprefixed id always means
-  `claude:<id>`; an unknown executor or model fails before spawn with both the executor and
-  id in the error. Routing details live in `references/executors.md` § "Executor entries".
-  A set value pins that tier and skips quota routing.
-- `PHASE_EXECUTOR` — backward-compatible shorthand selecting all three shipped tier
-  defaults: `claude` (default), `pi`, or `codex`. An explicit `PHASE_MODEL_*` overrides the
-  shorthand for that tier. The default/unset path therefore remains all-Claude.
-- `REVIEW_EXECUTOR` — backward-compatible shorthand choosing the default `REVIEW_MODEL`
-  executor for the Step 8 capstone review sub-agent: `claude`, `pi` or `codex`.
-  Default: follows `PHASE_EXECUTOR`, **except** that `PHASE_EXECUTOR=codex` defaults the
-  review to `claude` (see the codex rules below).
-  With `PHASE_EXECUTOR=pi`, the review runs on `opencode-go/grok-4.6` (xAI, family-diverse
-  from every default pi implementer: MiniMax, GLM, Qwen); set `REVIEW_EXECUTOR=claude`
-  explicitly to keep the reviewer on Opus while workers run on pi. `grok-4.6` was not in the
-  bake-off (`grok-4.5`, which passed all three canaries, is not exposed by pi).
-  **Diversity rule:** the reviewer and each implementer it checks must differ by executor
-  or model family whenever the configured pool offers such a target. The shipped foreign
-  defaults satisfy this: pi uses a Grok reviewer (different family), while codex uses a
-  Claude reviewer (different executor and family). The rule is inert—not falsely claimed
-  satisfied—on the backward-compatible all-Claude configuration. When pi families match
-  (e.g. a phase model overridden to a
-  Grok model), switch the reviewer to `pi:opencode-go/qwen3.8-max` — or to
-  `pi:opencode-go/glm-5.3` when the implementer is Qwen. **Caveat:**
-  no bake-off canary measured review *judgement* quality — C1 (coding), C2 (tool discipline),
-  and C3 (fidelity) cover implementation; review quality on a real diff is unmeasured and
-  Task 7 establishes it. Use `REVIEW_EXECUTOR=claude` if review reliability is a concern.
-  **Codex rules (mandatory).** Every Codex model is GPT family, so a codex reviewer is never
-  family-diverse from a codex implementer:
-  - `PHASE_EXECUTOR=codex` with `REVIEW_EXECUTOR` unset → the review defaults to `claude`
-    (Opus); it does **not** follow the phase executor.
-  - `REVIEW_EXECUTOR=codex` is valid with `PHASE_EXECUTOR=pi` or `claude`. `pi` + `codex` is
-    the pairing to evaluate as a cheap, family-diverse default: GPT reviewing open-weight
-    implementers.
-  - Refuse any resolved codex reviewer that would check a `codex:*` implementer: neither
-    executor nor family differs. Fail at startup with an error that names the family-diversity
-    rule (every Codex model is GPT family, so a codex reviewer never differs in family from a
-    codex implementer), includes both resolved addresses, and says **do not start the run**.
-  On a ChatGPT Plus plan one full-diff review is expensive: a `gpt-6-astra` review of a
-  106-file diff took 22 % of the 5-hour window (measured 2026-09-18).
-- `REVIEW_MODEL` — the `executor:model` target for the Step 8 review sub-agent. Its shipped
-  default follows `REVIEW_EXECUTOR`: `pi:opencode-go/grok-4.6` for pi,
-  `codex:gpt-5.6-sol` for codex (not `gpt-6-astra`, for the Plus-window cost above), and
-  `claude:opus` for claude, subject to the diversity override above. An explicit address
-  overrides both axes; an unprefixed id resolves to Claude for backward compatibility. A set
-  value pins the role and skips quota routing.
-- Routing config (`~/.claude/workflow-kit.json`, `<repo>/.claude/workflow-kit.json`) —
-  optional JSON file supplying ordered fallback lists for unpinned phase, fix, gate-verify,
-  and review roles; before each such spawn `scripts/route-target.sh` picks the first target
-  with quota budget. The project file overrides the user file per list. Explicit settings
-  (including `PHASE_EXECUTOR` and `REVIEW_EXECUTOR`) pin and win; with no file, every role
-  resolves from the defaults above. If the router itself exits non-zero, writes nothing to stdout, or prints a
-  non-JSON line (for example `jq` missing), print its stderr once and resolve as if it
-  returned `target: null`. Always pass `--project-dir <run-root>`, the repo root the run
-  started from; when `REVIEW_EXECUTOR=codex` or a `codex:*` `REVIEW_MODEL` is pinned, pass
-  `--exclude-executor codex` on every phase and fix router call. Schema,
-  precedence, budget rules, and fail-safe: `references/routing.md`.
+| Key | Default | Meaning |
+|---|---|---|
+| `routing.phase.light` / `.standard` / `.deep` | `["claude:haiku"]` / `["claude:sonnet"]` / `["claude:opus"]` | Phase, retry, and fix worker targets per tier (Step 5a.2). |
+| `routing.gateVerify` | `["claude:sonnet"]` | Gate-verify targets (Step 6); `["claude:haiku"]` suits an exit-code-only verify. |
+| `routing.review` | `["claude:opus"]` | Step 8 reviewer targets; § "Reviewer diversity" applies. |
+| `routing.prep` | `["claude:sonnet"]` | Step 1 plan-parse targets; `claude:*` only, and avoid `haiku` (the extract is load-bearing). |
+| `routing.e2e` | `["claude:sonnet"]` | Step 8 E2E worker targets; foreign targets are guarded by the fresh-evidence check. |
+| `minBudgetPercent` | `15` | Quota percent a target needs before the router picks it. |
+| `minBudgetPercentByRole.<role>` | `review: 25` | Per-role override of `minBudgetPercent`. |
+| `skills.verify` | `/verify` | Verify skill for self-verify and gate-verify. |
+| `skills.review` | `/code-review` | Step 8 review skill; must be non-interactive and read-only; absent skips review. |
+| `skills.e2e` | `/e2e` | Step 8 E2E skill; absent skips E2E. |
+| `skills.notify` | `/notify-me` | Skill that pages the user. |
+| `skills.createPr` | `/create-pr` | Step 9 PR skill; absent skips the PR. |
+| `selfVerifyLimit` | `2` | Caps both the warm self-verify rounds in a phase agent and the gate-verify attempts per phase. |
+| `implementPlan.orchestratorModel` | `opus` | Recommended orchestrator model family (Step 2). |
+| `implementPlan.maxParallelAgents` | `3` | Max concurrent phase agents; larger groups run in batches. |
+| `implementPlan.phase.timeBudget` | `30m` | Per-phase wall-clock budget (Step 5b). |
+| `implementPlan.phase.tokenCeiling.<tier>` | `80000` / `150000` / `250000` | Claude and pi token ceiling per tier, checked on completion (Step 5b). |
+| `implementPlan.phase.codexTokenCeiling.<tier>` | `200000` / `250000` / `400000` | Codex token ceiling per tier; replaces `tokenCeiling` for codex workers. |
+| `implementPlan.escalation.attempts` | `2` | Max forced-`claude:opus` rescue attempts before HALTED (Step 6). |
+| `implementPlan.escalation.tokenCeiling` | `400000` | Token ceiling for one rescue attempt. |
+| `implementPlan.escalation.timeBudget` | `30m` | Wall-clock budget for one rescue attempt. |
+| `implementPlan.review.enabled` | `true` | Run the Step 8 review; `false` skips review only. |
+| `implementPlan.review.autofixSeverity` | `high` | Lowest finding severity auto-fixed: `critical`, `high`, `medium`, or `low`. |
+| `implementPlan.review.maxRounds` | `2` | Cap on combined review/E2E↔fix rounds (Step 8d). |
+| `implementPlan.e2e.enabled` | `true` | Run the Step 8 E2E worker. |
+| `implementPlan.e2e.timeBudget` | `45m` | E2E wall-clock budget (a cold emulator plus the suite). |
+| `implementPlan.e2e.tokenCeiling` | `150000` | E2E token ceiling. |
+| `implementPlan.e2e.codexDeviceMode` | `reserved-device` | How codex workers, gates, and E2E get a device: `reserved-device`, `full-access`, or `off` (`references/executors.md` § codex). |
+| `implementPlan.createPr` | `true` | `false` ends the run at the local branch instead of calling `skills.createPr`. |
+
+`routing.prFix` (address-pr fix workers) and `routing.orchestrator` (the pm launch gate) live
+in the same file; implement-plan does not read them.
+
+### Reviewer diversity
+
+The Step 8 reviewer and each implementer it checks must differ by executor or model family
+whenever the configured lists offer such a target. The rule checks resolved routing targets,
+and it is inert (not falsely claimed satisfied) when every list is Claude-only. For pi, when
+the routed pi reviewer shares a family with a pi implementer (for example a Grok phase target
+under a Grok reviewer), switch the reviewer to `pi:opencode-go/qwen3.8-max`, or to
+`pi:opencode-go/glm-5.3` when the implementer is Qwen. For codex the rule is mandatory: every
+Codex model is GPT family, so a codex reviewer never differs in family from a codex
+implementer. When every `routing.review` target is `codex:*`, pass `--exclude-executor codex`
+on every phase, retry, and fix router call. When a phase tier list is also all `codex:*`, fail
+at startup (Step 0) with an error that names the family-diversity rule, includes the review
+list and that tier list, and says **do not start the run**. A mixed review list is handled by
+the review router call (`references/routing.md` § "Calling the router"). A codex reviewer over
+pi or Claude implementers is valid; pi workers with a codex reviewer is the pairing to evaluate
+as a cheap, family-diverse default. No bake-off measured review judgement on a real diff, so
+keep `routing.review` on `claude:opus` if review reliability is a concern. On a ChatGPT Plus
+plan one full-diff review is expensive: a `gpt-6-astra` review of a 106-file diff took 22 % of
+the 5-hour window (measured 2026-09-18).
 
 ## Plan Format Example
 
@@ -786,7 +747,7 @@ template.
 - **Parallel groups advance atomically** — every member must merge cleanly AND the single
   integration gate-verify must pass before Step 7 records progress and the group advances.
 - **The orchestrator window stays lean** — the raw plan is read by a cheap prep agent
-  (`PREP_AGENT_MODEL`), which returns a verbatim extract; the orchestrator never holds the
+  (`routing.prep`), which returns a verbatim extract; the orchestrator never holds the
   raw source, so it doesn't get re-processed every turn.
 - **Carry-forward is dependency-local** — retain only contracts, constraining decisions,
   and assigned follow-ups needed by direct dependents; committed files hold implementation
@@ -800,7 +761,7 @@ template.
   page you (Step 5b) rather than burning budget unattended.
 - **Review and E2E are the capstone** — after all phases pass, the enabled review and E2E
   workers run together on the same `HEAD`. One fix pass handles their actionable results.
-  The combined loop is bounded by `REVIEW_MAX_ROUNDS`; disable either worker independently.
+  The combined loop is bounded by `implementPlan.review.maxRounds`; disable either worker independently.
 - **Child worktrees are auto-cleaned, integration is not** — ephemeral child worktrees
   and branches are removed after their group's gate-verify passes (Step 5a.4); the
   integration worktree stays on disk until you decide (merge, delete, etc.).

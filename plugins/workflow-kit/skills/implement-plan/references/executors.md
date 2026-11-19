@@ -189,10 +189,12 @@ directory (from address-pr: `<skill-dir>/../implement-plan`).
 
 - **Label:** `<executor>:<run>/<phase>`, for example `codex:kmp-3-1/phase-2`. `<run>` is the
   worktree directory name, and `<phase>` is the stem the spawn uses for its scratch files, so
-  the label is unique per spawn. A retry that reuses the label replaces the old space.
+  the label is unique per spawn. A retry that reuses the label replaces the old space,
+  including a `starting:<label>` space left by interrupted startup.
 - **View:** the pane runs `herdr_space.py view`. The view renders the worker's JSON stream
   (commands, exit codes, file changes, messages, errors, and token totals) and follows it
-  until the worker PID exits. Then it prints the stderr tail and closes its own space. It is
+  until the worker PID exits. Then it prints the stderr tail and closes its own space,
+  retrying the close once on failure. It is
   read-only: closing it never stops the worker, and stop, token accounting, and final-answer
   extraction still use the scratch files.
 - **When on:** inside herdr (`HERDR_ENV=1`), or in a pm worker that pm launched with
@@ -204,7 +206,9 @@ directory (from address-pr: `<skill-dir>/../implement-plan`).
 - **Cleanup:** the `close --if-idle` after `wait` closes only shell-free panes, as a backup
   for a view that died early. A running viewer drains output and closes its own space. pm's
   `herdr.py sync` also runs `herdr_space.py sweep`, which closes any executor space whose
-  pane is back at its shell. Executor labels are published only after the viewer starts.
+  pane is back at its shell. Without pm, there is no sweep backstop. Executor labels are
+  published only after the viewer starts. Explicit `close --label` and replacement also
+  match `starting:<label>` spaces and preserve panes running user processes.
 
 Claude workers spawned with the Agent tool run in-process and have no terminal, so they get
 no space. A pm-launched worker itself has a `pm:<worker>` space, described in the pm skill's

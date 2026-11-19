@@ -75,7 +75,7 @@ elif cmd == ['pane', 'process-info']:
     result = {'process_info': {'shell_pid': 100, 'foreground_process_group_id': 200 if fg else 100, 'foreground_processes': [{'pid': 200, 'cmdline': fg}] if fg else []}}
 elif cmd == ['agent', 'get']:
     pane = pane_of(args[2])
-    if not pane['fg'] or 'attach' not in pane['fg']:
+    if os.environ.get('HERDR_TEST_AGENT_MISSING') or not pane['fg'] or 'attach' not in pane['fg']:
         print(json.dumps({'error': {'code': 'agent_not_found', 'message': 'not found'}}), file=sys.stderr)
         sys.exit(1)
     result = {'agent': {'agent': 'claude', 'name': pane.get('name')}}
@@ -146,9 +146,16 @@ for row in rows:
         row.update(status='idle', state='done')
 open(path, 'w').write(json.dumps(rows))
 PY
-run sync --vault "$vault" --repo "$repo" | check 'x=json.load(sys.stdin); assert sorted(x["opened"]) == ["alpha-three", "alpha-two-ci"] and x["closed"] == ["alpha-one"] and x["kept"] == ["alpha-four"], x'
+HERDR_TEST_AGENT_MISSING=1 run sync --vault "$vault" --repo "$repo" | check 'x=json.load(sys.stdin); assert sorted(x["opened"]) == ["alpha-three", "alpha-two-ci"] and x["closed"] == ["alpha-one"] and x["kept"] == ["alpha-four"] and "warning" not in x, x'
 [ "$(spaces)" = "pm:alpha-four pm:alpha-three pm:alpha-two-ci" ]
-run sync --vault "$vault" --repo "$repo" | check 'x=json.load(sys.stdin); assert x["opened"] == [] and x["closed"] == [], x'
+run sync --vault "$vault" --repo "$repo" | check 'x=json.load(sys.stdin); assert x["opened"] == [] and x["closed"] == [] and "warning" not in x, x'
+python3 - "$HERDR_TEST_STATE" <<'PYNAMES'
+import json, sys
+state = json.load(open(sys.argv[1]))
+for worker in ('alpha-three', 'alpha-two-ci'):
+    ws = next(w['workspace_id'] for w in state['workspaces'] if w['label'] == 'pm:' + worker)
+    assert next(p for p in state['panes'] if p['workspace_id'] == ws)['name'] == worker
+PYNAMES
 
 # A stopped worker closes even while its item still says paused; so does a finished retro worker.
 python3 - "$CLAUDE_TEST_AGENTS" <<'PY'
@@ -267,12 +274,31 @@ for failure in ('owned', 'close', 'process_info'):
         opener.assert_called_once_with('live', record, repo, name_timeout=0)
         sweeper.assert_called_once_with()
 
+# Missing sessions warn only for running or paused items, not pr/pr-ready history.
+items = [{'worker': status, 'status': status, 'sessionId': 'pruned'}
+         for status in ('running', 'paused', 'pr', 'pr-ready')]
+with patch.object(herdr, 'agents', return_value={}), \
+     patch.object(herdr, 'active_items', return_value=items), \
+     patch.object(herdr.space, 'spaces', return_value=[]), \
+     patch.object(herdr.space, 'sweep', return_value={'closed': []}):
+    result = herdr.sync(Path('/vault'), repo)
+    assert result['warning'] == ('session not listed yet for worker running: pruned; '
+                                 'session not listed yet for worker paused: pruned'), result
+    with patch.object(herdr, 'active_items', return_value=items[2:]):
+        assert 'warning' not in herdr.sync(Path('/vault'), repo)
+
 # Zero timeout makes one naming attempt without sleeping; later sync can retry.
 with patch.object(herdr.space, 'run', return_value={'code': 'agent_not_found'} ) as get, \
      patch.object(herdr.time, 'sleep') as sleep:
-    assert 'agentWarning' in herdr.name_agent('p', 'w', timeout=0)
+    assert herdr.name_agent('p', 'w', timeout=0) == {}
     get.assert_called_once()
     sleep.assert_not_called()
+# Real errors still warn immediately; a non-zero detection deadline still warns.
+with patch.object(herdr.space, 'run', return_value={'code': 'server_error', 'warning': 'failed'}):
+    assert herdr.name_agent('p', 'w', timeout=0) == {'agentWarning': 'failed'}
+with patch.object(herdr.space, 'run', return_value={'code': 'agent_not_found', 'warning': 'not found'}), \
+     patch.object(herdr.time, 'monotonic', side_effect=[0, 1]):
+    assert herdr.name_agent('p', 'w', timeout=0.1) == {'agentWarning': 'agent detection timed out for p'}
 with patch.object(herdr.space, 'run', return_value={'agent': {'name': 'w'}}), \
      patch.object(herdr.space, 'checked') as rename:
     assert herdr.name_agent('p', 'w', timeout=0) == {'agent': 'w'}

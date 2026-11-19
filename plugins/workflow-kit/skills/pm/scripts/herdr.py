@@ -153,7 +153,7 @@ def attached(pane: str, record: dict[str, Any]) -> bool:
 
 
 def name_agent(pane: str, worker: str, timeout: float = ATTACH_TIMEOUT) -> dict[str, Any]:
-    """Name the attach pane's agent after the worker; detection lag is a warning, not a failure."""
+    """Name the attach agent; a zero timeout defers detection lag to the next sync."""
     deadline = time.monotonic() + timeout
     while True:
         result = space.run(["agent", "get", pane])
@@ -165,6 +165,8 @@ def name_agent(pane: str, worker: str, timeout: float = ATTACH_TIMEOUT) -> dict[
             return {"agent": name}
         if "warning" in result and result.get("code") != "agent_not_found":
             return {"agentWarning": result["warning"]}
+        if timeout == 0 and result.get("code") == "agent_not_found":
+            return {}
         if time.monotonic() >= deadline:
             return {"agentWarning": f"agent detection timed out for {pane}"}
         time.sleep(POLL_INTERVAL)
@@ -249,7 +251,7 @@ def sync(vault: Path, repo: Path) -> dict[str, Any]:
     warnings: list[str] = []
     for item in active_items(vault):
         record = pick(by_name, item["worker"], item.get("sessionId"))
-        if record is None and item.get("sessionId"):
+        if record is None and item.get("sessionId") and item.get("status") in ("running", "paused"):
             warnings.append(f"session not listed yet for worker {item['worker']}: {item['sessionId']}")
         if keep(record, item):
             wanted[item["worker"]] = record

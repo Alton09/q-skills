@@ -154,7 +154,10 @@ def close_space(row: dict[str, Any], if_idle: bool = False) -> bool:
 
 def close_label(label: str, if_idle: bool = False) -> dict[str, Any]:
     closed, kept = [], []
-    for row in spaces(label):
+    rows = spaces(label)
+    if label.startswith(EXECUTOR_PREFIXES):
+        rows += spaces("starting:" + label)
+    for row in rows:
         (closed if close_space(row, if_idle=if_idle) else kept).append(row["workspace_id"])
     result: dict[str, Any] = {"closed": closed}
     if kept:
@@ -351,7 +354,9 @@ def view(args: argparse.Namespace) -> int:
     if args.label and workspace_id:
         rows = [row for row in run(["workspace", "list"]).get("workspaces", []) if row.get("workspace_id") == workspace_id]
         if rows and rows[0].get("label") == args.label:
-            run(["workspace", "close", workspace_id])
+            result = run(["workspace", "close", workspace_id])
+            if "warning" in result:
+                run(["workspace", "close", workspace_id])
     return 0
 
 

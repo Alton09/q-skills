@@ -187,6 +187,31 @@ for failed in (["pane", "run"], ["workspace", "rename"]):
             raise AssertionError("expected startup warning")
     assert not hs.spaces("starting:codex:broken")
 
+# Interrupted startup is recoverable by explicit close or same-label replacement.
+# Both idle panes and running viewers are ours; user processes remain protected.
+for prefix in ('codex:', 'pi:'):
+    label = prefix + 'interrupted'
+    def starting(command):
+        created = hs.checked(['workspace', 'create', '--label', 'starting:' + label, '--cwd', str(tmp), '--no-focus'])
+        if command:
+            hs.checked(['pane', 'run', created['root_pane']['pane_id'], command])
+        return created['workspace']['workspace_id']
+    for command in (None, 'python3 /s/herdr_space.py view --pid 9'):
+        ws = starting(command)
+        assert hs.close_label(label) == {'closed': [ws]}
+        ws = starting(command)
+        args = hs.parser().parse_args(['mirror', '--label', label, '--pid', '9', '--file', str(tmp / 'none'), '--format', prefix[:-1]])
+        opened = hs.mirror(args)
+        assert not hs.spaces('starting:' + label)
+        assert hs.spaces(label) == [{'workspace_id': opened['workspace'], 'label': label}]
+        hs.close_label(label)
+    ws = starting('vim notes.md')
+    assert hs.close_label(label, if_idle=True) == {'closed': [], 'kept': [ws]}
+    assert 'warning' in hs.close_label(label)
+    hs.mirror(args)
+    assert hs.spaces('starting:' + label)[0]['workspace_id'] == ws
+    hs.close_label(label)
+
 codex = [
     {"type": "thread.started", "thread_id": "t-1"},
     {"type": "item.started", "item": {"type": "command_execution", "command": "ls"}},
@@ -240,6 +265,20 @@ for label, closes in (("codex:wt/p", True), ("codex:wt/other", False)):
     with patch.object(hs, "run", side_effect=fake_run), patch.object(hs, "CLOSE_DELAY", 0), patch.dict(os.environ, {"HERDR_WORKSPACE_ID": "w9"}), patch("sys.stdout", io.StringIO()):
         assert hs.view(args) == 0
     assert (["workspace", "close", "w9"] in calls) == closes, calls
+
+# A transient self-close failure gets exactly one retry; persistent failure stays bounded.
+args.label = 'codex:wt/p'
+for failures in (0, 1, 2):
+    attempts = []
+    def flaky_close(argv):
+        if argv[:2] == ['workspace', 'close']:
+            attempts.append(argv)
+            return {'warning': 'temporary failure'} if len(attempts) <= failures else {}
+        return {'workspaces': [{'workspace_id': 'w9', 'label': args.label}]}
+    with patch.object(hs, 'run', side_effect=flaky_close), patch.object(hs, 'CLOSE_DELAY', 0), \
+         patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w9'}), patch('sys.stdout', io.StringIO()):
+        assert hs.view(args) == 0
+    assert attempts == [['workspace', 'close', 'w9']] * (1 if failures == 0 else 2), attempts
 
 # own_process recognises viewers and claude attach/agents clients only.
 for cmdline, ours in (("python3 /s/herdr_space.py view --pid 1", True), ("command claude attach abc", True),

@@ -30,8 +30,12 @@ entries below apply to it unchanged.
   cd <worktree> && { setsid timeout -k <grace> <budget-secs> pi -p --mode json --no-session \
     --model <provider/id> --skill <consumer .claude/skills> \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
-    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
+    2> <scratch>/<phase>.err & pid=$!; echo $pid > <scratch>/<phase>.pid
+    <space> mirror --label 'pi:<run>/<phase>' --pid $pid --format pi --cwd <worktree> \
+      --file <scratch>/<phase>.jsonl --err <scratch>/<phase>.err >/dev/null 2>&1
+    wait $pid; rc=$?; <space> close --label 'pi:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
   ```
+  The `<space>` lines open and close the worker's herdr space (§ "Herdr spaces").
   `setsid` makes the PID its process-group ID, so a group TERM reaches pi rather than only
   its wrapper; do not use shell job control (zsh `eval` rejects `set -m`). `</dev/null` is
   mandatory: without it, the 2026-09-16 probe produced
@@ -57,8 +61,12 @@ entries below apply to it unchanged.
     -s workspace-write --add-dir "$HOME" --add-dir "$(git rev-parse --git-common-dir)" \
     -c sandbox_workspace_write.network_access=true -o <scratch>/<phase>.last.md \
     "$(cat <handoff-file>)" </dev/null > <scratch>/<phase>.jsonl \
-    2> <scratch>/<phase>.err & echo $! > <scratch>/<phase>.pid; wait $!; }
+    2> <scratch>/<phase>.err & pid=$!; echo $pid > <scratch>/<phase>.pid
+    <space> mirror --label 'codex:<run>/<phase>' --pid $pid --format codex --cwd <worktree> \
+      --file <scratch>/<phase>.jsonl --err <scratch>/<phase>.err >/dev/null 2>&1
+    wait $pid; rc=$?; <space> close --label 'codex:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
   ```
+  The `<space>` lines open and close the worker's herdr space (§ "Herdr spaces").
   Set the timeout to the wall-clock budget plus five minutes; it is only the backstop for
   the orchestrator timer in `references/runaway-guard.md`. `</dev/null` is mandatory: the 180 s probe otherwise waited for input with no stdout
   (`rc=124`); `Reading additional input from stdin...` appears on stderr in both cases and
@@ -171,9 +179,41 @@ entries below apply to it unchanged.
   for example a `.claude/skills/skills` self-link. The orchestrator, never the user, does
   this; pi's no-`.agents` rule still applies only to pi.
 
+## Herdr spaces
+
+Every pi and codex spawn (phase, retry, escalation, gate, review, fix, and E2E) gets its own
+herdr workspace, so the user can watch the worker live. The space opens right after the spawn
+and closes when the worker exits. `<space>` is `python3
+<implement-plan-dir>/scripts/herdr_space.py`, where `<implement-plan-dir>` is this skill's
+directory (from address-pr: `<skill-dir>/../implement-plan`).
+
+- **Label:** `<executor>:<run>/<phase>`, for example `codex:kmp-3-1/phase-2`. `<run>` is the
+  worktree directory name, and `<phase>` is the stem the spawn uses for its scratch files, so
+  the label is unique per spawn. A retry that reuses the label replaces the old space.
+- **View:** the pane runs `herdr_space.py view`. The view renders the worker's JSON stream
+  (commands, exit codes, file changes, messages, errors, and token totals) and follows it
+  until the worker PID exits. Then it prints the stderr tail and closes its own space. It is
+  read-only: closing it never stops the worker, and stop, token accounting, and final-answer
+  extraction still use the scratch files.
+- **When on:** inside herdr (`HERDR_ENV=1`), or in a pm worker that pm launched with
+  `WORKFLOW_KIT_HERDR=1`, with `herdr` on `PATH` and `pm.herdr` not `false`. Otherwise both
+  `<space>` calls print `skipped` and do nothing.
+- **Failure:** `<space>` always exits 0 and its output is discarded, so a herdr failure never
+  blocks or fails a spawn. The `(exit $rc)` keeps the worker's own exit status, including
+  `124` from `timeout`.
+- **Cleanup:** the `close` after `wait` is a backup for a view that died early. pm's
+  `herdr.py sync` also runs `herdr_space.py sweep`, which closes any executor space whose
+  pane is back at its shell.
+
+Claude workers spawned with the Agent tool run in-process and have no terminal, so they get
+no space. A pm-launched worker itself has a `pm:<worker>` space, described in the pm skill's
+workers reference under "Herdr spaces".
+
 ## Adding an executor
 
 1. Prove the harness runs headless and non-interactively with stdin closed.
 2. Prove it loads the consumer project's required skills.
 3. Prove model selection works per call.
 4. Name the durable source of its token data.
+5. Add a renderer for its output stream to `scripts/herdr_space.py` and use it in the spawn
+   template's `<space> mirror` line.

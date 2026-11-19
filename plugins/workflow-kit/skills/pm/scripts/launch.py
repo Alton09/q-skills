@@ -204,7 +204,12 @@ def command(args: argparse.Namespace) -> dict[str, Any]:
     )
     suffix = "" if args.kind == "implement" else f"-{args.kind}"
     name = f"{feature_name(item_path)}-{item_path.stem}{suffix}"
-    settings = json.dumps({"env": {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}})
+    # HERDR_ENV=0 keeps the worker's herdr hook from reporting into pm's pane. With --herdr,
+    # WORKFLOW_KIT_HERDR=1 still lets the worker open herdr spaces for its codex/pi executors.
+    env = {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}
+    if args.herdr:
+        env["WORKFLOW_KIT_HERDR"] = "1"
+    settings = json.dumps({"env": env})
     argv = ["claude", "--bg", "--permission-mode", "auto", "--model", args.model, "-n", name, "--settings", settings, prompt]
     return {"name": name, "argv": argv, "prompt": prompt}
 
@@ -218,6 +223,7 @@ def parser() -> argparse.ArgumentParser:
     cmd = sub.add_parser("command")
     cmd.add_argument("--item", required=True); cmd.add_argument("--kind", required=True, choices=("plan", "implement", "ci", "sync", "comments")); cmd.add_argument("--model", required=True); cmd.add_argument("--repo", required=True)
     cmd.add_argument("--handoff"); cmd.add_argument("--context", action="append", default=[]); cmd.add_argument("--out"); cmd.add_argument("--pr"); cmd.add_argument("--worktree"); cmd.add_argument("--notify-cmd")
+    cmd.add_argument("--herdr", action="store_true", help="let the worker open herdr spaces for its executor workers")
     return parser
 
 

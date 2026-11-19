@@ -75,8 +75,8 @@ fields with `dossier.py item set <item> <key>=<value>...`, and sync touched path
 `dossier.py sync --vault <vault> -m "pm: standalone item" --board <vault>/Features/_project
 -- <item>`, adding any decision or log paths written. Use `_project` as the feature directory
 for dossier commands, and `project/<slug>` in cross-item `blockedBy` references. Worker names
-are `project-<slug>[-<kind>]`, notifications start with `[project]`, and herdr uses the
-`project` workspace. No standalone brief is required.
+are `project-<slug>[-<kind>]`, notifications start with `[project]`, and each worker's herdr
+space is `pm:project-<slug>[-<kind>]`. No standalone brief is required.
 
 ## Lock
 

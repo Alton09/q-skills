@@ -23,7 +23,7 @@ Skills delegate to external tools that must exist in consumer projects:
 - `/research` (optional)
 - `/create-pr` (optional) — implement-plan's final step delegates PR creation here; skipped if absent
 - `dev-toolkit` (optional) — `notify-me`, `pr-review`, and `pr-retro` enrich pm; it degrades gracefully when unavailable
-- `herdr` (optional) — attach panes mirror pm workers; it degrades gracefully when unavailable
+- `herdr` (optional) — one workspace per running worker (pm `claude attach` spaces, codex/pi executor live views), closed when the worker finishes; it degrades gracefully when unavailable
 - `quota-axi` — quota-aware routing and the pm orchestrator gate
 - `claude` CLI — pm background workers (`claude --bg`), attach, and agent status
 

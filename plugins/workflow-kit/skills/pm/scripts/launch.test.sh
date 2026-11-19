@@ -95,6 +95,9 @@ printf '%s' "$command" | check 'x=json.load(sys.stdin); assert "--notify-cmd" no
 # Herdr settings are fixed even when the calling shell has herdr variables.
 herdr_command=$(HERDR_ENV=1 HERDR_PANE_ID=lead-pane python3 "$launch" command --item "$item_path" --kind implement --model opus --repo "$tmp/project")
 printf '%s' "$herdr_command" | check 'import json,sys; x=json.load(sys.stdin); assert x["argv"][:4] == ["claude", "--bg", "--permission-mode", "auto"], x; assert json.loads(x["argv"][x["argv"].index("--settings") + 1])["env"] == {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0"}, x'
+# --herdr opts the worker into executor spaces without re-enabling its herdr hook.
+herdr_command=$(python3 "$launch" command --item "$item_path" --kind implement --model opus --repo "$tmp/project" --herdr)
+printf '%s' "$herdr_command" | check 'import json,sys; x=json.load(sys.stdin); assert json.loads(x["argv"][x["argv"].index("--settings") + 1])["env"] == {"PR_RETRO_NUDGE": "0", "HERDR_ENV": "0", "WORKFLOW_KIT_HERDR": "1"}, x'
 
 # A relative item plan is vault-relative, and --notify-cmd fills the protocol command.
 python3 "$script_dir/dossier.py" item set "$item_path" "plan=Plans/relative.md" >/dev/null

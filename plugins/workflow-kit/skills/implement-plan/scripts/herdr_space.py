@@ -8,7 +8,7 @@ blocks a spawn. Only argparse usage errors exit 2.
 Commands:
   available [--project-dir D]
   open --label L --cwd D --command CMD [--project-dir D]
-  close --label L [--project-dir D]
+  close --label L [--if-idle] [--project-dir D]
   mirror --label L --pid P --file F --format codex|pi [--err E] [--cwd D] [--project-dir D]
   view --pid P --file F --format codex|pi [--err E] [--label L]
   sweep [--project-dir D]   close executor spaces whose viewer has exited
@@ -142,23 +142,25 @@ def pane_ours(pane: str) -> bool:
     return shell_free(info) or all(own_process(p) for p in info.get("foreground_processes", []))
 
 
-def close_space(row: dict[str, Any]) -> bool:
+def close_space(row: dict[str, Any], if_idle: bool = False) -> bool:
     """Close one workspace unless a pane runs something the user started there."""
     workspace_id = row["workspace_id"]
-    if not all(pane_ours(p["pane_id"]) for p in panes(workspace_id)):
+    if not all(shell_free(process_info(p["pane_id"])) if if_idle else pane_ours(p["pane_id"])
+               for p in panes(workspace_id)):
         return False
     checked(["workspace", "close", workspace_id])
     return True
 
 
-def close_label(label: str) -> dict[str, Any]:
+def close_label(label: str, if_idle: bool = False) -> dict[str, Any]:
     closed, kept = [], []
     for row in spaces(label):
-        (closed if close_space(row) else kept).append(row["workspace_id"])
+        (closed if close_space(row, if_idle=if_idle) else kept).append(row["workspace_id"])
     result: dict[str, Any] = {"closed": closed}
     if kept:
         result["kept"] = kept
-        result["warning"] = f"workspace {', '.join(kept)} runs a process pm did not start; left open"
+        if not if_idle:
+            result["warning"] = f"workspace {', '.join(kept)} runs a process pm did not start; left open"
     return result
 
 
@@ -166,10 +168,21 @@ def open_space(label: str, cwd: Path, command: str, replace: bool = True) -> dic
     """Open a space whose only pane runs *command*, first closing same-label spaces when *replace*."""
     if replace:
         close_label(label)
-    created = checked(["workspace", "create", "--label", label, "--cwd", str(cwd), "--no-focus"])
+    # Publish executor labels only after the viewer starts, so sweep cannot race creation.
+    executor = label.startswith(EXECUTOR_PREFIXES)
+    created = checked(["workspace", "create", "--label", "starting:" + label if executor else label, "--cwd", str(cwd), "--no-focus"])
     workspace_id = created["workspace"]["workspace_id"]
     pane = created["root_pane"]["pane_id"]
-    checked(["pane", "run", pane, command])
+    try:
+        checked(["pane", "run", pane, command])
+        if executor:
+            checked(["workspace", "rename", workspace_id, label])
+    except SpaceError:
+        try:
+            close_space({"workspace_id": workspace_id})
+        except SpaceError:
+            pass
+        raise
     return {"opened": True, "label": label, "workspace": workspace_id, "pane": pane}
 
 
@@ -362,6 +375,7 @@ def parser() -> argparse.ArgumentParser:
     opener.add_argument("--label", required=True); opener.add_argument("--cwd", required=True)
     opener.add_argument("--command", required=True); opener.add_argument("--project-dir", default=".")
     closer = sub.add_parser("close")
+    closer.add_argument("--if-idle", action="store_true")
     closer.add_argument("--label", required=True); closer.add_argument("--project-dir", default=".")
     sub.add_parser("sweep").add_argument("--project-dir", default=".")
     for name in ("mirror", "view"):
@@ -390,7 +404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.action == "mirror":
             result = mirror(args)
         elif args.action == "close":
-            result = close_label(args.label)
+            result = close_label(args.label, if_idle=args.if_idle)
         else:
             result = sweep()
     except Exception as exc:  # best-effort: report, never fail the caller

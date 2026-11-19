@@ -61,6 +61,8 @@ elif cmd == ['workspace', 'create']:
     pane = {'pane_id': f'{ws}:p1', 'workspace_id': ws, 'cwd': flag('--cwd'), 'fg': None}
     state['panes'].append(pane)
     result = {'workspace': {'workspace_id': ws}, 'tab': {'tab_id': f'{ws}:t1'}, 'root_pane': {'pane_id': pane['pane_id']}}
+elif cmd == ['workspace', 'rename']:
+    next(w for w in state['workspaces'] if w['workspace_id'] == args[2])['label'] = args[3]
 elif cmd == ['workspace', 'close']:
     state['workspaces'] = [w for w in state['workspaces'] if w['workspace_id'] != args[2]]
     state['panes'] = [p for p in state['panes'] if p['workspace_id'] != args[2]]
@@ -120,6 +122,9 @@ PY
 # A second open is idempotent.
 run open --item "$items/one.md" --repo "$repo" | check 'x=json.load(sys.stdin); assert x["opened"] is False and x["workspace"] == "w1", x'
 [ "$(spaces)" = "pm:alpha-one" ]
+# A relaunch with an unlisted session never attaches to or closes the previous session.
+run open --worker alpha-one --session new-session --repo "$repo" | check 'x=json.load(sys.stdin); assert "session not listed yet" in x["warning"], x'
+[ "$(pane_cmd pm:alpha-one)" = "['command claude attach aaaa1111']" ]
 # An attach that exited is restarted in the same pane.
 python3 - "$HERDR_TEST_STATE" <<'PY'
 import json, sys
@@ -212,6 +217,8 @@ done
 
 python3 - "$script_dir" <<'PY'
 import re, sys
+from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0, sys.argv[1])
 import herdr
 for worker in ('', '123', '-abc', 'A B.C!', 'Ünicode', 'x' * 300, 'a-' + 'b' * 100, 'x' * 80 + '-ci', 'x' * 80 + '-comments'):
@@ -226,6 +233,49 @@ assert not herdr.keep({'state': 'stopped'}, {'status': 'paused'}) and not herdr.
 # pick prefers the item's session over a newer same-name session.
 rows = {'w': [{'id': 'new', 'sessionId': 'new-1', 'startedAt': 2}, {'id': 'old', 'sessionId': 'old-1', 'startedAt': 1}]}
 assert herdr.pick(rows, 'w', 'old-1')['id'] == 'old' and herdr.pick(rows, 'w')['id'] == 'new'
+assert herdr.pick(rows, 'w', 'missing') is None
 assert herdr.short_id({'sessionId': '0123456789'}) == '01234567'
+# Each close-loop failure stays local; opens and sweep still run and retain results.
+record = {'id': 'live', 'state': 'working'}
+repo = Path('/repo')
+for failure in ('owned', 'close', 'process_info'):
+    rows = [{'label': 'pm:bad', 'workspace_id': 'bad'}, {'label': 'pm:done', 'workspace_id': 'done'}]
+    def owned(row, repo):
+        if failure == 'owned' and row['workspace_id'] == 'bad':
+            raise herdr.MirrorError('owned failed')
+        return [{'pane_id': row['workspace_id'], 'cwd': str(repo)}]
+    def close(row):
+        if failure == 'close' and row['workspace_id'] == 'bad':
+            raise herdr.MirrorError('close failed')
+        herdr.space.process_info(row['workspace_id'])
+        return True
+    def info(pane):
+        if failure == 'process_info' and pane == 'bad':
+            raise herdr.MirrorError('process_info failed')
+        return {}
+    with patch.object(herdr, 'agents', return_value={'live': [record]}), \
+         patch.object(herdr, 'active_items', return_value=[{'worker': 'live'}]), \
+         patch.object(herdr.space, 'spaces', return_value=rows), \
+         patch.object(herdr, 'owned', side_effect=owned), \
+         patch.object(herdr.space, 'close_space', side_effect=close), \
+         patch.object(herdr.space, 'process_info', side_effect=info), \
+         patch.object(herdr, 'open_worker', return_value={'opened': True}) as opener, \
+         patch.object(herdr.space, 'sweep', side_effect=herdr.MirrorError('sweep failed')) as sweeper:
+        result = herdr.sync(Path('/vault'), repo)
+        assert result['closed'] == ['done'] and result['opened'] == ['live'], result
+        assert failure + ' failed' in result['warning'] and 'sweep failed' in result['warning'], result
+        opener.assert_called_once_with('live', record, repo, name_timeout=0)
+        sweeper.assert_called_once_with()
+
+# Zero timeout makes one naming attempt without sleeping; later sync can retry.
+with patch.object(herdr.space, 'run', return_value={'code': 'agent_not_found'} ) as get, \
+     patch.object(herdr.time, 'sleep') as sleep:
+    assert 'agentWarning' in herdr.name_agent('p', 'w', timeout=0)
+    get.assert_called_once()
+    sleep.assert_not_called()
+with patch.object(herdr.space, 'run', return_value={'agent': {'name': 'w'}}), \
+     patch.object(herdr.space, 'checked') as rename:
+    assert herdr.name_agent('p', 'w', timeout=0) == {'agent': 'w'}
+    rename.assert_not_called()
 PY
 printf 'herdr.test.sh: pass\n'

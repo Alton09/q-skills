@@ -33,7 +33,7 @@ entries below apply to it unchanged.
     2> <scratch>/<phase>.err & pid=$!; echo $pid > <scratch>/<phase>.pid
     <space> mirror --label 'pi:<run>/<phase>' --pid $pid --format pi --cwd <worktree> \
       --file <scratch>/<phase>.jsonl --err <scratch>/<phase>.err >/dev/null 2>&1
-    wait $pid; rc=$?; <space> close --label 'pi:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
+    wait $pid; rc=$?; <space> close --if-idle --label 'pi:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
   ```
   The `<space>` lines open and close the worker's herdr space (§ "Herdr spaces").
   `setsid` makes the PID its process-group ID, so a group TERM reaches pi rather than only
@@ -64,7 +64,7 @@ entries below apply to it unchanged.
     2> <scratch>/<phase>.err & pid=$!; echo $pid > <scratch>/<phase>.pid
     <space> mirror --label 'codex:<run>/<phase>' --pid $pid --format codex --cwd <worktree> \
       --file <scratch>/<phase>.jsonl --err <scratch>/<phase>.err >/dev/null 2>&1
-    wait $pid; rc=$?; <space> close --label 'codex:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
+    wait $pid; rc=$?; <space> close --if-idle --label 'codex:<run>/<phase>' >/dev/null 2>&1; (exit $rc); }
   ```
   The `<space>` lines open and close the worker's herdr space (§ "Herdr spaces").
   Set the timeout to the wall-clock budget plus five minutes; it is only the backstop for
@@ -201,9 +201,10 @@ directory (from address-pr: `<skill-dir>/../implement-plan`).
 - **Failure:** `<space>` always exits 0 and its output is discarded, so a herdr failure never
   blocks or fails a spawn. The `(exit $rc)` keeps the worker's own exit status, including
   `124` from `timeout`.
-- **Cleanup:** the `close` after `wait` is a backup for a view that died early. pm's
+- **Cleanup:** the `close --if-idle` after `wait` closes only shell-free panes, as a backup
+  for a view that died early. A running viewer drains output and closes its own space. pm's
   `herdr.py sync` also runs `herdr_space.py sweep`, which closes any executor space whose
-  pane is back at its shell.
+  pane is back at its shell. Executor labels are published only after the viewer starts.
 
 Claude workers spawned with the Agent tool run in-process and have no terminal, so they get
 no space. A pm-launched worker itself has a `pm:<worker>` space, described in the pm skill's

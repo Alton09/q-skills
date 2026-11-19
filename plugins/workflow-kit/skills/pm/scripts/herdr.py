@@ -107,8 +107,7 @@ def pick(by_name: dict[str, list[dict[str, Any]]], worker: str, session: Any = N
     rows = by_name.get(worker, [])
     if isinstance(session, str) and session:
         match = next((row for row in rows if str(row.get("sessionId", "")).startswith(session) or row.get("id") == session), None)
-        if match:
-            return match
+        return match
     return rows[0] if rows else None
 
 
@@ -153,9 +152,9 @@ def attached(pane: str, record: dict[str, Any]) -> bool:
     return False
 
 
-def name_agent(pane: str, worker: str) -> dict[str, Any]:
+def name_agent(pane: str, worker: str, timeout: float = ATTACH_TIMEOUT) -> dict[str, Any]:
     """Name the attach pane's agent after the worker; detection lag is a warning, not a failure."""
-    deadline = time.monotonic() + ATTACH_TIMEOUT
+    deadline = time.monotonic() + timeout
     while True:
         result = space.run(["agent", "get", pane])
         agent = result.get("agent")
@@ -177,22 +176,22 @@ def owned(row: dict[str, Any], repo: Path) -> list[dict[str, Any]] | None:
     return panes if panes and all(pane.get("cwd") == str(repo) for pane in panes) else None
 
 
-def open_worker(worker: str, record: dict[str, Any], repo: Path) -> dict[str, Any]:
+def open_worker(worker: str, record: dict[str, Any], repo: Path, name_timeout: float = ATTACH_TIMEOUT) -> dict[str, Any]:
     rows = space.spaces(label(worker))
     for row in rows:
         panes = owned(row, repo)
         if panes and len(panes) == 1:
             pane = panes[0]["pane_id"]
             if attached(pane, record):
-                return {"opened": False, "label": label(worker), "workspace": row["workspace_id"], "pane": pane, **name_agent(pane, worker)}
+                return {"opened": False, "label": label(worker), "workspace": row["workspace_id"], "pane": pane, **name_agent(pane, worker, timeout=name_timeout)}
             info = space.process_info(pane)
             if space.shell_free(info):
                 space.checked(["pane", "run", pane, attach_command(record)])
-                return {"opened": True, "label": label(worker), "workspace": row["workspace_id"], "pane": pane, **name_agent(pane, worker)}
+                return {"opened": True, "label": label(worker), "workspace": row["workspace_id"], "pane": pane, **name_agent(pane, worker, timeout=name_timeout)}
     result = space.open_space(label(worker), repo, attach_command(record), replace=False)
     if result.get("warning"):
         return result
-    return {**result, **name_agent(result["pane"], worker)}
+    return {**result, **name_agent(result["pane"], worker, timeout=name_timeout)}
 
 
 def item_worker(item_path: Path) -> tuple[str, dict[str, Any]]:
@@ -210,6 +209,8 @@ def open_action(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     else:
         worker, item, session = args.worker, None, args.session
     record = pick(agents(), worker, session)
+    if record is None and session:
+        raise MirrorError(f"session not listed yet for worker {worker}: {session}")
     if record is None:
         raise MirrorError(f"no background session named {worker}")
     if not keep(record, item):
@@ -245,27 +246,30 @@ def sync(vault: Path, repo: Path) -> dict[str, Any]:
     """Open a space for every running worker of this vault and close every finished one."""
     by_name = agents()
     wanted: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
     for item in active_items(vault):
         record = pick(by_name, item["worker"], item.get("sessionId"))
+        if record is None and item.get("sessionId"):
+            warnings.append(f"session not listed yet for worker {item['worker']}: {item['sessionId']}")
         if keep(record, item):
             wanted[item["worker"]] = record
     result: dict[str, Any] = {"opened": [], "closed": [], "kept": []}
-    warnings: list[str] = []
-    seen: set[str] = set()
     for row in space.spaces(prefixes=(PREFIX,)):
         worker = str(row["label"])[len(PREFIX):]
-        if owned(row, repo) is None:
-            continue
-        seen.add(worker)
-        if worker in wanted or live(pick(by_name, worker)):
-            result["kept"].append(worker)
-        elif space.close_space(row):
-            result["closed"].append(worker)
-        else:
-            warnings.append(f"workspace {row['workspace_id']} runs a process pm did not start; left open")
+        try:
+            if owned(row, repo) is None:
+                continue
+            if worker in wanted or live(pick(by_name, worker)):
+                result["kept"].append(worker)
+            elif space.close_space(row):
+                result["closed"].append(worker)
+            else:
+                warnings.append(f"workspace {row['workspace_id']} runs a process pm did not start; left open")
+        except MirrorError as exc:
+            warnings.append(f"{worker}: {exc}")
     for worker, record in wanted.items():
         try:
-            opened = open_worker(worker, record, repo)
+            opened = open_worker(worker, record, repo, name_timeout=0)
         except MirrorError as exc:
             warnings.append(f"{worker}: {exc}")
             continue
@@ -273,7 +277,11 @@ def sync(vault: Path, repo: Path) -> dict[str, Any]:
             result["opened"].append(worker)
         if opened.get("agentWarning"):
             warnings.append(f"{worker}: {opened['agentWarning']}")
-    result["swept"] = space.sweep()["closed"]
+    result["swept"] = []
+    try:
+        result["swept"] = space.sweep()["closed"]
+    except MirrorError as exc:
+        warnings.append(f"sweep: {exc}")
     if warnings:
         result["warning"] = "; ".join(warnings)
     return result

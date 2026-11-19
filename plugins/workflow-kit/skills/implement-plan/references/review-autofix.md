@@ -104,7 +104,7 @@ handoff, not from `skills.review` — it is not a like-for-like substitute.
     2> <scratch>/review.err & pid=$!; echo $pid > <scratch>/review.pid
     <space> mirror --label 'codex:<run>/review' --pid $pid --format codex --cwd <integration> \
       --file <scratch>/review.jsonl --err <scratch>/review.err >/dev/null 2>&1
-    wait $pid; rc=$?; <space> close --label 'codex:<run>/review' >/dev/null 2>&1; (exit $rc); }
+    wait $pid; rc=$?; <space> close --if-idle --label 'codex:<run>/review' >/dev/null 2>&1; (exit $rc); }
   ```
   `<space>` and the label follow `references/executors.md` § "Herdr spaces".
   Run this with `Bash(run_in_background: true)`. The schema requires top-level `repo_path`

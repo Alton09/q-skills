@@ -141,8 +141,8 @@ other paths touched and `--board <feature-dir>` for each affected feature.
 
 Drop an item to stop pursuing it while keeping its dossier history. Run `events.py agents`;
 if the item's worker is live, find its short id in `claude agents --json --all` and run
-`claude stop <short id>` before closing the tab, because a dropped item's worker would keep
-spending quota unmirrored. Set `stage: dropped` and `status: idle` with `dossier.py item set`,
+`claude stop <short id>` before closing its space with `herdr.py close`, because a dropped item's worker would keep
+spending quota. Set `stage: dropped` and `status: idle` with `dossier.py item set`,
 then sync through `dossier.py sync --board <feature-dir>` as in After merge (8). Run
 `herdr.py close --item <item> --repo <repo>` to remove its worker's space.
 

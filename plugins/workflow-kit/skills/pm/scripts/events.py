@@ -91,6 +91,15 @@ def count_unplanned(body: str) -> int:
     return 0 if bullets == ["None"] else len(bullets)
 
 
+def attach_target(data: dict[str, str | list[str]]) -> str:
+    """The short session id when known: `claude attach` matches names by prefix, so
+    `<feature>-<slug>` is ambiguous once `<feature>-<slug>-plan` exists."""
+    session = data.get("sessionId")
+    if isinstance(session, str) and session.strip():
+        return session.strip()[:8]
+    return str(data.get("worker", ""))
+
+
 def event_message(feature: str, event: str, detail: str, worker: str) -> str:
     # Truncate the detail, never the attach command, to stay under 200 characters.
     suffix = f"; claude attach {worker}" if event.startswith("paused-") and worker else ""
@@ -197,7 +206,7 @@ def worker_event(args: argparse.Namespace) -> dict[str, Any]:
         note = f"worker stuck: {detail}"
     elif log_event == "no-push":
         note = "address-pr completed without a push"
-    message = event_message(feature, event, detail, str(data.get("worker", ""))) if event else ""
+    message = event_message(feature, event, detail, attach_target(data)) if event else ""
     push, changed_notification = deliver(data, event, message, args.notify_cmd)
     set_item(path, data, body, updates, note)
     add_log(path.parent.parent, log_event, detail)

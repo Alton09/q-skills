@@ -250,6 +250,16 @@ long=$(printf 'x%.0s' $(seq 1 300))
 run worker-event --item "$item" --line "$(printf 'address-pr: needs input #15\nQuestion: %s' "$long")" --no-sync
 expect '.push | endswith("; claude attach alpha-longpause")' true
 expect '.push | length < 200' true
+# With a recorded session, the attach command uses its short id, which never matches by prefix.
+item=$(new_item sessionpause)
+python3 - "$item" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read().replace("worker: alpha-sessionpause\n", "worker: alpha-sessionpause\nsessionId: 0123abcd-ffff-0000-0000-000000000000\n", 1)
+open(path, "w").write(text)
+PY
+run worker-event --item "$item" --line "$(printf 'address-pr: needs input #16\nQuestion: Ship it?')" --no-sync
+expect '.push | endswith("; claude attach 0123abcd")' true
 pass
 
 # 19. Without --no-sync, worker-event commits and pushes the item and log to the vault remote.

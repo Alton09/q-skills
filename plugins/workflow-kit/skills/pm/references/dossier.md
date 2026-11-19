@@ -74,14 +74,17 @@ closing `---` is free-form Markdown.
 ## Worker names
 
 A worker is named `<feature>-<slug>`, plus `-<workerKind>` for every kind except
-`implement`. Examples are `kmp-ktor` and `kmp-ktor-ci`. Notifications use the same name in
-`claude attach <name>`.
+`implement`. Examples are `kmp-ktor` and `kmp-ktor-ci`. Attach commands use the session's
+8-character short id (`claude attach <short id>`), because `claude attach` matches names by
+prefix and `kmp-ktor` would also match `kmp-ktor-plan`. They fall back to the worker name
+only when the item has no `sessionId`.
 Standalone items use the `project` label: `project-<slug>[-<workerKind>]`,
 `blockedBy: [project/<slug>]`, and notifications prefixed with `[project]`.
 `herdr.py` lowercases the worker name, replaces characters outside `[a-z0-9_-]` with
 `-`, ensures it starts with a letter, and caps it at 32 characters. Long names keep the
 last hyphen-separated part (the kind suffix when there is one) when it is 23 characters
-or fewer, and get a 6-character stable hash. The tab label is the item title.
+or fewer, and get a 6-character stable hash. That is the herdr agent name; the worker's
+space is labeled `pm:<worker>` (`references/workers.md` § "Herdr spaces").
 
 ## Events
 
@@ -98,8 +101,8 @@ Log only in `log.md`, without a notification: `phase-done`, `ci-fixed`, `synced`
 Every successful command writes exactly one JSON object to stdout and exits 0. For
 `dossier.py`, invalid usage, unknown item keys, and invalid stages or statuses write an error
 to stderr and exit 2.
-`herdr.py` also uses stderr and exit 2 for usage errors (including malformed items or a
-missing worker for attach); mirror runtime failures return JSON `warning` with exit 0.
+`herdr.py` also uses stderr and exit 2 for usage errors (including malformed items or an
+item without a worker); space runtime failures return JSON `warning` with exit 0.
 
 - `resolve-vault [--project-dir D]` → `{vault, source, featuresDir}`. `source` is `config`,
   `convention`, or `none`.

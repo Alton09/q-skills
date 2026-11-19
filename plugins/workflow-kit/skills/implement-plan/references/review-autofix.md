@@ -101,8 +101,12 @@ handoff, not from `skills.review` — it is not a like-for-like substitute.
     -m <model part of the review target> -s read-only \
     --output-schema <scratch>/review-schema.json -o <scratch>/review.json \
     "$(cat <review-handoff-file>)" </dev/null > <scratch>/review.jsonl \
-    2> <scratch>/review.err & echo $! > <scratch>/review.pid; wait $!; }
+    2> <scratch>/review.err & pid=$!; echo $pid > <scratch>/review.pid
+    <space> mirror --label 'codex:<run>/review' --pid $pid --format codex --cwd <integration> \
+      --file <scratch>/review.jsonl --err <scratch>/review.err >/dev/null 2>&1
+    wait $pid; rc=$?; <space> close --if-idle --label 'codex:<run>/review' >/dev/null 2>&1; (exit $rc); }
   ```
+  `<space>` and the label follow `references/executors.md` § "Herdr spaces".
   Run this with `Bash(run_in_background: true)`. The schema requires top-level `repo_path`
   (absolute path), `range` (`<base>...<head>`), and `summary`, plus a `findings` array whose
   items require `severity` (`critical|high|medium|low`), `category`, `file`, `line`, `title`

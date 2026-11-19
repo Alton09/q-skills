@@ -108,7 +108,8 @@ user before this recovery, because it pushes to the remote.
 ## After merge (8)
 
 Set `stage: merged`, then set `stage: done` and `status: idle`; each write sets
-`updated`. Run `herdr.py close --item <item>` after `stage: done`.
+`updated`. Run `herdr.py sync --vault <vault> --repo <repo>` after `stage: done` to close any
+space left for the item's last worker.
 Log `phase-done` after the completed transition, with no notification.
 Read `### Unplanned Decisions` from the merged PR body. Append every decision
 that survived review to the appropriate `decisions.md` using source `PR #<n>
@@ -140,10 +141,10 @@ other paths touched and `--board <feature-dir>` for each affected feature.
 
 Drop an item to stop pursuing it while keeping its dossier history. Run `events.py agents`;
 if the item's worker is live, find its short id in `claude agents --json --all` and run
-`claude stop <short id>` before closing the tab, because a dropped item's worker would keep
-spending quota unmirrored. Set `stage: dropped` and `status: idle` with `dossier.py item set`,
+`claude stop <short id>` before closing its space with `herdr.py close`, because a dropped item's worker would keep
+spending quota. Set `stage: dropped` and `status: idle` with `dossier.py item set`,
 then sync through `dossier.py sync --board <feature-dir>` as in After merge (8). Run
-`herdr.py close --item <item>` to remove its mirror tab.
+`herdr.py close --item <item> --repo <repo>` to remove its worker's space.
 
 ## Retro (9)
 
@@ -165,7 +166,8 @@ dossier: brief, decisions, and log.
 shape it returns for other kinds: `claude --bg --permission-mode auto --model
 <model> -n <feature>-retro-<pr> ...`. The prompt names the approved findings,
 the target repo and branch, and whether to open a new PR or update an existing
-one.
+one. After it starts, run `herdr.py open --worker <feature>-retro-<pr> --repo <repo>` to give
+it a space; `herdr.py sync` closes the space when the retro worker finishes.
 
 ## Monitor loops
 

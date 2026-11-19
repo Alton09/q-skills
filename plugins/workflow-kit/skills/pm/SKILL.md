@@ -18,7 +18,7 @@ Run from the project repository root. `<skill-dir>` is this skill's directory (t
 holds this `SKILL.md`), not the working directory. Use `python3 <skill-dir>/scripts/dossier.py`
 for dossier commands, `python3 <skill-dir>/scripts/launch.py` for launch decisions,
 `python3 <skill-dir>/scripts/events.py` for worker events,
-`python3 <skill-dir>/scripts/herdr.py` for the mirror,
+`python3 <skill-dir>/scripts/herdr.py` for herdr spaces,
 `python3 <skill-dir>/scripts/lock.py` for the supervisor lock, and
 `python3 <skill-dir>/scripts/scan.py` for discovery. The short names below (`dossier.py`,
 `launch.py`, `events.py`, `herdr.py`, `lock.py`, `scan.py`) mean these paths.
@@ -54,10 +54,10 @@ answers. Offer `lock.py acquire --project-dir <repo> --force` as an ask decision
 with user confirmation. Follow `references/project.md` § "Lock" for ownership and recovery.
 When the user ends the session, run `lock.py release --project-dir <repo>`.
 
-Run `herdr.py available --project-dir <repo>` for an optional herdr view of workers
-(see `references/workers.md` § "Herdr mirror") and tell the user once whether it is on;
-report any `warnings` once. On `skipped` or a `warning`, tell the user once and continue
-without the mirror. Report a herdr.py exit 2 stderr message once and continue; it never
+Run `herdr.py available --project-dir <repo>` for optional herdr spaces, one per running
+worker (see `references/workers.md` § "Herdr spaces"), and tell the user once whether they
+are on; report any `warnings` once. On `skipped` or a `warning`, tell the user once and
+continue without spaces. Report a herdr.py exit 2 stderr message once and continue; it never
 blocks a launch.
 
 Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the project manager

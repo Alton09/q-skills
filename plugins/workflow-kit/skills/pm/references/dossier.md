@@ -140,7 +140,14 @@ item without a worker); space runtime failures return JSON `warning` with exit 0
   `--board V/Features/_project` requests the project board only. Rebase recovery regenerates
   conflicting boards and keeps the local `_project/inbox.md`; other conflicts abort before
   return.
-- `checks [--project-dir D]` → `{allowRule, trusted, permissionMode, fixes}`.
+- `checks [--project-dir D] [--session ID]` →
+  `{allowRule, trusted, permissionMode, sessionPermissionMode, fixes}`. `permissionMode` is
+  the configured default. `sessionPermissionMode` is the last `permissionMode` string in
+  `~/.claude/projects/<slug>/<session>.jsonl`, where `<slug>` is the resolved project path
+  with `/` and `.` replaced by `-`. It is null without `--session`, a transcript, or a matching
+  string. A non-null mode other than `auto` adds this fix: `this pm session runs in permission
+  mode <mode> but workers run in auto, so worker idle notices and messages reach only you;
+  pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages`.
 
 `resolve-vault` and `config` resolve through `../implement-plan/scripts/config.py`, which
 merges shipped defaults, then the user, then the project `.claude/workflow-kit.json`, so
@@ -149,10 +156,19 @@ is still read as `pm`, with a rename warning. Keys are `pm.vault`,
 `pm.maxWorkers`, and `pm.herdr`. `checks` adds `rename "lead" to "pm" in <path>` to `fixes`
 when a file has `lead` and no `pm`. The vault convention is
 `~/Workspace/Obsidian/<lowercased repo directory name>-vault`. `sync` never force-pushes;
-only the project manager passes `--board`, while workers never regenerate boards.
+`events.py worker-event` regenerates the item's feature board and the project board when it
+syncs (only the project board for a `_project` item).
 
 The commands above use `dossier.py`. The additional scripts have these contracts:
 
+- `events.py wait --vault V [--interval S] [--timeout S]` → one of `{"wait":"none"}`,
+  `{"wait":"changed","items":[...]}`, `{"wait":"worker-gone","items":[...]}`, or
+  `{"wait":"timeout"}`. Each result has optional `warnings`, present only when non-empty.
+  `changed` items have `{item, oldStatus, newStatus, oldStage, newStage}`;
+  `worker-gone` items have `{item, worker, sessionId, state}`. Defaults are 20 s between polls
+  and a 3300 s timeout; the interval must be finite and positive, and the timeout finite and
+  non-negative. The command is read-only: it writes no item, log, git state, or notification.
+  Follow `references/workers.md` § "Watch" for arming and handling results.
 - `lock.py acquire --project-dir R [--force]` → `{ok, lock, holder, stale, takenOver}`.
   `holder` is null or `{pid, host, cwd, startedAt}`. A live other owner returns `ok: false`
   with its holder; no Claude ancestor adds `reason: "no claude ancestor"`. A stale local

@@ -171,6 +171,9 @@ it a space; `herdr.py sync` closes the space when the retro worker finishes.
 
 ## Monitor loops
 
+Worker completion uses `events.py wait` (`references/workers.md` § "Watch"), not a Monitor
+loop; Monitor loops stay for PR CI and reviews.
+
 Use at most one loop per watched PR. Arm it with the maximum timeout and re-arm
 it after expiry while the item remains active. A loop only reports actionable
 lines: terminal CI results from `gh pr view <n> --json headRefOid,statusCheckRollup`, never

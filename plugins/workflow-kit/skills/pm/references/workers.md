@@ -122,8 +122,8 @@ JSON result and report each `warnings` entry once.
   <sessionId> --cwd <repo>` and record any final line through `worker-event` first, then
   apply the absent-worker row of § "Reconcile" if the item is still `running`.
 - On `timeout`, reconcile every still-`running` item per § "Reconcile" before re-arming:
-  run `events.py agents`, then `last-reply` where the row calls for it. This catches idle
-  workers with unrecorded final lines and workers waiting for user input.
+  use the session-first `agents` lookup below, then `last-reply` where the row calls for it.
+  This catches idle workers with unrecorded final lines and workers waiting for user input.
 - On `none`, no item is `running`; do not re-arm.
 
 After each result, run `herdr.py sync --vault <vault> --repo <repo>` so finished workers'
@@ -140,8 +140,11 @@ any item is `running`; leave an existing wait running.
 
 ## Reconcile
 
-For every active item, read the item and run `events.py agents`. Check its plan-file checkboxes,
-run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
+For every active item, read the item and run `events.py agents --session <sessionId>`.
+Read its `worker` result, not `byName`. If the item has no `sessionId`, use
+`events.py agents --worker <worker>` instead. A null result means that worker is absent;
+never fall back to a name when the item's session is absent from the records.
+Check its plan-file checkboxes, run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
 run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the project manager's
 repository root, so their transcripts live under that directory, not the worktree. After
 reconciling, run `herdr.py sync --vault <vault> --repo <repo>` once to open missing spaces and
@@ -163,7 +166,10 @@ evidence together before changing a stage.
 A `paused` worker is either an `implement-plan` worker stopped by its own guard or an
 `address-pr` worker waiting for a decision. The user can answer in `claude attach <short id>`
 per `references/dossier.md` § "Worker names", or give the answer to the project manager.
-Fall back to the worker name only when the item has no `sessionId`. Before forwarding an answer held by the project manager, run `events.py agents`.
+Before forwarding an answer held by the project manager, run
+`events.py agents --session <sessionId>` and read `worker`. Use
+`events.py agents --worker <worker>` only when the item has no `sessionId`, as in
+§ "Reconcile". A null session match does not permit a name fallback.
 Send `SendMessage` only when that worker is `idle`; when it is `waiting`, the user must attach
 because `AskUserQuestion` owns the reply path. After a successful forward, set
 `status: running`, clear `question`, and remove `stuck` and all `paused-*` keys from

@@ -144,7 +144,8 @@ item without a worker); space runtime failures return JSON `warning` with exit 0
   `{allowRule, trusted, permissionMode, sessionPermissionMode, fixes}`. `permissionMode` is
   the configured default. `sessionPermissionMode` is the last `permissionMode` string in
   `~/.claude/projects/<slug>/<session>.jsonl`, where `<slug>` is the resolved project path
-  with `/` and `.` replaced by `-`. It is null with an empty or omitted `--session`,
+  with every character outside ASCII `A-Z`, `a-z`, and `0-9` replaced by `-`. It is null
+  with an empty or omitted `--session`,
   without a transcript, or without a matching string. A non-null mode other than `auto` adds this fix: `this pm session runs in permission
   mode <mode> but workers run in auto, so worker idle notices and messages reach only you;
   pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages`.
@@ -161,6 +162,12 @@ syncs (only the project board for a `_project` item).
 
 The commands above use `dossier.py`. The additional scripts have these contracts:
 
+- `events.py agents [--session ID] [--worker NAME]` returns the existing `byName` map
+  with `status`, `state`, and `waitingFor`. With either lookup flag, it also returns
+  `worker`: the full matching record, or null. It shares the `wait` matcher: match a
+  `sessionId` prefix or short `id` when a non-empty session is supplied, with no name
+  fallback; otherwise select the newest `startedAt` record named `NAME`. Pass the item's
+  `sessionId` when present; use `--worker` only when the item has no `sessionId`.
 - `events.py wait --vault V [--interval S] [--timeout S]` → one of `{"wait":"none"}`,
   `{"wait":"changed","items":[...]}`, `{"wait":"worker-gone","items":[...]}`, or
   `{"wait":"timeout"}`. Each result has optional `warnings`, present only when non-empty.

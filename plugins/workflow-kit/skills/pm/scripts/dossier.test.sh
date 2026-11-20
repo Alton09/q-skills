@@ -532,3 +532,14 @@ printf '%s\n' '{"permissionMode":"bypassPermissions"}' >"$HOME/.claude/projects/
 run checks --project-dir "$tmp/project" --session ""
 expect .sessionPermissionMode null; expect .fixes "$base_fixes"
 pass
+
+# 25. checks finds the session mode for paths containing underscores and spaces.
+n=25
+mkdir -p "$tmp/project_under score"
+slug=$(realpath "$tmp/project_under score" | LC_ALL=C sed 's#[^A-Za-z0-9]#-#g')
+mkdir -p "$HOME/.claude/projects/$slug"
+printf '%s\n' '{"permissionMode":"bypassPermissions"}' >"$HOME/.claude/projects/$slug/underscore.jsonl"
+run checks --project-dir "$tmp/project_under score" --session underscore
+expect .sessionPermissionMode '"bypassPermissions"'
+expect '.fixes[-1] | startswith("this pm session runs in permission mode bypassPermissions")' true
+pass

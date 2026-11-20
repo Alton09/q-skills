@@ -560,3 +560,35 @@ with patch.object(events.subprocess, 'run', side_effect=FileNotFoundError('claud
     assert not records and 'claude agents failed:' in warning
 PY
 pass
+
+# 32. Session lookup ignores stale same-name records; legacy output stays identical.
+n=32
+export CLAUDE_AGENTS='[{"name":"alpha","sessionId":"current-full","id":"short","status":"busy","state":"working","startedAt":2},{"name":"alpha","sessionId":"old","status":"waiting","state":"done","waitingFor":"user","startedAt":1}]'
+run agents
+legacy=$out
+expect . '{"byName":{"alpha":{"status":"waiting","state":"done","waitingFor":"user"}}}'
+run agents --session current --worker alpha
+expect '.worker | [.sessionId,.status,.startedAt]' '["current-full","busy",2]'
+expect 'del(.worker)' "$legacy"
+run agents --session short
+expect .worker.sessionId '"current-full"'
+run agents --session missing --worker alpha
+expect .worker null
+run agents --worker alpha
+expect .worker.sessionId '"current-full"'
+export CLAUDE_AGENTS='[{"name":"alpha","sessionId":"current-full","state":"stopped","startedAt":3},{"name":"alpha","sessionId":"old","status":"idle","startedAt":1}]'
+run agents --session current
+expect '.worker | [.sessionId,.state,has("status")]' '["current-full","stopped",false]'
+run agents --worker alpha
+expect .worker.sessionId '"current-full"'
+pass
+
+# 33. last-reply finds transcripts for paths containing underscores and spaces.
+n=33
+mkdir -p "$tmp/repo_under score"
+slug=$(realpath "$tmp/repo_under score" | LC_ALL=C sed 's#[^A-Za-z0-9]#-#g')
+mkdir -p "$HOME/.claude/projects/$slug"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"feature-plan: done plans/underscore.md"}]}}' >"$HOME/.claude/projects/$slug/underscore.jsonl"
+run last-reply --session underscore --cwd "$tmp/repo_under score"
+expect .line '"feature-plan: done plans/underscore.md"'
+pass

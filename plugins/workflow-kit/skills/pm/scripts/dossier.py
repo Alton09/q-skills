@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any, Iterable, Sequence
@@ -546,7 +547,7 @@ def sync(vault: Path, message: str, board_dirs: Sequence[Path], paths: Sequence[
 
 
 def transcript_path(cwd: Path, session: str) -> Path:
-    slug = str(cwd.resolve()).replace("/", "-").replace(".", "-")
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(cwd.resolve()))
     return Path.home() / ".claude" / "projects" / slug / f"{session}.jsonl"
 
 

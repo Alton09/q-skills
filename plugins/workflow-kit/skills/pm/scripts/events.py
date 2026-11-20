@@ -289,7 +289,15 @@ def agent_records() -> tuple[list[dict], str | None]:
     return [record for record in records if isinstance(record, dict)], None
 
 
-def agents(_args: argparse.Namespace) -> dict[str, Any]:
+def pick_agent(records: list[dict], session: str | None, worker: str | None) -> dict | None:
+    # Mirror herdr.pick: session prefix/short id exclusively, otherwise newest name.
+    rows = sorted(records, key=lambda row: row.get("startedAt") or 0, reverse=True)
+    if isinstance(session, str) and session:
+        return next((row for row in rows if str(row.get("sessionId", "")).startswith(session) or row.get("id") == session), None)
+    return next((row for row in rows if row.get("name") == worker), None)
+
+
+def agents(args: argparse.Namespace) -> dict[str, Any]:
     records, warning = agent_records()
     if warning:
         print(warning, file=sys.stderr)
@@ -298,7 +306,10 @@ def agents(_args: argparse.Namespace) -> dict[str, Any]:
         for record in records:
             if isinstance(record, dict) and isinstance(record.get("name"), str):
                 by_name[record["name"]] = {key: record.get(key) for key in ("status", "state", "waitingFor")}
-    return {"byName": by_name}
+    result: dict[str, Any] = {"byName": by_name}
+    if args.session is not None or args.worker is not None:
+        result["worker"] = pick_agent(records, args.session, args.worker)
+    return result
 
 
 def wait(args: argparse.Namespace) -> dict[str, Any]:
@@ -371,12 +382,7 @@ def wait(args: argparse.Namespace) -> dict[str, Any]:
             worker, session = data.get("worker"), data.get("sessionId")
             if not worker and not session:
                 continue
-            # Mirror herdr.pick: session prefix/short id exclusively, otherwise newest name.
-            rows = sorted(records, key=lambda row: row.get("startedAt") or 0, reverse=True)
-            if isinstance(session, str) and session:
-                record = next((row for row in rows if str(row.get("sessionId", "")).startswith(session) or row.get("id") == session), None)
-            else:
-                record = next((row for row in rows if row.get("name") == worker), None)
+            record = pick_agent(records, session, worker)
             if record is not None and "status" in record:
                 gone_counts.pop(path, None)
                 continue
@@ -406,7 +412,9 @@ def make_parser() -> argparse.ArgumentParser:
     reply = sub.add_parser("last-reply")
     reply.add_argument("--session", required=True)
     reply.add_argument("--cwd", default=".")
-    sub.add_parser("agents")
+    agent = sub.add_parser("agents")
+    agent.add_argument("--session")
+    agent.add_argument("--worker")
     waiter = sub.add_parser("wait")
     waiter.add_argument("--vault", required=True)
     waiter.add_argument("--interval", type=float, default=20)

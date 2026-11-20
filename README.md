@@ -78,6 +78,8 @@ review are the checkpoints; implementation choices that survive review are recor
 `### Unplanned Decisions` in the PR body and then logged to the dossier after merge. When
 available, the optional dev-toolkit plugin supplies desktop notifications, PR review, and retro.
 
+The hook starts at most one detached vault sync per project every 10 minutes. It commits the whole vault as `vault: auto-sync`, then pulls with rebase and pushes only when the vault branch has an upstream. It never force-pushes. If a rebase conflicts, it aborts and keeps the commits local; resolve the conflict manually, using the per-vault log in `${XDG_RUNTIME_DIR:-/tmp}/workflow-kit-vault-sync/` for details. Set `WORKFLOW_KIT_VAULT_SYNC=0` to opt out.
+
 ### dev-toolkit
 
 Standalone dev utilities that work independently of any planning pipeline.
@@ -307,6 +309,9 @@ q-skills/
     workflow-kit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.1.0)
+      hooks/
+        hooks.json            # Registers the vault auto-sync PostToolUse hook
+        vault-sync.sh         # Throttled vault commit, pull, and push
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)

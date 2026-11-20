@@ -597,7 +597,7 @@ def checks(project_dir: Path, session: str | None = None) -> dict[str, Any]:
         if "lead" in document and "pm" not in document:
             fixes.append(f'rename "lead" to "pm" in {path}')
     session_permission_mode = None
-    if session is not None:
+    if session:
         try:
             with transcript_path(project_dir, session).open(encoding="utf-8") as transcript:
                 for line in transcript:

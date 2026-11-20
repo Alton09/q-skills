@@ -518,9 +518,27 @@ finished_name = {'name': 'alpha-active', 'state': 'stopped'}
 result, _ = scenario([([live_session, finished_name], None)] * 10)
 assert result == {'wait': 'timeout'}, result
 for status in ['busy', 'idle', 'waiting']:
-    # Fall back to worker name when sessionId does not match.
-    result, _ = scenario([([{'name': 'alpha-active', 'sessionId': 'other', 'status': status}], None)] * 10)
-    assert result == {'wait': 'timeout'}, result
+    # A stale live name cannot mask an absent session.
+    result, calls = scenario([([{'name': 'alpha-active', 'sessionId': 'other', 'status': status}], None)] * 10)
+    assert result['wait'] == 'worker-gone' and calls == 2, (result, calls)
+    # Session prefixes and short ids match live records regardless of worker name.
+    for identity in [{'sessionId': 'session-full'}, {'id': 'session'}]:
+        result, _ = scenario([([{'name': 'renamed', 'status': status, **identity}], None)] * 10)
+        assert result == {'wait': 'timeout'}, result
+    # Without a session, fall back to the newest record with the worker name.
+    def no_session(_poll):
+        write({key: value for key, value in base.items() if key != 'sessionId'})
+    older = {'name': 'alpha-active', 'state': 'done', 'startedAt': 1}
+    newer = {'name': 'alpha-active', 'status': status, 'startedAt': 2}
+    for rows in [[older, newer], [newer, older]]:
+        result, _ = scenario([(rows, None)] * 10, no_session)
+        assert result == {'wait': 'timeout'}, result
+    # The newest finished record also wins over an older live record.
+    newer = {'name': 'alpha-active', 'state': 'stopped', 'startedAt': 3}
+    older = {'name': 'alpha-active', 'status': status, 'startedAt': 2}
+    result, calls = scenario([([older, newer], None)] * 10, no_session)
+    assert result['wait'] == 'worker-gone' and calls == 2, (result, calls)
+    assert result['items'][0]['state'] == 'stopped', result
 result, calls = scenario([([], None), ([], 'warning: unavailable'), ([], None), ([], None)])
 assert result['wait'] == 'worker-gone' and calls == 4, (result, calls)
 assert result['warnings'] == ['warning: unavailable']

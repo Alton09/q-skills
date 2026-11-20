@@ -60,7 +60,7 @@ are on; report any `warnings` once. On `skipped` or a `warning`, tell the user o
 continue without spaces. Report a herdr.py exit 2 stderr message once and continue; it never
 blocks a launch.
 
-Run `dossier.py checks --project-dir <repo> --session $CLAUDE_CODE_SESSION_ID` and print
+Run `dossier.py checks --project-dir <repo> --session "$CLAUDE_CODE_SESSION_ID"` and print
 every entry in `fixes`. Advise the project manager session to use permission mode `auto`.
 `permissionMode` is the configured default; `sessionPermissionMode` comes from this session's
 transcript. Continue after the fixes. Follow `references/workers.md` § "Permissions and trust"

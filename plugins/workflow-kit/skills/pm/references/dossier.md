@@ -144,8 +144,8 @@ item without a worker); space runtime failures return JSON `warning` with exit 0
   `{allowRule, trusted, permissionMode, sessionPermissionMode, fixes}`. `permissionMode` is
   the configured default. `sessionPermissionMode` is the last `permissionMode` string in
   `~/.claude/projects/<slug>/<session>.jsonl`, where `<slug>` is the resolved project path
-  with `/` and `.` replaced by `-`. It is null without `--session`, a transcript, or a matching
-  string. A non-null mode other than `auto` adds this fix: `this pm session runs in permission
+  with `/` and `.` replaced by `-`. It is null with an empty or omitted `--session`,
+  without a transcript, or without a matching string. A non-null mode other than `auto` adds this fix: `this pm session runs in permission
   mode <mode> but workers run in auto, so worker idle notices and messages reach only you;
   pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages`.
 
@@ -168,7 +168,11 @@ The commands above use `dossier.py`. The additional scripts have these contracts
   `worker-gone` items have `{item, worker, sessionId, state}`. Defaults are 20 s between polls
   and a 3300 s timeout; the interval must be finite and positive, and the timeout finite and
   non-negative. The command is read-only: it writes no item, log, git state, or notification.
-  Follow `references/workers.md` § "Watch" for arming and handling results.
+  Match by `sessionId` prefix or short `id` when the item has a `sessionId`; do not fall
+  back to a name if that session is absent. Without a session, use the newest `startedAt`
+  record whose name equals `worker`, as in `herdr.py`. A live `idle` or `waiting` record
+  never triggers `worker-gone`. On timeout, reconcile every still-`running` item before
+  re-arming, per `references/workers.md` § "Watch" and § "Reconcile".
 - `lock.py acquire --project-dir R [--force]` → `{ok, lock, holder, stale, takenOver}`.
   `holder` is null or `{pid, host, cwd, startedAt}`. A live other owner returns `ok: false`
   with its holder; no Claude ancestor adds `reason: "no claude ancestor"`. A stale local

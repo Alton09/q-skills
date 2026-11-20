@@ -121,7 +121,9 @@ JSON result and report each `warnings` entry once.
 - On `worker-gone`, reconcile each listed item: run `events.py last-reply --session
   <sessionId> --cwd <repo>` and record any final line through `worker-event` first, then
   apply the absent-worker row of § "Reconcile" if the item is still `running`.
-- On `timeout`, re-arm while any item is `running`.
+- On `timeout`, reconcile every still-`running` item per § "Reconcile" before re-arming:
+  run `events.py agents`, then `last-reply` where the row calls for it. This catches idle
+  workers with unrecorded final lines and workers waiting for user input.
 - On `none`, no item is `running`; do not re-arm.
 
 After each result, run `herdr.py sync --vault <vault> --repo <repo>` so finished workers'

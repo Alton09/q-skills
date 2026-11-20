@@ -371,9 +371,12 @@ def wait(args: argparse.Namespace) -> dict[str, Any]:
             worker, session = data.get("worker"), data.get("sessionId")
             if not worker and not session:
                 continue
-            record = next((record for record in records if session and record.get("sessionId") == session), None)
-            if record is None and worker:
-                record = next((record for record in records if record.get("name") == worker), None)
+            # Mirror herdr.pick: session prefix/short id exclusively, otherwise newest name.
+            rows = sorted(records, key=lambda row: row.get("startedAt") or 0, reverse=True)
+            if isinstance(session, str) and session:
+                record = next((row for row in rows if str(row.get("sessionId", "")).startswith(session) or row.get("id") == session), None)
+            else:
+                record = next((row for row in rows if row.get("name") == worker), None)
             if record is not None and "status" in record:
                 gone_counts.pop(path, None)
                 continue

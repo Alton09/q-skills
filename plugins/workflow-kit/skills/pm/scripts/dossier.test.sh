@@ -525,3 +525,10 @@ printf '%s\n' '{"type":"assistant"}' >"$transcript"
 run checks --project-dir "$tmp/project" --session pm-session
 expect .sessionPermissionMode null; expect .fixes "$base_fixes"
 pass
+
+# 24. An empty session ignores even a stray .jsonl transcript and adds no mode fix.
+n=24
+printf '%s\n' '{"permissionMode":"bypassPermissions"}' >"$HOME/.claude/projects/$slug/.jsonl"
+run checks --project-dir "$tmp/project" --session ""
+expect .sessionPermissionMode null; expect .fixes "$base_fixes"
+pass

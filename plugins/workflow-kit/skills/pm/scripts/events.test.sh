@@ -29,6 +29,8 @@ EOF
 cat >"$tmp/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "${CLAUDE_AGENTS:-[] }"
+[ -z "${CLAUDE_AGENTS_MARKER:-}" ] || touch "$CLAUDE_AGENTS_MARKER"
+exit "${CLAUDE_AGENTS_RC:-0}"
 EOF
 chmod +x "$tmp/bin/gh" "$tmp/bin/git" "$tmp/bin/claude"
 
@@ -262,7 +264,11 @@ run worker-event --item "$item" --line "$(printf 'address-pr: needs input #16\nQ
 expect '.push | endswith("; claude attach 0123abcd")' true
 pass
 
-# 19. Without --no-sync, worker-event commits and pushes the item and log to the vault remote.
+# All --no-sync cases so far leave boards absent.
+[ ! -e "$tmp/vault/Features/alpha/board.md" ] || fail '--no-sync wrote feature board'
+[ ! -e "$tmp/vault/Features/_project/board.md" ] || fail '--no-sync wrote project board'
+
+# 19. Without --no-sync, worker-event pushes the item, log, and both boards.
 n=19
 git init -q --bare --initial-branch=main "$tmp/vault-remote.git"
 git clone -q "$tmp/vault-remote.git" "$tmp/sync-vault" 2>/dev/null
@@ -275,9 +281,11 @@ printf '%s\n' '---' 'slug: synced' 'title: synced' 'stage: implement' 'status: r
 git -C "$tmp/sync-vault" add -A && git -C "$tmp/sync-vault" commit -qm seed && git -C "$tmp/sync-vault" push -q -u origin main 2>/dev/null
 run worker-event --item "$item" --line 'feature-plan: done plans/synced.md'
 expect .synced.ok true
-git -C "$tmp/vault-remote.git" log -1 --format=%s main | grep -Fxq 'pm: plan-done' || fail 'sync commit not pushed'
+git -C "$tmp/vault-remote.git" log -1 --format=%s main | grep -Fxq 'pm: plan-done (board)' || fail 'board commit not pushed'
 git -C "$tmp/vault-remote.git" show main:Features/alpha/items/synced.md | grep -Fq 'status: idle' || fail 'item not pushed'
 git -C "$tmp/vault-remote.git" show main:Features/alpha/log.md | grep -Fq 'plan-done' || fail 'log not pushed'
+git -C "$tmp/vault-remote.git" show main:Features/alpha/board.md | grep 'synced' | grep -Fq 'idle' || fail 'feature board stale'
+git -C "$tmp/vault-remote.git" show main:Features/_project/board.md | grep -Fq 'synced' || fail 'project board stale'
 pass
 
 # 20. Standalone events use the project label and their own log, without feature churn.
@@ -295,4 +303,242 @@ cp "$tmp/vault/Features/_project/log.md" "$tmp/project-log-before"
 run worker-event --item "$item" --line 'feature-plan: done plans/fix-x.md' --no-sync
 expect .push null
 cmp -s "$tmp/project-log-before" "$tmp/vault/Features/_project/log.md" || fail 'duplicate standalone event appended log'
+pass
+
+# 21. A synced project item regenerates only the project board.
+n=21
+git init -q --bare --initial-branch=main "$tmp/project-remote.git"
+git clone -q "$tmp/project-remote.git" "$tmp/project-vault" 2>/dev/null
+git -C "$tmp/project-vault" config user.name 'Events Test'
+git -C "$tmp/project-vault" config user.email events@example.invalid
+python3 "$here/dossier.py" init-project --vault "$tmp/project-vault" >/dev/null || fail 'init-project'
+# An unrelated feature exists, but its board must not be generated.
+mkdir -p "$tmp/project-vault/Features/alpha/items"
+python3 "$here/dossier.py" item new --feature-dir "$tmp/project-vault/Features/_project" --slug standalone --title Standalone --set status=running >/dev/null || fail 'project item'
+item="$tmp/project-vault/Features/_project/items/standalone.md"
+git -C "$tmp/project-vault" add -A && git -C "$tmp/project-vault" commit -qm seed && git -C "$tmp/project-vault" push -q -u origin main 2>/dev/null
+run worker-event --item "$item" --line 'feature-plan: done plans/standalone.md'
+expect .synced.ok true
+git -C "$tmp/project-remote.git" show main:Features/_project/board.md | grep 'standalone' | grep -Fq 'idle' || fail 'standalone board stale'
+[ ! -e "$tmp/project-vault/Features/alpha/board.md" ] || fail 'project sync wrote feature board'
+pass
+
+# 22. --no-sync on a tracked vault makes no commit and leaves boards untouched.
+n=22
+before=$(git -C "$tmp/project-vault" rev-parse HEAD)
+cp "$tmp/project-vault/Features/_project/board.md" "$tmp/board-before"
+run worker-event --item "$item" --line 'feature-plan: done plans/changed.md' --no-sync
+expect .synced false
+[ "$before" = "$(git -C "$tmp/project-vault" rev-parse HEAD)" ] || fail '--no-sync committed'
+cmp -s "$tmp/board-before" "$tmp/project-vault/Features/_project/board.md" || fail '--no-sync changed board'
+pass
+
+# Wait fixtures are isolated from worker-event cases.
+wait_vault="$tmp/wait-vault"
+wait_feature="$wait_vault/Features/alpha"
+mkdir -p "$wait_feature/items"
+wait_item="$wait_feature/items/active.md"
+export CLAUDE_AGENTS='[{"name":"alpha-active","sessionId":"live-session","status":"busy","state":"working"}]'
+export CLAUDE_AGENTS_MARKER="$tmp/agents-polled"
+wait_new() {
+  rm -f "$wait_item"
+  python3 "$here/dossier.py" item new --feature-dir "$wait_feature" --slug active --title Active --set status=running --set stage=implement --set worker=alpha-active --set sessionId=live-session >/dev/null || fail 'wait fixture'
+}
+start_wait() {
+  rm -f "$CLAUDE_AGENTS_MARKER"
+  python3 "$script" wait --vault "$wait_vault" --interval 0.1 --timeout "${1:-3}" >"$tmp/wait.out" 2>"$tmp/wait.err" &
+  wait_pid=$!
+}
+polled() {
+  local attempt
+  for attempt in $(seq 1 200); do
+    [ ! -e "$CLAUDE_AGENTS_MARKER" ] || return 0
+    sleep 0.01
+  done
+  fail 'wait did not poll agents'
+}
+finish_wait() {
+  wait "$wait_pid" || fail "wait exit $?"
+  out=$(cat "$tmp/wait.out")
+  [ "$(wc -l <"$tmp/wait.out")" -eq 1 ] || fail 'wait expected one JSON line'
+  jq -e 'type == "object"' <<<"$out" >/dev/null || fail 'wait not JSON object'
+}
+
+# 23. No running item returns immediately, without polling Claude.
+n=23
+start_wait
+finish_wait
+expect .wait '"none"'; expect 'has("warnings")' false
+[ ! -e "$CLAUDE_AGENTS_MARKER" ] || fail 'none polled agents'
+pass
+
+# 24. A running item becoming idle returns its old and new values.
+n=24
+wait_new
+start_wait
+polled
+python3 "$here/dossier.py" item set "$wait_item" status=idle >/dev/null || fail 'set idle'
+finish_wait
+expect .wait '"changed"'
+expect '.items | length' 1
+expect '.items[0] | [.oldStatus,.newStatus,.oldStage,.newStage]' '["running","idle","implement","implement"]'
+expect '.items[0].item' "$(jq -nc --arg path "$wait_item" '$path')"
+expect 'has("warnings")' false
+pass
+
+# 25. A finished worker with no live status counts as gone after two polls.
+n=25
+wait_new
+export CLAUDE_AGENTS='[{"name":"alpha-active","sessionId":"live-session","state":"done"}]'
+start_wait
+finish_wait
+expect .wait '"worker-gone"'
+expect '.items[0] | [.worker,.sessionId,.state]' '["alpha-active","live-session","done"]'
+pass
+
+# 26. A live busy worker times out; wait writes no vault files.
+n=26
+export CLAUDE_AGENTS='[{"name":"alpha-active","sessionId":"live-session","status":"busy","state":"working"}]'
+before=$(find "$wait_vault" -type f -print0 | sort -z | xargs -0 sha256sum)
+start_wait 0.4
+finish_wait
+expect .wait '"timeout"'; expect 'has("warnings")' false
+after=$(find "$wait_vault" -type f -print0 | sort -z | xargs -0 sha256sum)
+[ "$before" = "$after" ] || fail 'wait changed vault files'
+pass
+
+# 27. Claude failure never signals gone; later item change retains one warning.
+n=27
+export CLAUDE_AGENTS_RC=1
+start_wait
+polled
+sleep 0.25
+python3 "$here/dossier.py" item set "$wait_item" status=idle >/dev/null || fail 'set idle'
+finish_wait
+expect .wait '"changed"'; expect '.warnings | length' 1
+expect '.warnings[0] | startswith("warning: claude agents failed:")' true
+unset CLAUDE_AGENTS_RC
+pass
+
+# 28. An initially idle second item becoming running ends the wait.
+n=28
+wait_new
+python3 "$here/dossier.py" item new --feature-dir "$wait_feature" --slug second --title Second --set status=idle >/dev/null || fail 'second item'
+start_wait
+polled
+python3 "$here/dossier.py" item set "$wait_feature/items/second.md" status=running >/dev/null || fail 'launch second'
+finish_wait
+expect .wait '"changed"'
+expect '.items[0] | [.oldStatus,.newStatus]' '["idle","running"]'
+expect '.items[0].item | endswith("/second.md")' true
+pass
+
+# 29. Invalid polling values and a missing Features directory are usage errors.
+n=29
+for args in '--interval 0' '--interval -1' '--interval nan' '--timeout -1' '--timeout inf'; do
+  # Deliberate splitting: each fixture contains one option and its value.
+  out=$(python3 "$script" wait --vault "$wait_vault" $args 2>"$tmp/error")
+  rc=$?
+  [ "$rc" -eq 2 ] || fail "invalid $args exit $rc"
+  [ -s "$tmp/error" ] || fail 'missing usage diagnostic'
+done
+out=$(python3 "$script" wait --vault "$tmp/missing" 2>"$tmp/error")
+[ "$?" -eq 2 ] || fail 'missing Features exit'
+grep -Fq 'Features directory not found' "$tmp/error" || fail 'missing Features diagnostic'
+pass
+
+# 30. A partial item write is retried, warns once, and is never a change itself.
+n=30
+wait_new
+python3 "$here/dossier.py" item set "$wait_feature/items/second.md" status=idle >/dev/null || fail 'reset second'
+start_wait
+polled
+cp "$wait_item" "$tmp/valid-item"
+printf '%s\n' '---' 'status: running' >"$wait_item"
+sleep 0.35
+kill -0 "$wait_pid" 2>/dev/null || fail 'partial write ended wait'
+cp "$tmp/valid-item" "$wait_item"
+python3 "$here/dossier.py" item set "$wait_item" status=idle >/dev/null || fail 'recover item'
+finish_wait
+expect .wait '"changed"'; expect '.warnings | length' 1
+expect '.warnings[0] | contains("cannot parse item")' true
+pass
+
+# 31. Poll semantics: deletion, new launch, stage/updated changes, worker identity,
+# two consecutive gone polls, and failures between polls. Fake time avoids races.
+n=31
+python3 - "$here" "$tmp/poll-vault" <<'PY' || fail 'poll semantics'
+import argparse
+from pathlib import Path
+import sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import dossier
+import events
+
+vault = Path(sys.argv[2])
+item = vault / 'Features/alpha/items/active.md'
+item.parent.mkdir(parents=True)
+base = dict(slug='active', status='running', stage='implement', updated='before',
+            worker='alpha-active', sessionId='session')
+
+def write(data):
+    # Preserve explicit updated values for deterministic updated-only changes.
+    item.write_text('---\n' + ''.join(f'{key}: {value}\n' for key, value in data.items()) + '---\n')
+
+def scenario(records, mutate=None, timeout=0.6):
+    write(base)
+    second = item.with_name('new.md')
+    second.unlink(missing_ok=True)
+    clock = [0.0]
+    polls = [0]
+    def sleep(seconds):
+        clock[0] += seconds
+        polls[0] += 1
+        if mutate:
+            mutate(polls[0])
+    with patch.object(events.time, 'monotonic', side_effect=lambda: clock[0]), \
+         patch.object(events.time, 'sleep', side_effect=sleep), \
+         patch.object(events, 'agent_records', side_effect=records) as agents:
+        result = events.wait(argparse.Namespace(vault=str(vault), interval=0.1, timeout=timeout))
+    return result, agents.call_count
+
+result, calls = scenario([], lambda poll: item.unlink() if poll == 1 else None)
+assert result['wait'] == 'changed' and calls == 0, result
+assert result['items'][0]['newStatus'] is None and result['items'][0]['newStage'] is None
+for key, value in [('stage', 'pr'), ('updated', 'after')]:
+    result, calls = scenario([], lambda poll: write({**base, key: value}))
+    assert result['wait'] == 'changed' and calls == 0, result
+second = item.with_name('new.md')
+result, _ = scenario([], lambda poll: second.write_text('---\nstatus: running\nstage: plan\n---\n'))
+assert result['items'][0]['oldStatus'] is None and result['items'][0]['newStatus'] == 'running', result
+
+live_session = {'name': 'renamed', 'sessionId': 'session', 'status': 'idle'}
+finished_name = {'name': 'alpha-active', 'state': 'stopped'}
+result, _ = scenario([([live_session, finished_name], None)] * 10)
+assert result == {'wait': 'timeout'}, result
+for status in ['busy', 'idle', 'waiting']:
+    # Fall back to worker name when sessionId does not match.
+    result, _ = scenario([([{'name': 'alpha-active', 'sessionId': 'other', 'status': status}], None)] * 10)
+    assert result == {'wait': 'timeout'}, result
+result, calls = scenario([([], None), ([], 'warning: unavailable'), ([], None), ([], None)])
+assert result['wait'] == 'worker-gone' and calls == 4, (result, calls)
+assert result['warnings'] == ['warning: unavailable']
+result, calls = scenario([([], None), ([live_session], None), ([], None), ([], None)])
+assert result['wait'] == 'worker-gone' and calls == 4, (result, calls)
+result, _ = scenario([([], 'warning: unavailable')] * 10)
+assert result == {'wait': 'timeout', 'warnings': ['warning: unavailable']}, result
+result, calls = scenario([], timeout=0)
+assert result == {'wait': 'timeout'} and calls == 0, result
+
+# Invalid JSON and failed commands produce warnings rather than gone evidence.
+from subprocess import CompletedProcess
+for output in ['broken', 'null', '{"agents":null}']:
+    with patch.object(events.subprocess, 'run', return_value=CompletedProcess([], 0, output, '')):
+        records, warning = events.agent_records()
+        assert records == [] and warning == 'warning: claude agents returned invalid JSON'
+with patch.object(events.subprocess, 'run', side_effect=FileNotFoundError('claude missing')):
+    records, warning = events.agent_records()
+    assert not records and 'claude agents failed:' in warning
+PY
 pass

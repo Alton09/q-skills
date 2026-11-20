@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from typing import Any, Sequence
 
 import dossier
@@ -213,7 +215,10 @@ def worker_event(args: argparse.Namespace) -> dict[str, Any]:
     sync_result: dict[str, Any] | None = None
     if not args.no_sync:
         relative = os.path.relpath(path, vault)
-        sync_result = dossier.sync(vault, f"pm: {log_event}", [], [relative, os.path.relpath(path.parent.parent / "log.md", vault)])
+        feature_dir = path.parent.parent
+        project_dir = vault / "Features" / dossier.PROJECT_DIR
+        board_dirs = [project_dir] if feature_dir == project_dir else [feature_dir, project_dir]
+        sync_result = dossier.sync(vault, f"pm: {log_event}", board_dirs, [relative, os.path.relpath(path.parent.parent / "log.md", vault)])
     return {"item": str(path), "event": event, "push": push, "synced": sync_result if sync_result is not None else False}
 
 
@@ -245,8 +250,7 @@ def assistant_text(value: Any) -> str | None:
 
 def last_reply(args: argparse.Namespace) -> dict[str, Any]:
     cwd = Path(args.cwd).expanduser().resolve()
-    slug = str(cwd).replace("/", "-").replace(".", "-")
-    transcript = Path.home() / ".claude" / "projects" / slug / f"{args.session}.jsonl"
+    transcript = dossier.transcript_path(cwd, args.session)
     if not transcript.is_file():
         print(f"warning: transcript not found: {transcript}", file=sys.stderr)
         return {"reply": None, "line": None}
@@ -268,23 +272,116 @@ def last_reply(args: argparse.Namespace) -> dict[str, Any]:
     return {"reply": reply, "line": line}
 
 
-def agents(_args: argparse.Namespace) -> dict[str, Any]:
-    result = subprocess.run(["claude", "agents", "--json", "--all"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+def agent_records() -> tuple[list[dict], str | None]:
+    try:
+        result = subprocess.run(["claude", "agents", "--json", "--all"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError as exc:
+        return [], f"warning: claude agents failed: {exc}"
     if result.returncode:
-        print(f"warning: claude agents failed: {(result.stderr or result.stdout).strip()}", file=sys.stderr)
-        return {"byName": {}}
+        return [], f"warning: claude agents failed: {(result.stderr or result.stdout).strip()}"
     try:
         parsed = json.loads(result.stdout)
     except json.JSONDecodeError:
-        print("warning: claude agents returned invalid JSON", file=sys.stderr)
-        return {"byName": {}}
+        return [], "warning: claude agents returned invalid JSON"
     records = parsed.get("agents", []) if isinstance(parsed, dict) else parsed
+    if not isinstance(records, list):
+        return [], "warning: claude agents returned invalid JSON"
+    return [record for record in records if isinstance(record, dict)], None
+
+
+def agents(_args: argparse.Namespace) -> dict[str, Any]:
+    records, warning = agent_records()
+    if warning:
+        print(warning, file=sys.stderr)
     by_name: dict[str, dict[str, Any]] = {}
     if isinstance(records, list):
         for record in records:
             if isinstance(record, dict) and isinstance(record.get("name"), str):
                 by_name[record["name"]] = {key: record.get(key) for key in ("status", "state", "waitingFor")}
     return {"byName": by_name}
+
+
+def wait(args: argparse.Namespace) -> dict[str, Any]:
+    if not math.isfinite(args.interval) or args.interval <= 0:
+        raise UsageError("--interval must be > 0 and finite")
+    if not math.isfinite(args.timeout) or args.timeout < 0:
+        raise UsageError("--timeout must be >= 0 and finite")
+    features = Path(args.vault).expanduser().resolve() / "Features"
+    if not features.is_dir():
+        raise UsageError(f"Features directory not found: {features}")
+    deadline = time.monotonic() + args.timeout
+    warnings: list[str] = []
+    warned_paths: set[Path] = set()
+
+    def result(kind: str, **extra: Any) -> dict[str, Any]:
+        return {"wait": kind, **extra, **({"warnings": warnings} if warnings else {})}
+
+    def read_items() -> dict[Path, dict | None]:
+        items: dict[Path, dict | None] = {}
+        for path in sorted(features.glob("*/items/*.md")):
+            try:
+                items[path] = dossier.parse_item(path)[0]
+            except (dossier.UsageError, OSError, UnicodeError) as exc:
+                # Keep the path present: a partial write is neither a change nor deletion.
+                items[path] = None
+                if path not in warned_paths:
+                    warnings.append(f"warning: cannot parse item {path}: {exc}")
+                    warned_paths.add(path)
+        return items
+
+    def state(data: dict) -> tuple[Any, Any, Any]:
+        return tuple(data.get(key) for key in ("status", "stage", "updated"))
+
+    initial = read_items()
+    snapshot = {path: state(data) for path, data in initial.items() if data is not None}
+    watched = {path for path, values in snapshot.items() if values[0] == "running"}
+    if not watched:
+        return result("none")
+    gone_counts: dict[Path, int] = {}
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return result("timeout")
+        time.sleep(min(args.interval, remaining))
+        if time.monotonic() >= deadline:
+            return result("timeout")
+        current = read_items()
+        changes = []
+        for path in sorted(watched | current.keys()):
+            if path in current and current[path] is None:
+                gone_counts.pop(path, None)
+                continue
+            old = snapshot.get(path, (None, None, None))
+            new = state(current[path]) if path in current else (None, None, None)
+            if (path in watched and old != new) or (old[0] != "running" and new[0] == "running"):
+                changes.append({"item": str(path), "oldStatus": old[0], "newStatus": new[0], "oldStage": old[1], "newStage": new[1]})
+        if changes:
+            return result("changed", items=changes)
+        records, warning = agent_records()
+        if warning:
+            if warning not in warnings:
+                warnings.append(warning)
+            gone_counts.clear()
+            continue
+        gone = []
+        for path in sorted(watched):
+            data = current.get(path)
+            if data is None:
+                continue
+            worker, session = data.get("worker"), data.get("sessionId")
+            if not worker and not session:
+                continue
+            record = next((record for record in records if session and record.get("sessionId") == session), None)
+            if record is None and worker:
+                record = next((record for record in records if record.get("name") == worker), None)
+            if record is not None and "status" in record:
+                gone_counts.pop(path, None)
+                continue
+            gone_counts[path] = gone_counts.get(path, 0) + 1
+            if gone_counts[path] >= 2:
+                gone.append({"item": str(path), "worker": worker, "sessionId": session, "state": record.get("state") if record else None})
+        if gone:
+            return result("worker-gone", items=gone)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -307,6 +404,10 @@ def make_parser() -> argparse.ArgumentParser:
     reply.add_argument("--session", required=True)
     reply.add_argument("--cwd", default=".")
     sub.add_parser("agents")
+    waiter = sub.add_parser("wait")
+    waiter.add_argument("--vault", required=True)
+    waiter.add_argument("--interval", type=float, default=20)
+    waiter.add_argument("--timeout", type=float, default=3300)
     return parser
 
 
@@ -317,6 +418,8 @@ def run_cli(args: argparse.Namespace) -> dict[str, Any]:
         return notify(args)
     if args.command == "last-reply":
         return last_reply(args)
+    if args.command == "wait":
+        return wait(args)
     return agents(args)
 
 

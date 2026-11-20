@@ -500,3 +500,28 @@ with patch.object(dossier, 'commit_if_staged', return_value=False), \
     assert result['ok'] and result['warnings'] == warnings, result
 PY
 pass
+
+# 23. checks reads the last string permissionMode from the session transcript.
+n=23
+slug=$(realpath "$tmp/project" | sed 's#[/.]#-#g')
+mkdir -p "$HOME/.claude/projects/$slug"
+transcript="$HOME/.claude/projects/$slug/pm-session.jsonl"
+run checks --project-dir "$tmp/project"
+base_fixes=$(jq -c .fixes <<<"$out")
+expect .sessionPermissionMode null
+printf '%s\n' '{"type":"permission-mode","permissionMode":"auto"}' '{"type":"user","permissionMode":"bypassPermissions"}' '{"permissionMode":broken' '{"permissionMode":false}' '[]' >"$transcript"
+run checks --project-dir "$tmp/project" --session pm-session
+expect .sessionPermissionMode '"bypassPermissions"'
+expect '.fixes[-1]' '"this pm session runs in permission mode bypassPermissions but workers run in auto, so worker idle notices and messages reach only you; pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages"'
+expect '.fixes[:-1]' "$base_fixes"
+printf '%s\n' '{"type":"permission-mode","permissionMode":"auto"}' >>"$transcript"
+run checks --project-dir "$tmp/project" --session pm-session
+expect .sessionPermissionMode '"auto"'; expect .fixes "$base_fixes"
+run checks --project-dir "$tmp/project" --session missing-session
+expect .sessionPermissionMode null; expect .fixes "$base_fixes"
+run checks --project-dir "$tmp/project"
+expect .sessionPermissionMode null; expect .fixes "$base_fixes"
+printf '%s\n' '{"type":"assistant"}' >"$transcript"
+run checks --project-dir "$tmp/project" --session pm-session
+expect .sessionPermissionMode null; expect .fixes "$base_fixes"
+pass

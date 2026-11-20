@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any, Iterable, Sequence
@@ -545,7 +546,12 @@ def sync(vault: Path, message: str, board_dirs: Sequence[Path], paths: Sequence[
     return {"ok": False, "error": "push rejected after 3 attempts", "attempts": 3, "warnings": warnings}
 
 
-def checks(project_dir: Path) -> dict[str, Any]:
+def transcript_path(cwd: Path, session: str) -> Path:
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(cwd.resolve()))
+    return Path.home() / ".claude" / "projects" / slug / f"{session}.jsonl"
+
+
+def checks(project_dir: Path, session: str | None = None) -> dict[str, Any]:
     project_dir = project_dir.expanduser().resolve()
     settings_paths = (
         Path.home() / ".claude" / "settings.json",
@@ -591,7 +597,24 @@ def checks(project_dir: Path) -> dict[str, Any]:
         document = read_json(path)
         if "lead" in document and "pm" not in document:
             fixes.append(f'rename "lead" to "pm" in {path}')
-    return {"allowRule": allow_rule, "trusted": trusted, "permissionMode": permission_mode, "fixes": fixes}
+    session_permission_mode = None
+    if session:
+        try:
+            with transcript_path(project_dir, session).open(encoding="utf-8") as transcript:
+                for line in transcript:
+                    if '"permissionMode"' not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(entry, dict) and isinstance(entry.get("permissionMode"), str):
+                        session_permission_mode = entry["permissionMode"]
+        except FileNotFoundError:
+            pass
+    if session_permission_mode is not None and session_permission_mode != "auto":
+        fixes.append(f"this pm session runs in permission mode {session_permission_mode} but workers run in auto, so worker idle notices and messages reach only you; pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages")
+    return {"allowRule": allow_rule, "trusted": trusted, "permissionMode": permission_mode, "sessionPermissionMode": session_permission_mode, "fixes": fixes}
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -639,6 +662,7 @@ def make_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("paths", nargs="*")
     checks_parser = sub.add_parser("checks")
     checks_parser.add_argument("--project-dir", default=".")
+    checks_parser.add_argument("--session")
     return parser
 
 
@@ -671,7 +695,7 @@ def run_cli(args: argparse.Namespace) -> dict[str, Any]:
             paths.pop(0)
         return sync(Path(args.vault), args.message, [Path(path).resolve() for path in args.board], paths)
     if args.command == "checks":
-        return checks(Path(args.project_dir))
+        return checks(Path(args.project_dir), args.session)
     raise AssertionError(args.command)
 
 

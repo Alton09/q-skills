@@ -140,7 +140,15 @@ item without a worker); space runtime failures return JSON `warning` with exit 0
   `--board V/Features/_project` requests the project board only. Rebase recovery regenerates
   conflicting boards and keeps the local `_project/inbox.md`; other conflicts abort before
   return.
-- `checks [--project-dir D]` → `{allowRule, trusted, permissionMode, fixes}`.
+- `checks [--project-dir D] [--session ID]` →
+  `{allowRule, trusted, permissionMode, sessionPermissionMode, fixes}`. `permissionMode` is
+  the configured default. `sessionPermissionMode` is the last `permissionMode` string in
+  `~/.claude/projects/<slug>/<session>.jsonl`, where `<slug>` is the resolved project path
+  with every character outside ASCII `A-Z`, `a-z`, and `0-9` replaced by `-`. It is null
+  with an empty or omitted `--session`,
+  without a transcript, or without a matching string. A non-null mode other than `auto` adds this fix: `this pm session runs in permission
+  mode <mode> but workers run in auto, so worker idle notices and messages reach only you;
+  pm relies on events.py wait; switch this session to auto (shift+tab) to restore direct messages`.
 
 `resolve-vault` and `config` resolve through `../implement-plan/scripts/config.py`, which
 merges shipped defaults, then the user, then the project `.claude/workflow-kit.json`, so
@@ -149,10 +157,29 @@ is still read as `pm`, with a rename warning. Keys are `pm.vault`,
 `pm.maxWorkers`, and `pm.herdr`. `checks` adds `rename "lead" to "pm" in <path>` to `fixes`
 when a file has `lead` and no `pm`. The vault convention is
 `~/Workspace/Obsidian/<lowercased repo directory name>-vault`. `sync` never force-pushes;
-only the project manager passes `--board`, while workers never regenerate boards.
+`events.py worker-event` regenerates the item's feature board and the project board when it
+syncs (only the project board for a `_project` item).
 
 The commands above use `dossier.py`. The additional scripts have these contracts:
 
+- `events.py agents [--session ID] [--worker NAME]` returns the existing `byName` map
+  with `status`, `state`, and `waitingFor`. With either lookup flag, it also returns
+  `worker`: the full matching record, or null. It shares the `wait` matcher: match a
+  `sessionId` prefix or short `id` when a non-empty session is supplied, with no name
+  fallback; otherwise select the newest `startedAt` record named `NAME`. Pass the item's
+  `sessionId` when present; use `--worker` only when the item has no `sessionId`.
+- `events.py wait --vault V [--interval S] [--timeout S]` → one of `{"wait":"none"}`,
+  `{"wait":"changed","items":[...]}`, `{"wait":"worker-gone","items":[...]}`, or
+  `{"wait":"timeout"}`. Each result has optional `warnings`, present only when non-empty.
+  `changed` items have `{item, oldStatus, newStatus, oldStage, newStage}`;
+  `worker-gone` items have `{item, worker, sessionId, state}`. Defaults are 20 s between polls
+  and a 3300 s timeout; the interval must be finite and positive, and the timeout finite and
+  non-negative. The command is read-only: it writes no item, log, git state, or notification.
+  Match by `sessionId` prefix or short `id` when the item has a `sessionId`; do not fall
+  back to a name if that session is absent. Without a session, use the newest `startedAt`
+  record whose name equals `worker`, as in `herdr.py`. A live `idle` or `waiting` record
+  never triggers `worker-gone`. On timeout, reconcile every still-`running` item before
+  re-arming, per `references/workers.md` § "Watch" and § "Reconcile".
 - `lock.py acquire --project-dir R [--force]` → `{ok, lock, holder, stale, takenOver}`.
   `holder` is null or `{pid, host, cwd, startedAt}`. A live other owner returns `ok: false`
   with its holder; no Claude ancestor adds `reason: "no claude ancestor"`. A stale local

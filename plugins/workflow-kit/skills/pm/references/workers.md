@@ -85,7 +85,10 @@ Evaluate gates in this order so a scarce worker slot is not spent on work that c
    rewriting `status`, and sync the item. Then run `herdr.py open --item <item> --repo <repo>`
    to give the worker its space. For an `implement` launch, notify `impl-started`
    through `events.py notify`; other launch kinds have no notification event. Subscribe using
-   an empty `SendMessage` with `notify_when_idle: true` immediately after launch.
+   an empty `SendMessage` with `notify_when_idle: true` immediately after launch. Then arm
+   `events.py wait --vault <vault>` with `Bash(run_in_background: true)` when no wait is
+   running, as in § "Watch". Keep exactly one wait: an existing wait ends within one interval
+   because the new item became `running`; handle its result and re-arm then.
 
 ## Worker protocol
 
@@ -108,22 +111,40 @@ After either command, if `push` is non-null, call PushNotification with it.
 
 ## Watch
 
-Treat an idle notice as the primary completion signal. Run `events.py worker-event --item <item>
+Run `events.py wait --vault <vault>` with `Bash(run_in_background: true)` while any item
+is `running`, and arm it only when no wait is running. Its background-task completion is the
+primary completion signal and wakes the project manager in any permission mode. Read its
+JSON result and report each `warnings` entry once.
+
+- On `changed`, read each listed item and follow its recorded event as for an idle notice.
+  A new `running` item also ends the wait; read its state before continuing supervision.
+- On `worker-gone`, reconcile each listed item: run `events.py last-reply --session
+  <sessionId> --cwd <repo>` and record any final line through `worker-event` first, then
+  apply the absent-worker row of § "Reconcile" if the item is still `running`.
+- On `timeout`, reconcile every still-`running` item per § "Reconcile" before re-arming:
+  use the session-first `agents` lookup below, then `last-reply` where the row calls for it.
+  This catches idle workers with unrecorded final lines and workers waiting for user input.
+- On `none`, no item is `running`; do not re-arm.
+
+After each result, run `herdr.py sync --vault <vault> --repo <repo>` so finished workers'
+spaces close. Except after `none`, re-arm one wait while any item is `running`.
+
+Keep the idle notice as a secondary signal. Run `events.py worker-event --item <item>
 --line-file -` for its final line, passing the line on stdin through a quoted heredoc; if the
 notice is truncated, first run `events.py last-reply --session <sessionId> --cwd <repo>` and
-use its `line`. This is idempotent, which makes it safe when both worker and project manager report the
-same final line. Act on the recorded event and item state, run `herdr.py sync --vault <vault>
---repo <repo>` so a finished worker's space closes, then re-arm the empty `SendMessage`
-subscription while the item remains active.
-
-A live project manager may also use `Monitor` loops for work that needs external observation. Use
-`events.py agents` only as a restarted project manager's fallback, not as normal polling: the subscription
-avoids missed completion while keeping the item file as the source of truth.
+use its `line`. Both signal paths are idempotent through `worker-event`, so reporting the
+same final line from the worker and project manager is safe. Act on the recorded event and
+item state, run `herdr.py sync --vault <vault> --repo <repo>`, then re-arm the empty
+`SendMessage` subscription while the item remains active. Ensure one wait is armed while
+any item is `running`; leave an existing wait running.
 
 ## Reconcile
 
-For every active item, read the item and run `events.py agents`. Check its plan-file checkboxes,
-run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
+For every active item, read the item and run `events.py agents --session <sessionId>`.
+Read its `worker` result, not `byName`. If the item has no `sessionId`, use
+`events.py agents --worker <worker>` instead. A null result means that worker is absent;
+never fall back to a name when the item's session is absent from the records.
+Check its plan-file checkboxes, run `gh pr view <pr> --json state,mergeable,reviews,statusCheckRollup` when it has a PR, and
 run `events.py last-reply --session <sessionId> --cwd <repo>`. Workers start in the project manager's
 repository root, so their transcripts live under that directory, not the worktree. After
 reconciling, run `herdr.py sync --vault <vault> --repo <repo>` once to open missing spaces and
@@ -134,7 +155,7 @@ follows:
 |---|---|
 | Item is `running`; `agents` says its worker is `idle`; `last-reply.line` is a final line not yet recorded. | Run `events.py worker-event` with that line, then follow the resulting item event. |
 | `agents` reports `status: waiting`. | The worker used `AskUserQuestion`. Keep its item status unchanged, tell the user to open the worker's `pm:<worker>` herdr space when available or run `claude attach <short id>`, and do not send it a message. |
-| The worker is absent from `agents`, but the item says `status: running`. | Set `status: stuck`, sync, notify `stuck`, and offer a relaunch rather than silently replacing the session. |
+| The worker is absent from `agents` or its record has no live `status`, but the item says `status: running`. | Set `status: stuck`, sync, notify `stuck`, and offer a relaunch rather than silently replacing the session. |
 | GitHub confirms the PR is merged. | Continue with the after-merge procedure in the lifecycle reference. |
 
 Do not trust GitHub `state` alone: use the item, merged PR details, reviews, checks, and worker
@@ -145,13 +166,17 @@ evidence together before changing a stage.
 A `paused` worker is either an `implement-plan` worker stopped by its own guard or an
 `address-pr` worker waiting for a decision. The user can answer in `claude attach <short id>`
 per `references/dossier.md` § "Worker names", or give the answer to the project manager.
-Fall back to the worker name only when the item has no `sessionId`. Before forwarding an answer held by the project manager, run `events.py agents`.
+Before forwarding an answer held by the project manager, run
+`events.py agents --session <sessionId>` and read `worker`. Use
+`events.py agents --worker <worker>` only when the item has no `sessionId`, as in
+§ "Reconcile". A null session match does not permit a name fallback.
 Send `SendMessage` only when that worker is `idle`; when it is `waiting`, the user must attach
 because `AskUserQuestion` owns the reply path. After a successful forward, set
 `status: running`, clear `question`, and remove `stuck` and all `paused-*` keys from
-`notified` while preserving other keys; sync and re-arm `notify_when_idle`. Apply the same
-state changes when reconciling a resume through `claude attach`. Do not send a notification merely for
-the resume; the earlier `paused-<id>` notification already carries the attach command.
+`notified` while preserving other keys; sync and re-arm `notify_when_idle`. Also arm
+`events.py wait --vault <vault>` with `Bash(run_in_background: true)` when no wait is running,
+per § "Watch". Apply the same state changes when reconciling a resume through `claude attach`.
+Do not send a notification merely for the resume; the earlier `paused-<id>` notification already carries the attach command.
 
 ## Permissions and trust
 

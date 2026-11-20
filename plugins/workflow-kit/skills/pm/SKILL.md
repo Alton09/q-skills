@@ -60,12 +60,11 @@ are on; report any `warnings` once. On `skipped` or a `warning`, tell the user o
 continue without spaces. Report a herdr.py exit 2 stderr message once and continue; it never
 blocks a launch.
 
-Run `dossier.py checks --project-dir <repo>` and print every entry in `fixes`. Advise the project manager
-session to use permission mode `auto`. If `permissionMode` is not `auto`, warn that workers
-still launch in `auto` and cross-mode messages can stall. This check reads the configured
-default and cannot see the session's actual permission mode (including a CLI override);
-continue after the warning. Follow
-`references/workers.md` § "Permissions and trust" for the trust and allow-rule setup.
+Run `dossier.py checks --project-dir <repo> --session "$CLAUDE_CODE_SESSION_ID"` and print
+every entry in `fixes`. Advise the project manager session to use permission mode `auto`.
+`permissionMode` is the configured default; `sessionPermissionMode` comes from this session's
+transcript. Continue after the fixes. Follow `references/workers.md` § "Permissions and trust"
+for the trust and allow-rule setup.
 
 Before each launch, apply `<skill-dir>/../implement-plan/references/routing.md`
 § "Orchestrator gate" via the launch procedure rather than inventing a model or quota rule.
@@ -95,9 +94,9 @@ Append a short rehydrate entry to `<vault>/Features/_project/log.md`. Run
 `dossier.py sync --vault <vault> -m "pm: rehydrate" --board <vault>/Features/_project --
 <vault>/Features/_project/log.md <vault>/Features/_project/inbox.md`, including any other
 paths touched during reconciliation and a `--board <feature-dir>` for each affected feature.
-For live supervision, follow `references/workers.md` § "Watch" and the bounded behavior in
-`references/lifecycle.md` § "Monitor loops"; normal polling is unnecessary because the idle
-subscription and item file preserve completion.
+For live supervision, arm one `events.py wait --vault <vault>` while any item is `running`,
+per `references/workers.md` § "Watch". Its background-task completion is the primary live
+signal; the idle subscription is secondary.
 
 ## Stages 1–3
 

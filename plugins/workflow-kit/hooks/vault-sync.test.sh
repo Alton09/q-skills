@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 hook="$script_dir/vault-sync.sh"
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 background_started=0
 cleanup() {
     if [[ $background_started == 1 ]]; then
@@ -40,10 +40,25 @@ mkdir -p "$HOME/Workspace/Obsidian" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME"
 project=$CLAUDE_PROJECT_DIR
 vault="$HOME/Workspace/Obsidian/project-vault"
 remote="$tmp/remote.git"
-state="$XDG_RUNTIME_DIR/workflow-kit-vault-sync"
-key=${project//[^A-Za-z0-9]/_}
+state="$XDG_RUNTIME_DIR/workflow-kit-vault-sync-$UID"
+# Same reversible byte escaping as the hook, with no command substitution.
+path_key() {
+    local LC_ALL=C input=$1 char encoded i
+    key=
+    for ((i=0; i<${#input}; i++)); do
+        char=${input:i:1}
+        case $char in
+            [A-Za-z0-9]) key+=$char ;;
+            *) printf -v encoded '_%02x' "'$char"; key+=$encoded ;;
+        esac
+    done
+}
+path_key 'my-app'; dash_key=$key
+path_key 'my_app'; [[ $key != "$dash_key" ]]
+path_key "$project"
 stamp="$state/$key.stamp"
-vault_key=${vault//[^A-Za-z0-9]/_}
+path_key "$vault"
+vault_key=$key
 lock="$state/$vault_key.lock"
 
 git init -q -b main "$project"
@@ -70,7 +85,8 @@ silent() {
 run() { silent bash "$hook" --run "$project"; }
 
 # Fresh stamp: unchanged metadata and no external commands before the due check.
-mkdir -p "$state" "$tmp/spies"
+mkdir -m 700 "$state"
+mkdir "$tmp/spies"
 printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}" > "$stamp"
 metadata=$(python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st_mtime_ns,s.st_size)' "$stamp")
 for command in date git python3; do
@@ -107,6 +123,7 @@ import subprocess
 import sys
 
 root = Path(os.environ["VAULT_SYNC_TEST_ROOT"])
+assert sys.argv[1] == "bash", sys.argv
 child = subprocess.Popen(sys.argv[1:], start_new_session=True)
 (root / "child.pid").write_text(str(child.pid))
 try:
@@ -116,6 +133,9 @@ finally:
 LAUNCHER
 chmod +x "$tmp/launchers/setsid"
 export VAULT_SYNC_TEST_ROOT="$tmp"
+# A future stamp (clock rollback) is due.
+printf '%s\n' "$(( ${EPOCHSECONDS:-$(date +%s)} + 3600 ))" > "$stamp"
+
 printf 'due edit\n' >> "$vault/note.md"
 background_started=1
 silent env PATH="$tmp/launchers:$PATH" bash "$hook"
@@ -146,24 +166,96 @@ assert_push
 [[ $pushed == "$local_commit" ]]
 
 # Every in-progress marker skips changes without creating a commit.
-for marker in index.lock rebase-merge rebase-apply MERGE_HEAD; do
+for marker in index.lock rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
     path=$(git -C "$vault" rev-parse --git-path "$marker")
     [[ $path == /* ]] || path="$vault/$path"
     touch "$path"
     printf 'blocked edit\n' >> "$vault/note.md"
     run
     [[ $(git -C "$vault" rev-parse HEAD) == "$pushed" ]]
+    [[ -e $path ]] # Pre-existing rebase markers must survive untouched.
     rm "$path"
 done
 
-# A current vault lock skips; an abandoned lock is reclaimed once old enough.
-mkdir "$lock"
+# Unmerged index entries without a sequencer marker must never be staged.
+blob=$(git -C "$vault" rev-parse HEAD:note.md)
+printf '100644 %s 1\tnote.md\n100644 %s 2\tnote.md\n100644 %s 3\tnote.md\n' "$blob" "$blob" "$blob" |
+    git -C "$vault" update-index --index-info
 run
 [[ $(git -C "$vault" rev-parse HEAD) == "$pushed" ]]
+[[ -n $(git -C "$vault" ls-files -u) ]]
+printf '0 %040d\tnote.md\n100644 %s 0\tnote.md\n' 0 "$blob" |
+    git -C "$vault" update-index --index-info
+
+# A live owner keeps its lock even when old; a dead owner is reclaimed.
+mkdir "$lock"
+printf '%s\n' "$$" > "$lock/pid"
 python3 -c 'import os,sys,time; t=time.time()-660; os.utime(sys.argv[1],(t,t))' "$lock"
+run
+[[ $(git -C "$vault" rev-parse HEAD) == "$pushed" ]]
+[[ $(cat "$lock/pid") == "$$" ]]
+# Reap a real child to obtain a dead PID, rather than guessing a PID number.
+sleep 0 &
+dead_pid=$!
+wait "$dead_pid"
+printf '%s\n' "$dead_pid" > "$lock/pid"
 run
 [[ ! -d $lock ]]
 assert_push
+
+# A PID-less lock may still be initializing and must never be reclaimed.
+mkdir "$lock"
+run
+[[ -d $lock ]]
+rmdir "$lock"
+
+# SSH defaults must respect each supported user configuration source.
+mkdir "$tmp/git-spy"
+export VAULT_SYNC_REAL_GIT
+VAULT_SYNC_REAL_GIT=$(command -v git)
+cat > "$tmp/git-spy/git" <<'GITSPY'
+#!/usr/bin/env bash
+if [[ ${3:-} == status ]]; then
+    printf '%s\n' "${GIT_SSH_COMMAND-unset}" > "$VAULT_SYNC_TEST_ROOT/ssh-command"
+fi
+exec "$VAULT_SYNC_REAL_GIT" "$@"
+GITSPY
+chmod +x "$tmp/git-spy/git"
+silent env PATH="$tmp/git-spy:$PATH" bash "$hook" --run "$project"
+[[ $(cat "$tmp/ssh-command") == 'ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3' ]]
+git -C "$vault" config core.sshCommand 'ssh -i ~/.ssh/vault_key'
+silent env PATH="$tmp/git-spy:$PATH" bash "$hook" --run "$project"
+[[ $(cat "$tmp/ssh-command") == unset ]]
+git -C "$vault" config --unset core.sshCommand
+silent env PATH="$tmp/git-spy:$PATH" GIT_SSH=custom-ssh bash "$hook" --run "$project"
+[[ $(cat "$tmp/ssh-command") == unset ]]
+silent env PATH="$tmp/git-spy:$PATH" GIT_SSH_COMMAND='ssh -i custom' bash "$hook" --run "$project"
+[[ $(cat "$tmp/ssh-command") == 'ssh -i custom' ]]
+
+# Reject state, stamp, and log symlinks without changing their targets.
+printf 'keep\n' > "$tmp/target"
+rm "$stamp"
+ln -s "$tmp/target" "$stamp"
+silent bash "$hook"
+[[ $(cat "$tmp/target") == keep ]]
+rm "$stamp" "$state/$vault_key.log"
+ln -s "$tmp/target" "$state/$vault_key.log"
+run
+[[ $(cat "$tmp/target") == keep ]]
+rm "$state/$vault_key.log"
+mkdir "$tmp/unsafe-runtime" "$tmp/state-target"
+ln -s "$tmp/state-target" "$tmp/unsafe-runtime/workflow-kit-vault-sync-$UID"
+silent env XDG_RUNTIME_DIR="$tmp/unsafe-runtime" bash "$hook"
+[[ -z $(ls -A "$tmp/state-target") ]]
+[[ $(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$state") == 0o700 ]]
+
+# A project without Git may still configure its own external vault.
+mkdir -p "$tmp/plain/.claude"
+printf '{"pm":{"vault":"%s"}}\n' "$vault" > "$tmp/plain/.claude/workflow-kit.json"
+printf 'plain project edit\n' >> "$vault/note.md"
+silent bash "$hook" --run "$tmp/plain"
+assert_push
+[[ -z $(git -C "$vault" status --porcelain) ]]
 
 # Sibling worktrees must resolve the main checkout's convention-based vault.
 git -C "$project" worktree add -qb sibling "$tmp/sibling"

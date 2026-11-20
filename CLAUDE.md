@@ -10,7 +10,7 @@ Mono-repo for Claude Code plugins. Each plugin lives under `plugins/<name>/` wit
 
 ## Current Plugins
 
-- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan, address-pr, pm; feature-plan supports handoff mode, and the skills share a `--worker` input; implement-plan orchestrates on Claude Code with swappable phase executors, has a built-in opus escalation rescue, and delegates PR creation to the consuming project's `/create-pr`; pm is the project manager that supervises every feature and standalone item in a repo, with resumable dossiers and background workers mirrored in herdr); ships a throttled vault auto-sync hook
+- `workflow-kit` — Plan → build pipeline (feature-plan, implement-plan, address-pr, pm; feature-plan supports handoff mode, and the skills share a `--worker` input; implement-plan orchestrates on Claude Code with swappable phase executors, has a built-in opus escalation rescue, and delegates PR creation to the consuming project's `/create-pr`; pm is the project manager that supervises every feature and standalone item in a repo, with resumable dossiers and background workers mirrored in herdr); ships a throttled PostToolUse vault auto-sync hook (configured or convention-based external Git vault; private per-user state, PID-owned locks, and conflict guards)
 - `dev-toolkit` — Standalone dev utilities (notify-me, pr-review, pr-retro)
 
 ## Dependencies

@@ -1,7 +1,9 @@
 {
   "version": 2,
   "routing": {
-    "review": ["claude:opus"]
+    "review": [
+      "pi:opencode-go-gemini/gemini-4-argon"
+    ]
   },
   "implementPlan": {
     "review": {

@@ -78,6 +78,10 @@ review are the checkpoints; implementation choices that survive review are recor
 `### Unplanned Decisions` in the PR body and then logged to the dossier after merge. When
 available, the optional dev-toolkit plugin supplies desktop notifications, PR review, and retro.
 
+workflow-kit includes a PostToolUse hook that starts at most one detached vault sync per session directory every 10 minutes (each worktree session throttles separately). It resolves the vault from `pm.vault` (project config overrides user config), falling back to `~/Workspace/Obsidian/<lowercase project name>-vault`. The vault must be its own Git repository outside the project repository; the project itself need not use Git. Worktree sessions use the main checkout's name and configuration; a per-vault lock prevents concurrent syncs. The last edit of a session waits for the next due tool call in that repository.
+
+The hook commits the whole vault as `vault: auto-sync`, then pulls with rebase and pushes only when the vault branch has an upstream. It never force-pushes and skips ongoing Git operations or unmerged entries. If its pull creates a conflicting rebase, it aborts and keeps the commits local; resolve the conflict manually. Private per-user state and per-vault logs live in `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/workflow-kit-vault-sync-$UID/`; locks are reclaimed when their recorded owner PID is dead, or when a PID-less leftover is older than 10 minutes. Set `WORKFLOW_KIT_VAULT_SYNC=0` to opt out.
+
 ### dev-toolkit
 
 Standalone dev utilities that work independently of any planning pipeline.
@@ -307,6 +311,10 @@ q-skills/
     workflow-kit/
       .claude-plugin/
         plugin.json           # Plugin manifest (v1.1.0)
+      hooks/
+        hooks.json            # Registers the vault auto-sync PostToolUse hook
+        vault-sync.sh         # Throttled vault commit, pull, and push
+        vault-sync.test.sh    # Isolated vault auto-sync integration tests
       skills/
         feature-plan/         # Feature planning skill
         implement-plan/       # Plan execution skill (with built-in opus escalation rescue)

@@ -1,0 +1,17 @@
+{
+  "description": "workflow-kit PostToolUse hook: commits and pushes the project vault every 10 minutes at most",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/vault-sync.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
